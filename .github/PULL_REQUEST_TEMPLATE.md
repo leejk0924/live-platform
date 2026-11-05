@@ -1,28 +1,25 @@
-<!--
-브랜치 이름: <issue>-<slug> (예: 1-workspace-skeleton)
-이슈에 붙는 PR이 여러 개면 앞선 PR은 `Refs #N`만, 이슈의 마지막 PR에만 `Closes #N`을 쓴다.
--->
+## 📌 개요
+<!-- 이번 PR의 목적과 변경 사항을 한두 줄로 설명해주세요 -->
 
-Refs #
 
-## 무엇을 바꿨나
+## 🛠️ 작업 내용
+<!-- 구현하거나 변경한 내용을 적어주세요 -->
+- 
+- 
 
-## 왜
+## 💬 참고 사항
+<!-- 설계 의도, 주의 사항, 리뷰어에게 확인을 요청할 부분을 적어주세요 -->
+<!-- 설계 결정 기록(ADR, docs/decisions)이 있으면 아래 줄에 링크를 넣고, 없으면 이 줄을 삭제해주세요. 리뷰어는 문서에 민감정보가 없는지도 확인해주세요 -->
+- 설계 기록(ADR): 
 
-## 관련 ADR
+## 🔗 관련 이슈
+- Closes #
 
-<!-- Obsidian 경로 규칙: ADR/<area>/<issue>-<slug>.md (예: ADR/common/1-hexagonal-five-planes.md). 없으면 "없음". -->
+## 🔄 수정 사항 (선택)
+<!-- 리뷰 피드백을 반영해 수정한 내용을 적어주세요. 없으면 이 섹션을 삭제해주세요 -->
+- 
 
-## 검증
-
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --all-targets -- -D warnings`
-- [ ] `cargo test --workspace`
-- [ ] `cargo deny check`
-
-## 체크리스트
-
-- [ ] 이 PR이 이슈의 마지막 PR이면 `Refs #N`을 `Closes #N`으로 바꿨다
-- [ ] `domain`·`application`에 인프라 이름(AWS, MediaMTX, Postgres, axum)이 없다
-- [ ] 비밀값을 커밋하거나 로그에 남기지 않았다
-- [ ] Devlog와 관련 Rust-Learning 노트를 갱신했다
+## 🎯 완료 조건
+<!-- 어떤 상태가 되면 이 PR이 완료된 것인지 적어주세요 -->
+- [ ] 
+- [ ]
