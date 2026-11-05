@@ -1,0 +1,38 @@
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+
+[licenses]
+allow = ["MIT", "Apache-2.0", "BSD-3-Clause", "Unicode-3.0"]
+confidence-threshold = 0.9
+
+[licenses.private]
+ignore = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+# Hexagonal dependency direction. `wrappers` lists the only crates allowed to
+# depend directly on the banned crate, so an inward-pointing edge fails CI.
+deny = [
+    { crate = "application", wrappers = ["infrastructure", "api"], reason = "application is used only by adapters and the composition root" },
+    { crate = "infrastructure", wrappers = ["api"], reason = "only the composition root wires adapters" },
+
+    { crate = "axum", wrappers = ["api"], reason = "HTTP framework belongs to the inbound adapter" },
+    { crate = "axum-core", wrappers = ["axum"], reason = "HTTP framework belongs to the inbound adapter" },
+    { crate = "tower-http", wrappers = ["api"], reason = "HTTP middleware belongs to adapters" },
+    { crate = "hyper", wrappers = ["axum", "hyper-util"], reason = "HTTP stack belongs to adapters" },
+    { crate = "hyper-util", wrappers = ["axum"], reason = "HTTP stack belongs to adapters" },
+    { crate = "sqlx", wrappers = ["infrastructure"], reason = "persistence is an outbound adapter" },
+    { crate = "aws-config", wrappers = ["infrastructure"], reason = "cloud SDKs are outbound adapters" },
+    { crate = "aws-sdk-s3", wrappers = ["infrastructure"], reason = "cloud SDKs are outbound adapters" },
+]
