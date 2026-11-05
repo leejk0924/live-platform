@@ -1,5 +1,6 @@
 use std::{
     env::{self, VarError},
+    ffi::OsStr,
     io::{self, BufRead, BufReader, Read, Write},
     net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
     process::ExitCode,
@@ -13,22 +14,15 @@ use tracing_subscriber::EnvFilter;
 const DEFAULT_ADDR: &str = "0.0.0.0:8080";
 
 fn main() -> ExitCode {
-    let raw = match env::var("API_ADDR") {
-        Ok(raw) => Some(raw),
-        Err(VarError::NotPresent) => None,
-        Err(err @ VarError::NotUnicode(_)) => {
-            eprintln!("invalid API_ADDR: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let addr = match listen_addr(raw.as_deref()) {
+    let addr = match listen_addr(env::var("API_ADDR")) {
         Ok(addr) => addr,
         Err(err) => {
             eprintln!("invalid API_ADDR: {err}");
             return ExitCode::FAILURE;
         }
     };
-    match env::args().nth(1).as_deref() {
+    let command = env::args_os().nth(1);
+    match command.as_deref().map(OsStr::to_str) {
         None => match serve(addr) {
             Ok(()) => ExitCode::SUCCESS,
             Err(err) => {
@@ -36,16 +30,20 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Some("healthcheck") => healthcheck(addr),
-        Some(other) => {
-            eprintln!("unknown command: {other}");
+        Some(Some("healthcheck")) => healthcheck(addr),
+        Some(_) => {
+            eprintln!("unknown command: {:?}", command.unwrap_or_default());
             ExitCode::FAILURE
         }
     }
 }
 
-fn listen_addr(raw: Option<&str>) -> Result<SocketAddr, AddrParseError> {
-    raw.unwrap_or(DEFAULT_ADDR).parse()
+fn listen_addr(var: Result<String, VarError>) -> Result<SocketAddr, String> {
+    match var {
+        Ok(raw) => raw.parse().map_err(|err: AddrParseError| err.to_string()),
+        Err(VarError::NotPresent) => Ok(DEFAULT_ADDR.parse().expect("default address is valid")),
+        Err(err @ VarError::NotUnicode(_)) => Err(err.to_string()),
+    }
 }
 
 #[tokio::main]
@@ -116,7 +114,9 @@ fn probe_target(listen: SocketAddr) -> SocketAddr {
 }
 
 fn probe(target: SocketAddr) -> io::Result<()> {
-    let timeout = Duration::from_secs(2);
+    // connect, write and read each get this budget; together they must stay under
+    // the 3s Docker healthcheck timeout so the error message is not lost to a kill.
+    let timeout = Duration::from_millis(900);
     let mut stream = TcpStream::connect_timeout(&target, timeout)?;
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(timeout))?;
@@ -187,16 +187,22 @@ mod tests {
     }
 
     #[test]
-    fn listen_addr_defaults_when_unset() {
+    fn listen_addr_defaults_only_when_unset() {
         assert_eq!(
-            listen_addr(None),
+            listen_addr(Err(VarError::NotPresent)),
             Ok(SocketAddr::from(([0, 0, 0, 0], 8080)))
+        );
+        assert!(listen_addr(Err(VarError::NotUnicode(std::ffi::OsString::new()))).is_err());
+        assert!(listen_addr(Ok(String::new())).is_err());
+        assert_eq!(
+            listen_addr(Ok("127.0.0.1:9000".into())),
+            Ok(SocketAddr::from(([127, 0, 0, 1], 9000)))
         );
     }
 
     #[test]
     fn listen_addr_rejects_garbage() {
-        assert!(listen_addr(Some("nope")).is_err());
+        assert!(listen_addr(Ok("nope".into())).is_err());
     }
 
     #[test]
