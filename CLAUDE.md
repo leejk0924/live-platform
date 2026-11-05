@@ -63,4 +63,19 @@ cargo deny check
 
 ## 커밋
 
-사용자가 요청할 때만 커밋한다. 기본 브랜치에서 작업 중이면 브랜치를 먼저 만든다.
+기본 브랜치에서 작업 중이면 브랜치를 먼저 만든다. 이슈 작업 중에는 최소 기능 단위마다 커밋하고, 각 커밋은 검증 명령을 통과한 상태여야 한다.
+
+메시지 형식(`scripts/check-commit-msg.sh`가 PR CI에서 검사한다):
+
+```text
+<type>: <한국어 요약>
+
+<왜 바꿨는지. 선택>
+
+Refs #<이슈 번호>
+```
+
+- type: `feat` `fix` `refactor` `perf` `test` `docs` `build` `ci` `chore` 중 하나, 소문자, scope 없음.
+- 요약은 한국어, 끝에 마침표 없음. type과 코드 식별자는 영어 그대로.
+- 마지막 줄은 `Refs #N`. 이슈를 닫는 `Closes #N`은 PR 본문에만 쓴다.
+- AI 작성자 표기(`Co-Authored-By` 등)는 넣지 않는다.
