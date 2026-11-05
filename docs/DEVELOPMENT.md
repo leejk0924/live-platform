@@ -12,6 +12,7 @@
 - 모든 작업은 GitHub 이슈에서 시작한다. 이슈 없는 작업은 하지 않는다.
 - 이슈 하나에 PR 여러 개가 붙을 수 있다. PR 하나는 한 가지 목적만 담는다.
 - `main`에 직접 커밋하거나 push하지 않는다.
+- Claude Code로 작업할 때는 `/issue-cycle <이슈 번호>` 한 번으로 구현 → 리뷰 → 리뷰 처리(수용/거부) → ADR → draft PR까지 진행한다. 절차는 [`.claude/skills/issue-cycle/SKILL.md`](../.claude/skills/issue-cycle/SKILL.md). 머지는 사람이 한다.
 
 ## 2. 이슈
 
