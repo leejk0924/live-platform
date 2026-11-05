@@ -56,7 +56,7 @@ cargo deny check
 ## 작업 단위
 
 - 모든 작업은 GitHub 이슈 단위. 이슈 하나에 PR 여러 개가 붙을 수 있다.
-- 브랜치: `<issue>-<slug>` (예: `1-workspace-skeleton`). PR 본문에 `Refs #N`, 이슈의 마지막 PR에만 `Closes #N`.
+- 브랜치: `<type>/<issue>` (예: `feat/6`). 절차 전체는 `docs/DEVELOPMENT.md`. PR 본문에 `Refs #N`, 이슈의 마지막 PR에만 `Closes #N`.
 - 저장소는 제출 전까지 private. 마감 전 gitleaks 이력 스캔 후 public 전환(#15).
 - 작업 단위가 끝나면 Devlog와 관련 Rust-Learning 노트를 갱신한다.
 - 오픈소스 사용 시 README `Credits`에 출처를 추가한다.

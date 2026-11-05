@@ -36,5 +36,5 @@ body:
   - type: markdown
     attributes:
       value: |
-        브랜치는 `<issue>-<slug>` (예: `1-workspace-skeleton`).
+        브랜치는 `<type>/<issue>` (예: `feat/6`). 규칙은 `docs/DEVELOPMENT.md`.
         PR 본문에는 `Refs #N`, 이 이슈의 마지막 PR에만 `Closes #N`.
