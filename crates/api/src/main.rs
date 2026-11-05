@@ -7,8 +7,7 @@ use std::{
     time::Duration,
 };
 
-use api::config::listen_addr;
-use axum::{Router, routing::get};
+use api::{app, config::listen_addr};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
@@ -49,14 +48,6 @@ async fn serve(addr: SocketAddr) -> io::Result<()> {
     axum::serve(listener, app())
         .with_graceful_shutdown(shutdown_signal())
         .await
-}
-
-fn app() -> Router {
-    Router::new().nest("/api", Router::new().route("/healthz", get(healthz)))
-}
-
-async fn healthz() -> &'static str {
-    "ok"
 }
 
 async fn shutdown_signal() {
@@ -128,25 +119,9 @@ fn probe(target: SocketAddr) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use axum::{
-        body::{Body, to_bytes},
-        http::{Request, StatusCode},
-    };
-    use tower::ServiceExt;
+    use axum::Router;
 
     use super::*;
-
-    #[tokio::test]
-    async fn healthz_returns_ok() {
-        let response = app()
-            .oneshot(Request::get("/api/healthz").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), 64).await.unwrap();
-        assert_eq!(&body[..], b"ok");
-    }
 
     #[tokio::test]
     async fn healthcheck_probe_reports_server_health() {

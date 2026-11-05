@@ -71,15 +71,10 @@ pub fn listen_addr(var: Result<String, VarError>) -> Result<SocketAddr, String> 
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::HashMap,
-        io,
-        sync::{Arc, Mutex},
-    };
-
-    use tracing_subscriber::fmt::MakeWriter;
+    use std::collections::HashMap;
 
     use super::*;
+    use crate::test_support::LogBuffer;
 
     const URL: &str = "postgres://app:s3cr3t-pw@db:5432/app";
 
@@ -127,39 +122,14 @@ mod tests {
         assert!(!err.to_string().contains("s3cr3t-pw"));
     }
 
-    #[derive(Clone, Default)]
-    struct Buffer(Arc<Mutex<Vec<u8>>>);
-
-    impl io::Write for Buffer {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            self.0.lock().unwrap().write(buf)
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl<'a> MakeWriter<'a> for Buffer {
-        type Writer = Buffer;
-
-        fn make_writer(&'a self) -> Self::Writer {
-            self.clone()
-        }
-    }
-
     #[test]
     fn logging_the_config_redacts_the_database_url() {
         let config = from(&[("DATABASE_URL", URL)]).unwrap();
-        let buffer = Buffer::default();
-        let subscriber = tracing_subscriber::fmt()
-            .json()
-            .with_writer(buffer.clone())
-            .finish();
+        let logs = LogBuffer::default();
 
-        tracing::subscriber::with_default(subscriber, || tracing::info!(?config, "loaded"));
+        tracing::subscriber::with_default(logs.subscriber(), || tracing::info!(?config, "loaded"));
 
-        let logged = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        let logged = logs.contents();
         assert!(
             logged.contains("REDACTED"),
             "config should be logged: {logged}"
