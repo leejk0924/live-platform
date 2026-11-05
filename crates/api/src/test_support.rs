@@ -3,8 +3,26 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use application::ports::id::{IdGenerationError, IdGenerator};
+use domain::id::SnowflakeId;
 use tracing::Subscriber;
 use tracing_subscriber::fmt::MakeWriter;
+
+use crate::AppState;
+
+struct UnusedIds;
+
+impl IdGenerator for UnusedIds {
+    fn next_id(&self) -> Result<SnowflakeId, IdGenerationError> {
+        Err(IdGenerationError::LeaseExpired)
+    }
+}
+
+pub fn test_state() -> AppState {
+    AppState {
+        ids: Arc::new(UnusedIds),
+    }
+}
 
 /// Captures JSON log lines so tests can assert what reached the logs.
 #[derive(Clone, Default)]

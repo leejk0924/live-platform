@@ -7,15 +7,25 @@ pub mod json;
 #[cfg(test)]
 mod test_support;
 
+use std::sync::Arc;
+
+use application::ports::id::IdGenerator;
 use axum::{Router, middleware, routing::get};
 
 use crate::error::ApiError;
 
-pub fn app() -> Router {
+/// Dependencies the handlers share, assembled in `main`.
+#[derive(Clone)]
+pub struct AppState {
+    pub ids: Arc<dyn IdGenerator>,
+}
+
+pub fn app(state: AppState) -> Router {
     Router::new()
         .nest("/api", Router::new().route("/healthz", get(healthz)))
         .fallback(|| async { ApiError::not_found() })
         .layer(middleware::from_fn(error::trace_id))
+        .with_state(state)
 }
 
 async fn healthz() -> &'static str {
@@ -32,10 +42,11 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::test_support::test_state;
 
     #[tokio::test]
     async fn healthz_returns_ok() {
-        let response = app()
+        let response = app(test_state())
             .oneshot(Request::get("/api/healthz").body(Body::empty()).unwrap())
             .await
             .unwrap();
@@ -48,7 +59,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_route_is_a_not_found_envelope() {
         for path in ["/api/nope", "/nope"] {
-            let response = app()
+            let response = app(test_state())
                 .oneshot(Request::get(path).body(Body::empty()).unwrap())
                 .await
                 .unwrap();

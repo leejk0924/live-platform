@@ -1,34 +1,53 @@
 use std::{
     env,
+    error::Error,
     ffi::OsStr,
     io::{self, BufRead, BufReader, Read, Write},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
     process::ExitCode,
+    sync::Arc,
     time::Duration,
 };
 
-use api::{app, config::listen_addr};
+use api::{
+    AppState, app,
+    config::{Config, listen_addr},
+};
+use infrastructure::{
+    id::SnowflakeIdGenerator,
+    persistence::{self, PgWorkerIdAllocator},
+};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
+const DB_MAX_CONNECTIONS: u32 = 10;
+
 fn main() -> ExitCode {
-    let addr = match listen_addr(env::var("API_ADDR")) {
-        Ok(addr) => addr,
-        Err(err) => {
-            eprintln!("invalid API_ADDR: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
     let command = env::args_os().nth(1);
     match command.as_deref().map(OsStr::to_str) {
-        None => match serve(addr) {
-            Ok(()) => ExitCode::SUCCESS,
+        None => {
+            let config = match Config::from_lookup(|key| env::var(key)) {
+                Ok(config) => config,
+                Err(err) => {
+                    eprintln!("invalid configuration: {err}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match serve(config) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(err) => {
+                    eprintln!("server error: {err}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some(Some("healthcheck")) => match listen_addr(env::var("API_ADDR")) {
+            Ok(addr) => healthcheck(addr),
             Err(err) => {
-                eprintln!("server error: {err}");
+                eprintln!("invalid API_ADDR: {err}");
                 ExitCode::FAILURE
             }
         },
-        Some(Some("healthcheck")) => healthcheck(addr),
         Some(_) => {
             eprintln!("unknown command: {:?}", command.unwrap_or_default());
             ExitCode::FAILURE
@@ -37,17 +56,39 @@ fn main() -> ExitCode {
 }
 
 #[tokio::main]
-async fn serve(addr: SocketAddr) -> io::Result<()> {
+async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt()
         .json()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
+    tracing::info!(?config, "starting");
 
-    let listener = TcpListener::bind(addr).await?;
-    tracing::info!(%addr, "listening");
-    axum::serve(listener, app())
-        .with_graceful_shutdown(shutdown_signal())
+    let listener = TcpListener::bind(config.listen_addr).await?;
+    let pool = persistence::connect(&config.database_url, DB_MAX_CONNECTIONS)
         .await
+        .map_err(|err| format!("database connection failed: {err}"))?;
+    persistence::migrate(&pool)
+        .await
+        .map_err(|err| format!("database migration failed: {err}"))?;
+    let allocator = Arc::new(PgWorkerIdAllocator::new(
+        pool.clone(),
+        config.worker_lease_ttl,
+    ));
+    let (ids, heartbeat) = SnowflakeIdGenerator::start(allocator, config.worker_lease_ttl)
+        .await
+        .map_err(|err| format!("id generator start failed: {err}"))?;
+
+    tracing::info!(addr = %config.listen_addr, "listening");
+    let served = axum::serve(listener, app(AppState { ids }))
+        .with_graceful_shutdown(shutdown_signal())
+        .await;
+
+    match heartbeat.shutdown().await {
+        Ok(()) => tracing::info!("worker id lease released"),
+        Err(err) => tracing::warn!(%err, "could not release worker id lease"),
+    }
+    pool.close().await;
+    Ok(served?)
 }
 
 async fn shutdown_signal() {
@@ -119,15 +160,33 @@ fn probe(target: SocketAddr) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use application::ports::id::{IdGenerationError, IdGenerator};
     use axum::Router;
+    use domain::id::SnowflakeId;
 
     use super::*;
+
+    struct UnusedIds;
+
+    impl IdGenerator for UnusedIds {
+        fn next_id(&self) -> Result<SnowflakeId, IdGenerationError> {
+            Err(IdGenerationError::LeaseExpired)
+        }
+    }
 
     #[tokio::test]
     async fn healthcheck_probe_reports_server_health() {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, app()).await });
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app(AppState {
+                    ids: Arc::new(UnusedIds),
+                }),
+            )
+            .await
+        });
 
         let healthy = tokio::task::spawn_blocking(move || probe(addr))
             .await
