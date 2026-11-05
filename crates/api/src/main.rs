@@ -1,17 +1,16 @@
 use std::{
-    env::{self, VarError},
+    env,
     ffi::OsStr,
     io::{self, BufRead, BufReader, Read, Write},
-    net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
     process::ExitCode,
     time::Duration,
 };
 
+use api::config::listen_addr;
 use axum::{Router, routing::get};
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
-
-const DEFAULT_ADDR: &str = "0.0.0.0:8080";
 
 fn main() -> ExitCode {
     let addr = match listen_addr(env::var("API_ADDR")) {
@@ -35,14 +34,6 @@ fn main() -> ExitCode {
             eprintln!("unknown command: {:?}", command.unwrap_or_default());
             ExitCode::FAILURE
         }
-    }
-}
-
-fn listen_addr(var: Result<String, VarError>) -> Result<SocketAddr, String> {
-    match var {
-        Ok(raw) => raw.parse().map_err(|err: AddrParseError| err.to_string()),
-        Err(VarError::NotPresent) => Ok(DEFAULT_ADDR.parse().expect("default address is valid")),
-        Err(err @ VarError::NotUnicode(_)) => Err(err.to_string()),
     }
 }
 
@@ -184,25 +175,6 @@ mod tests {
             err.to_string().contains("HTTP/1.1 404 Not Found"),
             "error should carry the received status line, got: {err}"
         );
-    }
-
-    #[test]
-    fn listen_addr_defaults_only_when_unset() {
-        assert_eq!(
-            listen_addr(Err(VarError::NotPresent)),
-            Ok(SocketAddr::from(([0, 0, 0, 0], 8080)))
-        );
-        assert!(listen_addr(Err(VarError::NotUnicode(std::ffi::OsString::new()))).is_err());
-        assert!(listen_addr(Ok(String::new())).is_err());
-        assert_eq!(
-            listen_addr(Ok("127.0.0.1:9000".into())),
-            Ok(SocketAddr::from(([127, 0, 0, 1], 9000)))
-        );
-    }
-
-    #[test]
-    fn listen_addr_rejects_garbage() {
-        assert!(listen_addr(Ok("nope".into())).is_err());
     }
 
     #[test]

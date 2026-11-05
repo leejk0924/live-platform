@@ -25,6 +25,7 @@ dependencies = [
  "axum",
  "domain",
  "infrastructure",
+ "thiserror",
  "tokio",
  "tower",
  "tracing",
