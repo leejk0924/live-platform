@@ -10,9 +10,9 @@ domain.workspace = true
 application.workspace = true
 async-trait.workspace = true
 sqlx.workspace = true
-
-[dev-dependencies]
+thiserror.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true
