@@ -1,0 +1,9 @@
+# Issue #3 media PoC only: lets one user publish to the `poc` path until #7 replaces this with per-broadcast JWT.
+# Never layer this onto a long-running deployment.
+services:
+  mediamtx:
+    environment:
+      MTX_AUTHINTERNALUSERS_2_USER: poc
+      MTX_AUTHINTERNALUSERS_2_PASS: ${POC_PUBLISH_PASS:?set POC_PUBLISH_PASS in .env}
+      MTX_AUTHINTERNALUSERS_2_PERMISSIONS_0_ACTION: publish
+      MTX_AUTHINTERNALUSERS_2_PERMISSIONS_0_PATH: poc
