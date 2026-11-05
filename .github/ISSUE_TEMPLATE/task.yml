@@ -31,8 +31,8 @@ body:
     id: adr
     attributes:
       label: 관련 ADR
-      description: "Obsidian 경로 규칙 ADR/<area>/<issue>-<slug>.md. 없으면 비워 둔다."
-      placeholder: ADR/common/1-hexagonal-five-planes.md
+      description: "docs/adr/<area>/<issue>-<slug>.md. 없으면 비워 둔다."
+      placeholder: docs/adr/common/1-hexagonal-five-planes.md
   - type: markdown
     attributes:
       value: |

@@ -86,7 +86,7 @@ bash scripts/check-commit-msg.sh origin/main..HEAD
 - 제목: 커밋 제목과 같은 형식 `<type>: <한국어 요약>`. squash merge 시 이 제목이 `main`의 커밋 제목이 된다.
 - 본문: [PR 템플릿](../.github/PULL_REQUEST_TEMPLATE.md)을 채운다.
   - 관련 이슈: 이슈의 마지막 PR이면 `Closes #N`, 아니면 `Refs #N`.
-  - 설계 결정이 있었으면 ADR 경로를 적는다.
+  - 설계 결정이 있었으면 같은 PR에 ADR 파일을 넣고, `설계 기록(ADR)`에 그 파일 경로(`docs/adr/<area>/<issue>-<slug>.md`)를 적는다.
 - CI가 모두 통과하고 리뷰를 마친 뒤 **squash merge**한다.
 - 리뷰 지적을 반영한 커밋은 같은 브랜치에 추가하고, PR 본문 `수정 사항`에 적는다. force push는 리뷰 전까지만.
 
@@ -129,11 +129,20 @@ cd web && npm run lint && npm run typecheck && npm run build
 
 ## 8. 문서
 
-작업 단위(PR)가 끝나면 Obsidian `개발/live-platform/`을 갱신한다.
+### ADR (저장소)
+
+대안을 비교해 결정했으면 `docs/adr/<area>/<issue>-<slug>.md`에 남기고, 그 결정을 구현한 PR에 함께 넣는다.
+형식과 목록은 [`docs/adr/README.md`](adr/README.md).
+
+- 확정된 ADR의 본문을 고쳐 쓰지 않는다. 결정이 바뀌면 파일 끝에 `## Follow-up (YYYY-MM-DD)`를 붙이거나, 새 ADR을 쓰고 기존 ADR의 `status`를 `superseded`로 바꾼다.
+- 새 ADR을 쓰면 `docs/adr/README.md` 목록에 한 줄 추가한다.
+
+### Obsidian (개인 노트)
+
+작업 단위(PR)가 끝나면 Obsidian `개발/live-platform/`을 갱신한다. 저장소에는 들어가지 않는다.
 
 | 폴더 | 언제 |
 |---|---|
-| `ADR/<area>/<issue>-<slug>.md` | 대안을 비교해 결정했을 때 |
 | `Rust-Learning/` | 새 Rust 개념·패턴을 썼을 때 (Java 관점 설명) |
 | `Devlog/` | 매 작업일 |
 | `Security/` | 위협 모델이 바뀌었을 때 |

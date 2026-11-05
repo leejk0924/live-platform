@@ -50,8 +50,9 @@ cargo deny check
 
 ## 문서
 
-- Obsidian 프로젝트 폴더: `C:\Users\akdir\OneDrive\문서\obsidian\문서관리\개발\live-platform\` (vault 루트는 `문서관리`)
-  - `00-Overview/` 개요·Capacity Plan, `ADR/<area>/<issue>-<slug>.md` 결정 기록, `Rust-Learning/` Java↔Rust, `Devlog/` 날짜별 로그, `Security/` 위협 모델
+- **ADR(결정 기록)은 저장소 `docs/adr/<area>/<issue>-<slug>.md`**에 쓴다. 형식은 `docs/adr/README.md`. 결정을 구현한 PR에 함께 넣고, PR 본문 `설계 기록(ADR)`에 그 파일 경로를 적는다.
+- Obsidian은 사용자 개인 노트: `C:\Users\akdir\OneDrive\문서\obsidian\문서관리\개발\live-platform\` (vault 루트는 `문서관리`)
+  - `00-Overview/` 개요·Capacity Plan, `Rust-Learning/` Java↔Rust, `Devlog/` 날짜별 로그, `Security/` 위협 모델
 
 ## 작업 단위
 

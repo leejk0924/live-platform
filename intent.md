@@ -1,6 +1,6 @@
 # intent.md — 무엇을, 왜 만드는가
 
-> 한 장짜리 북극성 문서. 결정의 상세 근거는 Obsidian `live-platform/ADR/`에 있다.
+> 한 장짜리 북극성 문서. 결정의 상세 근거는 [`docs/adr/`](docs/adr/README.md)에 있다.
 > 확정일: 2026-11-05 (grilling 세션 합의)
 
 ## 1. 목표
@@ -56,4 +56,4 @@
 ## 7. 작업 방식
 
 Claude가 구현하고 Java 관점 설명을 붙인다 → 사용자가 리뷰한다 → Claude가 수정한다.
-작업 단위가 끝날 때마다 Obsidian(ADR / Rust-Learning / Devlog)을 갱신한다.
+작업 단위가 끝날 때마다 ADR(`docs/adr/`)과 Obsidian(Rust-Learning / Devlog)을 갱신한다.
