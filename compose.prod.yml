@@ -1,0 +1,8 @@
+services:
+  caddy:
+    environment:
+      SITE_ADDRESS: ${DOMAIN:?set DOMAIN in .env}
+
+  mediamtx:
+    environment:
+      MTX_WEBRTCADDITIONALHOSTS: ${PUBLIC_IP:?set PUBLIC_IP in .env}

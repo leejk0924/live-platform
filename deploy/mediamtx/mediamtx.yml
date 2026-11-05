@@ -1,0 +1,42 @@
+logLevel: info
+logDestinations: [stdout]
+
+# Deny by default: anyone may watch, nobody may publish until issue #7 switches to JWT.
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: read
+      - action: playback
+  - user: any
+    pass:
+    ips: ["127.0.0.1", "::1"]
+    permissions:
+      - action: api
+
+api: true
+apiAddress: :9997
+metrics: false
+pprof: false
+playback: false
+
+rtsp: false
+rtmp: false
+srt: false
+moq: false
+
+hls: true
+hlsAddress: :8888
+hlsVariant: lowLatency
+
+webrtc: true
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
+# Set per environment through MTX_WEBRTCADDITIONALHOSTS (the public IP in prod).
+webrtcAdditionalHosts: []
+
+paths:
+  all_others:

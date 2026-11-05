@@ -1,0 +1,39 @@
+{
+	email {$ACME_EMAIL}
+	# The container cannot write the host trust store; local browsers accept the internal CA by hand.
+	skip_install_trust
+}
+
+{$SITE_ADDRESS:localhost} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+
+	# MediaMTX answers with root-relative Location headers (HLS cookie check, WHIP session URL),
+	# so the stripped prefix has to be put back.
+	handle_path /media/hls/* {
+		reverse_proxy mediamtx:8888 {
+			header_down Location ^/ /media/hls/
+		}
+	}
+
+	handle_path /media/webrtc/* {
+		reverse_proxy mediamtx:8889 {
+			header_down Location ^/ /media/webrtc/
+		}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
