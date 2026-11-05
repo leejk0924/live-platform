@@ -11,6 +11,7 @@ declare -A allowed=(
 failed=0
 for crate in domain application; do
     deps=$(cargo tree -p "$crate" -e normal,build --depth 1 --prefix none --format '{p}' \
+        --target all --all-features --locked \
         | tail -n +2 | awk '{print $1}' | sort -u)
     crate_ok=1
     for dep in $deps; do
