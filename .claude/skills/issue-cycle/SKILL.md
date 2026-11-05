@@ -15,6 +15,13 @@ ls -d ~/.claude/plugins/cache/*/pstack/*/skills/poteto-mode/SKILL.md | sort -V |
 
 규칙의 출처: 절차·이름은 `docs/DEVELOPMENT.md`, 코드 규칙은 `CLAUDE.md`. 이 파일과 충돌하면 그 두 문서가 이긴다.
 
+## 0. 전제 확인
+
+이 스킬은 이 프로젝트 전용이고 플러그인 두 개가 있어야 한다. 시작 전에 확인하고, 하나라도 없으면 아무 작업도 하지 않고 멈춘 뒤 무엇이 없는지 알린다.
+
+- **pstack**: 위 `ls` 명령이 `poteto-mode/SKILL.md` 경로를 출력한다.
+- **jk**: 사용 가능한 스킬 목록에 `jk:code-review`, `jk:session-summary`, `jk:session-context`가 있다.
+
 ## 1. 준비
 
 1. `gh issue view <N>`으로 목표·범위·완료 조건을 읽는다. 완료 조건이 확인 가능한 문장이 아니면 사용자에게 묻고 멈춘다.
