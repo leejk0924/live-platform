@@ -23,15 +23,13 @@ fi
 
 docker compose "${files[@]}" up -d --build --wait --remove-orphans
 
-if [ "$mode" = prod ]; then
-    host="$(sed -n 's/^DOMAIN=//p' .env)"
-    insecure=()
-else
-    host=localhost
-    # The local certificate comes from Caddy's internal CA, which this machine does not trust.
-    insecure=(--insecure)
-fi
+# Ask Caddy which address it serves, so quoting or CRLF in .env cannot make this check disagree with compose.
+host="$(docker compose "${files[@]}" exec -T caddy printenv SITE_ADDRESS)"
+# The first prod start waits for Let's Encrypt, which --wait does not cover.
+curl_opts=(-fsS --max-time 10 --retry 12 --retry-delay 5 --retry-all-errors)
+# The local certificate comes from Caddy's internal CA, which this machine does not trust.
+[ "$mode" = local ] && curl_opts+=(--insecure)
 
-body="$(curl -fsS --max-time 10 "${insecure[@]}" "https://$host/api/healthz")"
+body="$(curl "${curl_opts[@]}" "https://$host/api/healthz")"
 [ "$body" = ok ] || { echo "healthz answered '$body', expected 'ok'" >&2; exit 1; }
 echo "ok: https://$host is up ($(git rev-parse --short HEAD))"

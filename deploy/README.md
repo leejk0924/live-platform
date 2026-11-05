@@ -9,9 +9,9 @@
 
 | 서비스 | 외부 포트 | 역할 |
 |---|---|---|
-| caddy | 80, 443/tcp, 443/udp | HTTPS 종료, `/api/*` → api, `/media/*` → mediamtx, 나머지는 SPA |
+| caddy | 80, 443/tcp, 443/udp | HTTPS 종료, `/api/*` → api, `/media/hls/*`·`/media/webrtc/*` → mediamtx, 나머지는 SPA |
 | api | 없음 | Rust API |
-| mediamtx | 8189/udp, 8189/tcp | WebRTC 미디어 (WHIP 송출, WHEP 시청). HLS·API는 내부만 |
+| mediamtx | 8189/udp, 8189/tcp | WebRTC 미디어. HLS(8888)와 WHIP/WHEP 시그널링(8889)은 Caddy를 거쳐 공개, Control API(9997)는 내부만 |
 | postgres | 없음 | 데이터 |
 
 | 파일 | 내용 |
@@ -28,8 +28,8 @@
 
 ```bash
 cp .env.example .env
-# POSTGRES_PASSWORD만 바꾸면 된다 (영숫자만)
-sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 24)/" .env
+# 로컬은 값을 그대로 둬도 동작한다. 비밀번호만 무작위로 바꾸려면 (macOS sed도 동작):
+sed -i.bak "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 24)/" .env && rm .env.bak
 bash deploy/deploy.sh local
 ```
 
@@ -53,7 +53,7 @@ echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 
 1. duckdns.org에서 서브도메인을 만들고 서버 공인 IP를 넣는다.
 2. 서버 밖에서 `nslookup <이름>.duckdns.org`가 그 IP를 돌려주는지 확인한다.
-3. 인증서는 Caddy가 첫 요청 때 Let's Encrypt에서 받는다. 80과 443이 열려 있어야 한다.
+3. 인증서는 Caddy가 시작할 때 Let's Encrypt에서 받는다. 80과 443이 열려 있어야 한다. `deploy.sh prod`는 발급을 기다리며 healthz를 최대 1분 재시도한다.
 
 ## 5. 첫 배포
 
@@ -86,7 +86,7 @@ bash deploy/deploy.sh prod
 | 상태 | `docker compose -f compose.yml -f compose.prod.yml ps` |
 | 로그 | `docker compose -f compose.yml -f compose.prod.yml logs -f --tail 100 <서비스>` |
 | 리소스 사용량 | `docker stats --no-stream` |
-| DB 백업 | `docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > backup.sql` |
+| DB 백업 | `docker compose -f compose.yml -f compose.prod.yml exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > ~/backup-$(date +%F).sql` (저장소 밖에 쓴다) |
 | 오래된 이미지 정리 | `docker image prune -f` |
 
 로그는 컨테이너마다 10MB × 3개로 회전한다.
