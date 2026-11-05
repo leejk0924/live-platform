@@ -50,13 +50,17 @@ cargo deny check
 
 ## 문서
 
-- Obsidian 프로젝트 폴더: `C:\Users\akdir\OneDrive\문서\obsidian\문서관리\개발\live-platform\` (vault 루트는 `문서관리`)
-  - `00-Overview/` 개요·Capacity Plan, `ADR/<area>/<issue>-<slug>.md` 결정 기록, `Rust-Learning/` Java↔Rust, `Devlog/` 날짜별 로그, `Security/` 위협 모델
+- **ADR(결정 기록)은 저장소 `docs/adr/<area>/<issue>-<slug>.md`**에 쓴다. 형식은 `docs/adr/README.md`. 결정을 구현한 PR에 함께 넣고, PR 본문 `설계 기록(ADR)`에 그 파일 경로를 적는다.
+  - `jk:session-summary`: 스킬의 vault 경로(`<vault>/<project>/...`) 대신 **`docs/adr/<area>/<issue>-<slug>.md`**에 저장한다. 임시 파일 작성 → `scan-sensitive.sh` 통과 → 저장 순서는 그대로 지키고, 저장 후 `docs/adr/README.md` 목록에 한 줄 추가한다. 커밋은 작업 흐름대로 해당 PR에 포함한다.
+  - `jk:session-context`: 인덱스는 저장소의 `docs/adr`에서 만든다.
+    `OBSIDIAN_VAULT="$(git rev-parse --show-toplevel)/docs" bash "<SKILL_DIR>/scripts/build-index.sh" -p adr -m <area>,common -c main`
+- Obsidian은 사용자 개인 노트: `C:\Users\akdir\OneDrive\문서\obsidian\문서관리\개발\live-platform\` (vault 루트는 `문서관리`)
+  - `00-Overview/` 개요·Capacity Plan, `Rust-Learning/` Java↔Rust, `Devlog/` 날짜별 로그, `Security/` 위협 모델
 
 ## 작업 단위
 
 - 모든 작업은 GitHub 이슈 단위. 이슈 하나에 PR 여러 개가 붙을 수 있다.
-- 브랜치: `<issue>-<slug>` (예: `1-workspace-skeleton`). PR 본문에 `Refs #N`, 이슈의 마지막 PR에만 `Closes #N`.
+- 브랜치: `<type>/<issue>` (예: `feat/6`). 절차 전체는 `docs/DEVELOPMENT.md`. PR 본문에 `Refs #N`, 이슈의 마지막 PR에만 `Closes #N`.
 - 저장소는 제출 전까지 private. 마감 전 gitleaks 이력 스캔 후 public 전환(#15).
 - 작업 단위가 끝나면 Devlog와 관련 Rust-Learning 노트를 갱신한다.
 - 오픈소스 사용 시 README `Credits`에 출처를 추가한다.

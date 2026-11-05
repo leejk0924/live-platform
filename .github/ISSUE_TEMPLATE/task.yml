@@ -31,10 +31,10 @@ body:
     id: adr
     attributes:
       label: 관련 ADR
-      description: "Obsidian 경로 규칙 ADR/<area>/<issue>-<slug>.md. 없으면 비워 둔다."
-      placeholder: ADR/common/1-hexagonal-five-planes.md
+      description: "docs/adr/<area>/<issue>-<slug>.md. 없으면 비워 둔다."
+      placeholder: docs/adr/common/1-hexagonal-five-planes.md
   - type: markdown
     attributes:
       value: |
-        브랜치는 `<issue>-<slug>` (예: `1-workspace-skeleton`).
+        브랜치는 `<type>/<issue>` (예: `feat/6`). 규칙은 `docs/DEVELOPMENT.md`.
         PR 본문에는 `Refs #N`, 이 이슈의 마지막 PR에만 `Closes #N`.
