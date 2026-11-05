@@ -53,3 +53,11 @@ README에 실제 접속 가능한 URL이 필요하고, 화면 공유·카메라�
 - 과제 문서에 AWS·컨테이너 요구가 없다는 지적으로, "로컬 compose 우선 + AWS는 adapter로만" 구성을 한 번 검토했다(로컬 HTTPS는 Caddy `tls internal`, 녹화는 로컬 파일시스템 + API 서명 URL).
 - 비용 추정(t3.medium 월 ~$45, 실사용자 없음)을 보고 사용자가 AWS 기준으로 되돌렸다. 공개 URL과 실기기 HTTPS 검증을 1일차부터 확보하는 쪽이 리스크가 낮다.
 - 유지되는 원칙: AWS 전용 개념은 adapter와 `deploy/`에만 두고, 로컬 `docker compose up`도 README 실행 방법으로 계속 지원한다.
+
+## Follow-up (2026-11-06): 검증은 로컬에서만
+
+- 사용자 결정: 테스트는 로컬 `docker compose`에서만 하고, AWS에서는 배포·검증하지 않는다.
+- #2는 EC2 없이 할 수 있는 것만 한다: 배포 절차 문서(`deploy/README.md`), `deploy/deploy.sh local|prod`, `compose.prod.yml` 오버레이 점검.
+- `deploy.sh local`은 로컬에서 실행해 확인했다. `deploy.sh prod`와 운영 절차는 (unverified).
+- 영향: 실기기 화면 공유·카메라는 HTTPS가 필요하다. 공인 HTTPS 주소 없이 #3(실기기 PoC)을 하려면 LAN에서 Caddy 내부 CA를 기기에 신뢰시키거나 다른 터널 수단이 필요하다. #3에서 정한다.
+- 위 결정(EC2, IMDSv2, SSM 등)은 지우지 않는다. 운영 서버를 쓰게 되면 그대로 따른다.
