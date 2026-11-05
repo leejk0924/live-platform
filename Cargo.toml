@@ -12,6 +12,7 @@ domain = { path = "crates/domain" }
 application = { path = "crates/application" }
 infrastructure = { path = "crates/infrastructure" }
 
+async-trait = "0.1"
 thiserror = "2"
 
 axum = "0.8"
