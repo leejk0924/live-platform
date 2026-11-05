@@ -25,6 +25,7 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --workspace
+      - run: bash scripts/check-layer-deps.sh
 
   cargo-deny:
     runs-on: ubuntu-24.04
