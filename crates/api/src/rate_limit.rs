@@ -1,7 +1,12 @@
 //! Per-instance request limits for the auth endpoints. They are a guard
 //! against brute force, not shared state, so each instance keeps its own.
 
-use std::{convert::Infallible, net::SocketAddr, num::NonZeroU32, time::Duration};
+use std::{
+    convert::Infallible,
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+    num::NonZeroU32,
+    time::Duration,
+};
 
 use axum::{
     extract::{ConnectInfo, FromRequestParts},
@@ -79,6 +84,18 @@ impl RateLimits {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientKey(String);
 
+/// One IPv6 subscriber usually holds a whole /64, so keying on the full
+/// address would give them 2^64 fresh budgets.
+fn client_network(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => IpAddr::V4(v4),
+            None => IpAddr::V6(Ipv6Addr::from_bits(v6.to_bits() & (u128::MAX << 64))),
+        },
+        v4 => v4,
+    }
+}
+
 impl<S: Send + Sync> FromRequestParts<S> for ClientKey {
     type Rejection = Infallible;
 
@@ -90,14 +107,17 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientKey {
             .filter_map(|value| value.to_str().ok())
             .flat_map(|value| value.split(','))
             .map(str::trim)
-            .rfind(|entry| !entry.is_empty());
-        let key = match forwarded {
-            Some(entry) => entry.to_owned(),
-            None => parts
+            .rfind(|entry| !entry.is_empty())
+            .and_then(|entry| entry.parse::<IpAddr>().ok());
+        let peer = || {
+            parts
                 .extensions
                 .get::<ConnectInfo<SocketAddr>>()
-                .map_or_else(|| "unknown".to_owned(), |info| info.0.ip().to_string()),
+                .map(|info| info.0.ip())
         };
+        let key = forwarded
+            .or_else(peer)
+            .map_or_else(|| "unknown".to_owned(), |ip| client_network(ip).to_string());
         Ok(Self(key))
     }
 }
@@ -130,6 +150,41 @@ mod tests {
         assert_eq!(key_of(peer).await, ClientKey("192.0.2.1".into()));
 
         assert_eq!(key_of(Request::new(())).await, ClientKey("unknown".into()));
+    }
+
+    fn forwarded_for(value: &str) -> Request<()> {
+        let mut request = Request::builder()
+            .header("x-forwarded-for", value)
+            .body(())
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([192, 0, 2, 1], 4000))));
+        request
+    }
+
+    #[tokio::test]
+    async fn ipv6_clients_in_one_64_share_a_key() {
+        let a = key_of(forwarded_for("2001:db8::1")).await;
+        let b = key_of(forwarded_for("2001:db8::2")).await;
+        let other = key_of(forwarded_for("2001:db8:0:1::1")).await;
+        assert_eq!(a, b);
+        assert_ne!(a, other);
+    }
+
+    #[tokio::test]
+    async fn ipv4_mapped_ipv6_is_keyed_as_ipv4() {
+        let mapped = key_of(forwarded_for("::ffff:203.0.113.9")).await;
+        assert_eq!(mapped, key_of(forwarded_for("203.0.113.9")).await);
+        assert_ne!(mapped, key_of(forwarded_for("::ffff:203.0.113.10")).await);
+    }
+
+    #[tokio::test]
+    async fn a_forwarded_entry_that_is_not_an_ip_falls_back_to_the_peer() {
+        assert_eq!(
+            key_of(forwarded_for("1.2.3.4, not-an-ip")).await,
+            ClientKey("192.0.2.1".into())
+        );
     }
 
     #[test]
