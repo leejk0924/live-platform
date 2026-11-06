@@ -103,7 +103,8 @@ fn broadcast_id(raw: &str) -> Result<BroadcastId, ApiError> {
     raw.parse().map_err(|_| BroadcastError::NotFound.into())
 }
 
-/// Accepts `"3"` and `W/"3"`.
+/// Accepts only a strong tag such as `"3"`: RFC 9110 compares `If-Match`
+/// strongly, so a weak tag can never match.
 fn expected_version(headers: &HeaderMap) -> Result<Version, ApiError> {
     let raw = headers
         .get(IF_MATCH)
@@ -112,7 +113,6 @@ fn expected_version(headers: &HeaderMap) -> Result<Version, ApiError> {
         .to_str()
         .map_err(|_| ApiError::invalid_if_match())?
         .trim();
-    let tag = tag.strip_prefix("W/").unwrap_or(tag);
     tag.strip_prefix('"')
         .and_then(|tag| tag.strip_suffix('"'))
         .filter(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
@@ -340,7 +340,7 @@ pub(crate) async fn create(
     summary = "Replace title and description; owner only",
     params(
         ("id" = String, Path, description = "Broadcast id"),
-        ("If-Match" = String, Header, description = "The version being edited, as returned in `ETag`: `\"3\"` (`W/\"3\"` is accepted)"),
+        ("If-Match" = String, Header, description = "The version being edited, as returned in `ETag`: `\"3\"`"),
     ),
     request_body = BroadcastInput,
     security(("session" = [])),
@@ -418,9 +418,9 @@ mod tests {
     }
 
     #[test]
-    fn if_match_takes_a_strong_or_weak_version_tag() {
+    fn if_match_takes_a_strong_version_tag() {
         assert_eq!(if_match(Some("\"3\"")), Ok(3));
-        assert_eq!(if_match(Some("W/\"12\"")), Ok(12));
+        assert_eq!(if_match(Some("\"12\"")), Ok(12));
         assert_eq!(if_match(Some(" \"1\" ")), Ok(1));
     }
 
@@ -436,6 +436,7 @@ mod tests {
             "\"1.0\"",
             "*",
             "\"1\", \"2\"",
+            "W/\"1\"",
             "w/\"1\"",
             "\"99999999999\"",
         ] {

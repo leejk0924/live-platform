@@ -567,7 +567,7 @@
           {
             "name": "If-Match",
             "in": "header",
-            "description": "The version being edited, as returned in `ETag`: `\"3\"` (`W/\"3\"` is accepted)",
+            "description": "The version being edited, as returned in `ETag`: `\"3\"`",
             "required": true,
             "schema": {
               "type": "string"

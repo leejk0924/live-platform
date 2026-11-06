@@ -353,7 +353,7 @@ async fn a_stale_if_match_is_a_version_conflict(pool: PgPool) {
     assert_eq!(first.headers[header::ETAG], "\"2\"");
     assert_eq!(first.body["version"], 2);
 
-    let second = update(&router, Some(&actors.owner), &id, Some("W/\"1\""), "second").await;
+    let second = update(&router, Some(&actors.owner), &id, Some("\"1\""), "second").await;
     assert_eq!(second.status, StatusCode::CONFLICT, "{}", second.body);
     assert_eq!(second.code(), "VERSION_CONFLICT");
     let kept = Stored {
@@ -363,7 +363,11 @@ async fn a_stale_if_match_is_a_version_conflict(pool: PgPool) {
     };
     assert_eq!(stored(&pool, &id).await, kept);
 
-    for (tag, code) in [(None, "IF_MATCH_REQUIRED"), (Some("2"), "INVALID_IF_MATCH")] {
+    for (tag, code) in [
+        (None, "IF_MATCH_REQUIRED"),
+        (Some("2"), "INVALID_IF_MATCH"),
+        (Some("W/\"2\""), "INVALID_IF_MATCH"),
+    ] {
         let reply = update(&router, Some(&actors.owner), &id, tag, "third").await;
         assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{tag:?}");
         assert_eq!(reply.code(), code, "{tag:?}");

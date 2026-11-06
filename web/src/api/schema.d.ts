@@ -622,7 +622,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                /** @description The version being edited, as returned in `ETag`: `"3"` (`W/"3"` is accepted) */
+                /** @description The version being edited, as returned in `ETag`: `"3"` */
                 "If-Match": string;
             };
             path: {
