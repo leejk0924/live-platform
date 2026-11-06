@@ -5,6 +5,8 @@ import './index.css'
 import { AuthProvider } from './auth/AuthProvider.tsx'
 import Layout from './Layout.tsx'
 import BroadcastDetail from './pages/BroadcastDetail.tsx'
+import BroadcastEdit from './pages/BroadcastEdit.tsx'
+import BroadcastNew from './pages/BroadcastNew.tsx'
 import Home from './pages/Home.tsx'
 import Login from './pages/Login.tsx'
 import Signup from './pages/Signup.tsx'
@@ -15,7 +17,9 @@ const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { index: true, element: <Home /> },
+      { path: 'broadcasts/new', element: <BroadcastNew /> },
       { path: 'broadcasts/:id', element: <BroadcastDetail /> },
+      { path: 'broadcasts/:id/edit', element: <BroadcastEdit /> },
       { path: 'login', element: <Login /> },
       { path: 'signup', element: <Signup /> },
       { path: '*', element: <NotFound /> },

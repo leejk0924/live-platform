@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, Navigate } from 'react-router'
+import { Link, Navigate, useLocation } from 'react-router'
 import { authApi } from '../api/auth.ts'
 import { useAuth } from '../auth/context.ts'
 import CredentialsForm from '../auth/CredentialsForm.tsx'
@@ -8,6 +8,8 @@ import { useSignIn } from '../auth/useSignIn.ts'
 export default function Login() {
   const { auth } = useAuth()
   const { pending, error, run } = useSignIn()
+  const location = useLocation()
+  const from = (location.state as { from?: string } | null)?.from ?? '/'
   const [demoEnabled, setDemoEnabled] = useState(false)
 
   useEffect(() => {
@@ -23,8 +25,8 @@ export default function Login() {
     }
   }, [])
 
-  // A successful sign-in lands here too, which is how the page leaves for home.
-  if (auth.status === 'signedIn') return <Navigate to="/" replace />
+  // A successful sign-in lands here too, which is how the page leaves for where the user was headed.
+  if (auth.status === 'signedIn') return <Navigate to={from} replace />
 
   return (
     <>
