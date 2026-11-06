@@ -28,7 +28,10 @@ done
 
 # deny.toml lets api wrap sqlx for its database tests; production code must
 # still reach Postgres through infrastructure.
-if cargo tree -p api -e normal --depth 1 --prefix none --format '{p}' --locked     | tail -n +2 | awk '{print $1}' | grep -qx sqlx; then
+api_deps=$(cargo tree -p api -e normal,build --depth 1 --prefix none --format '{p}' \
+    --target all --all-features --locked \
+    | tail -n +2 | awk '{print $1}')
+if grep -qx sqlx <<<"$api_deps"; then
     echo "api depends on sqlx outside dev-dependencies"
     failed=1
 else
