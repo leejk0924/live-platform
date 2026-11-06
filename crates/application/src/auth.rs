@@ -133,7 +133,8 @@ pub struct DemoLogIn {
 
 impl DemoLogIn {
     /// Creates the demo accounts that do not exist yet. Does nothing while
-    /// demo login is disabled.
+    /// demo login is disabled. Fails if a demo name is held by an account
+    /// with a password, so startup stops instead of the first demo login.
     pub async fn seed(&self) -> Result<(), Error> {
         if !self.enabled {
             return Ok(());
@@ -144,9 +145,22 @@ impl DemoLogIn {
                 username: account.username(),
                 credential: Credential::DemoOnly,
             };
-            self.users.insert(&user).await?;
+            if self.users.insert(&user).await? == Inserted::UsernameTaken {
+                self.demo_user(account).await?;
+            }
         }
         Ok(())
+    }
+
+    async fn demo_user(&self, account: DemoAccount) -> Result<User, Error> {
+        let username = account.username();
+        match self.users.find_by_username(&username).await? {
+            Some(user) if user.credential == Credential::DemoOnly => Ok(user),
+            Some(_) => {
+                Err(PortError(format!("{} is not a demo-only account", username.as_str())).into())
+            }
+            None => Err(PortError(format!("{} was not seeded", username.as_str())).into()),
+        }
     }
 
     pub async fn run(
@@ -157,16 +171,8 @@ impl DemoLogIn {
         if !self.enabled {
             return Err(AuthError::DemoLoginDisabled.into());
         }
-        let username = account.username();
-        match self.users.find_by_username(&username).await? {
-            Some(user) if user.credential == Credential::DemoOnly => {
-                sign_in(self.sessions.as_ref(), user, previous).await
-            }
-            Some(_) => {
-                Err(PortError(format!("{} is not a demo-only account", username.as_str())).into())
-            }
-            None => Err(PortError(format!("{} was not seeded", username.as_str())).into()),
-        }
+        let user = self.demo_user(account).await?;
+        sign_in(self.sessions.as_ref(), user, previous).await
     }
 }
 
@@ -248,14 +254,6 @@ mod tests {
 
         async fn revoke(&self, _: &SessionToken) -> Result<(), PortError> {
             Ok(())
-        }
-    }
-
-    struct NoIds;
-
-    impl IdGenerator for NoIds {
-        fn next_id(&self) -> Result<SnowflakeId, IdGenerationError> {
-            Err(IdGenerationError::LeaseExpired)
         }
     }
 
@@ -448,7 +446,7 @@ mod tests {
         let sessions = Arc::new(RecordingSessions::default());
         let use_case = DemoLogIn {
             enabled: true,
-            ids: Arc::new(NoIds),
+            ids: Arc::new(FixedIds),
             users: Arc::new(OneUser(row)),
             sessions: sessions.clone(),
         };
@@ -476,5 +474,15 @@ mod tests {
             Err(Error::Internal(_))
         ));
         assert!(sessions.0.lock().unwrap().is_empty(), "no session created");
+    }
+
+    #[tokio::test]
+    async fn seeding_fails_when_a_demo_name_belongs_to_a_password_account() {
+        let row = user(
+            DemoAccount::Streamer.username(),
+            Credential::Password(PasswordHash::new("$argon2id$...".into())),
+        );
+        let (use_case, _) = demo_log_in(row);
+        assert!(matches!(use_case.seed().await, Err(Error::Internal(_))));
     }
 }
