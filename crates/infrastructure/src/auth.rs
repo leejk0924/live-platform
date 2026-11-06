@@ -35,14 +35,18 @@ impl Argon2Hasher {
         &self,
         work: impl FnOnce() -> Result<T, PortError> + Send + 'static,
     ) -> Result<T, PortError> {
-        let _permit = self
-            .permits
-            .acquire()
+        // The permit moves into the job: if the caller is cancelled, the job
+        // still runs to the end and must keep counting against the cap.
+        let permit = Arc::clone(&self.permits)
+            .acquire_owned()
             .await
             .map_err(|err| PortError(err.to_string()))?;
-        tokio::task::spawn_blocking(work)
-            .await
-            .map_err(|err| PortError(format!("password hashing task failed: {err}")))?
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            work()
+        })
+        .await
+        .map_err(|err| PortError(format!("password hashing task failed: {err}")))?
     }
 }
 
@@ -172,6 +176,37 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_call_keeps_its_permit_until_the_blocking_work_ends() {
+        use std::{
+            sync::atomic::{AtomicUsize, Ordering},
+            time::Duration,
+        };
+
+        let hasher = Argon2Hasher {
+            dummy: "unused".into(),
+            permits: Arc::new(Semaphore::new(1)),
+        };
+        let running = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let work = || {
+            let (running, peak) = (Arc::clone(&running), Arc::clone(&peak));
+            move || {
+                let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(300));
+                running.fetch_sub(1, Ordering::SeqCst);
+                Ok(())
+            }
+        };
+
+        let cancelled = tokio::time::timeout(Duration::from_millis(50), hasher.run(work())).await;
+        assert!(cancelled.is_err(), "the first call is cancelled mid-work");
+        hasher.run(work()).await.unwrap();
+
+        assert_eq!(peak.load(Ordering::SeqCst), 1);
     }
 
     #[test]
