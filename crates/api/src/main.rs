@@ -11,16 +11,19 @@ use std::{
 
 use api::{
     AppState, app,
+    auth::AuthPorts,
     config::{Config, listen_addr},
 };
 use infrastructure::{
+    auth::{Argon2Hasher, BreachedPasswordList},
     id::SnowflakeIdGenerator,
-    persistence::{self, PgWorkerIdAllocator},
+    persistence::{self, PgSessionStore, PgUserRepository, PgWorkerIdAllocator},
 };
 use tokio::{net::TcpListener, sync::oneshot};
 use tracing_subscriber::EnvFilter;
 
 const DB_MAX_CONNECTIONS: u32 = 10;
+const RATE_LIMIT_CLEANUP: Duration = Duration::from_secs(60);
 
 fn main() -> ExitCode {
     let command = env::args_os().nth(1);
@@ -70,6 +73,9 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
     persistence::migrate(&pool)
         .await
         .map_err(|err| format!("database migration failed: {err}"))?;
+    let hasher = tokio::task::spawn_blocking(Argon2Hasher::new)
+        .await?
+        .map_err(|err| format!("password hasher start failed: {err}"))?;
     let allocator = Arc::new(PgWorkerIdAllocator::new(
         pool.clone(),
         config.worker_lease_ttl,
@@ -78,20 +84,50 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         .await
         .map_err(|err| format!("id generator start failed: {err}"))?;
 
+    let ports = AuthPorts {
+        ids,
+        users: Arc::new(PgUserRepository::new(pool.clone())),
+        sessions: Arc::new(PgSessionStore::new(pool.clone())),
+        hasher: Arc::new(hasher),
+        breached: Arc::new(BreachedPasswordList::load()),
+    };
+    let state = AppState::new(
+        ports,
+        config.allowed_origins.clone(),
+        config.demo_login_enabled,
+    );
+    if let Err(err) = state.auth.demo_log_in.seed().await {
+        if let Err(release_err) = heartbeat.shutdown().await {
+            tracing::warn!(%release_err, "could not release worker id lease");
+        }
+        return Err(format!("demo account seeding failed: {err}").into());
+    }
+    let limits = Arc::clone(&state.limits);
+    tokio::spawn(async move {
+        let mut ticks = tokio::time::interval(RATE_LIMIT_CLEANUP);
+        loop {
+            ticks.tick().await;
+            limits.forget_idle();
+        }
+    });
+
     tracing::info!(addr = %config.listen_addr, "listening");
     let lease_lost = heartbeat.lease_lost();
     let (lost_tx, mut lost_rx) = oneshot::channel();
-    let served = axum::serve(listener, app(AppState { ids }))
-        .with_graceful_shutdown(async move {
-            tokio::select! {
-                () = shutdown_signal() => {}
-                () = lease_lost => {
-                    tracing::error!("worker id lease lost, draining connections before exit");
-                    let _ = lost_tx.send(());
-                }
+    let served = axum::serve(
+        listener,
+        app(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        tokio::select! {
+            () = shutdown_signal() => {}
+            () = lease_lost => {
+                tracing::error!("worker id lease lost, draining connections before exit");
+                let _ = lost_tx.send(());
             }
-        })
-        .await;
+        }
+    })
+    .await;
 
     match heartbeat.shutdown().await {
         Ok(()) => tracing::info!("worker id lease released"),
@@ -175,33 +211,16 @@ fn probe(target: SocketAddr) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use application::ports::id::{IdGenerationError, IdGenerator};
-    use axum::Router;
-    use domain::id::SnowflakeId;
+    use axum::{Router, routing::get};
 
     use super::*;
-
-    struct UnusedIds;
-
-    impl IdGenerator for UnusedIds {
-        fn next_id(&self) -> Result<SnowflakeId, IdGenerationError> {
-            Err(IdGenerationError::LeaseExpired)
-        }
-    }
 
     #[tokio::test]
     async fn healthcheck_probe_reports_server_health() {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(
-                listener,
-                app(AppState {
-                    ids: Arc::new(UnusedIds),
-                }),
-            )
-            .await
-        });
+        let healthz = Router::new().route("/api/healthz", get(|| async { "ok" }));
+        tokio::spawn(async move { axum::serve(listener, healthz).await });
 
         let healthy = tokio::task::spawn_blocking(move || probe(addr))
             .await

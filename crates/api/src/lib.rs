@@ -1,9 +1,12 @@
 //! HTTP inbound adapter and composition root. A library so the binary and the
 //! tests share it, and items the next handlers will use are not dead code.
 
+pub mod auth;
 pub mod config;
+pub mod csrf;
 pub mod error;
 pub mod json;
+pub mod rate_limit;
 #[cfg(test)]
 mod test_support;
 
@@ -13,17 +16,42 @@ use application::ports::id::IdGenerator;
 use axum::{Router, middleware, routing::get};
 use tower_http::catch_panic::CatchPanicLayer;
 
-use crate::error::ApiError;
+use crate::{
+    auth::{AuthPorts, AuthUseCases},
+    config::Origin,
+    error::ApiError,
+    rate_limit::RateLimits,
+};
 
 /// Dependencies the handlers share, assembled in `main`.
 #[derive(Clone)]
 pub struct AppState {
     pub ids: Arc<dyn IdGenerator>,
+    pub auth: Arc<AuthUseCases>,
+    pub allowed_origins: Arc<[Origin]>,
+    pub limits: Arc<RateLimits>,
+}
+
+impl AppState {
+    pub fn new(ports: AuthPorts, allowed_origins: Vec<Origin>, demo_login_enabled: bool) -> Self {
+        Self {
+            ids: ports.ids.clone(),
+            auth: Arc::new(AuthUseCases::new(ports, demo_login_enabled)),
+            allowed_origins: allowed_origins.into(),
+            limits: Arc::new(RateLimits::default()),
+        }
+    }
 }
 
 pub fn app(state: AppState) -> Router {
-    with_envelope(Router::new().nest("/api", Router::new().route("/healthz", get(healthz))))
-        .with_state(state)
+    let api = Router::new()
+        .route("/healthz", get(healthz))
+        .nest("/auth", auth::routes())
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state.allowed_origins),
+            csrf::guard,
+        ));
+    with_envelope(Router::new().nest("/api", api)).with_state(state)
 }
 
 /// Wraps `routes` so that every error, including the ones axum produces
