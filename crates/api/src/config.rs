@@ -40,7 +40,14 @@ impl Origin {
             && host
                 .bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-');
-        let port_ok = port.is_none_or(|p| p.parse::<u16>().is_ok_and(|p| p != 0));
+        // Browsers write the port as plain digits and omit the scheme's
+        // default, so any other spelling would never match an `Origin` header.
+        let default_port = if scheme == "https" { 443 } else { 80 };
+        let port_ok = port.is_none_or(|p| {
+            p.bytes().all(|b| b.is_ascii_digit())
+                && !p.starts_with('0')
+                && p.parse::<u16>().is_ok_and(|p| p != default_port)
+        });
         (host_ok && port_ok).then(|| Self(raw.to_owned()))
     }
 
@@ -60,6 +67,8 @@ pub enum ConfigError {
     DatabaseUrlNotUnicode,
     #[error("WORKER_LEASE_TTL_SECS must be an integer of at least {MIN_LEASE_TTL_SECS}, got {0:?}")]
     LeaseTtl(String),
+    #[error("ALLOWED_ORIGINS is not set")]
+    MissingAllowedOrigins,
     #[error(
         "ALLOWED_ORIGINS must be a comma separated list of origins like https://example.com, got {0:?}"
     )]
@@ -90,6 +99,7 @@ impl Config {
         };
         let allowed_origins = match lookup("ALLOWED_ORIGINS") {
             Ok(raw) => allowed_origins(&raw).ok_or(ConfigError::AllowedOrigins(raw))?,
+            Err(VarError::NotPresent) => return Err(ConfigError::MissingAllowedOrigins),
             Err(err) => return Err(ConfigError::AllowedOrigins(err.to_string())),
         };
         let demo_login_enabled = match lookup("DEMO_LOGIN_ENABLED") {
@@ -219,8 +229,15 @@ mod tests {
         );
         assert!(matches!(
             from_exact(&[("DATABASE_URL", URL)]),
-            Err(ConfigError::AllowedOrigins(_))
+            Err(ConfigError::MissingAllowedOrigins)
         ));
+        assert_eq!(
+            origins("http://a.example:443,https://a.example:80")
+                .unwrap()
+                .len(),
+            2,
+            "a port is only implied by its own scheme"
+        );
         for bad in [
             "",
             ",",
@@ -233,6 +250,11 @@ mod tests {
             "https://A.example",
             "https://a.example:0",
             "https://a.example:99999",
+            "https://a.example:",
+            "https://a.example:+443",
+            "https://a.example:0443",
+            "https://a.example:443",
+            "http://a.example:80",
             "https://user@a.example",
             "*",
         ] {
