@@ -59,23 +59,26 @@ async fn renew_after_expiry_is_lost(pool: PgPool) {
 
 #[sqlx::test(migrations = "./migrations")]
 #[ignore = "requires DATABASE_URL (Postgres)"]
-async fn released_last_ms_becomes_next_floor_and_never_decreases(pool: PgPool) {
+async fn renew_never_lowers_and_release_stores_the_exact_value(pool: PgPool) {
     let allocator = allocator(pool.clone());
     let lease = allocator.acquire().await.unwrap();
     assert_eq!(lease.floor_ms, 0);
     let worker = lease.worker.get();
 
     allocator.renew(&lease, 500).await.unwrap();
+    allocator.renew(&lease, 300).await.unwrap();
+    assert_eq!(last_ms(&pool, worker).await, 500, "renew never lowers");
+
     allocator.release(&lease, 400).await.unwrap();
     assert_eq!(
         last_ms(&pool, worker).await,
-        500,
-        "GREATEST keeps the higher value"
+        400,
+        "release replaces the renewal bound with the exact last use"
     );
     allocator.release(&lease, 900).await.unwrap();
     assert_eq!(
         last_ms(&pool, worker).await,
-        500,
+        400,
         "a released lease no longer writes"
     );
 
@@ -87,7 +90,7 @@ async fn released_last_ms_becomes_next_floor_and_never_decreases(pool: PgPool) {
 
     let again = allocator.acquire().await.unwrap();
     assert_eq!(again.worker, lease.worker);
-    assert_eq!(again.floor_ms, 500);
+    assert_eq!(again.floor_ms, 400);
     assert_ne!(again.holder, lease.holder);
 }
 

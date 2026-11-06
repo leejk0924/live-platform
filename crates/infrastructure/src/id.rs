@@ -84,16 +84,22 @@ impl SnowflakeIdGenerator {
 
         let behind_ms = lease.floor_ms.saturating_sub(clock.now_ms());
         if behind_ms > MAX_STARTUP_BACKWARD.as_millis() as u64 {
-            if let Err(err) = allocator.release(&lease, lease.floor_ms).await {
-                tracing::warn!(%err, "could not release worker id lease after refusing to start");
-            }
+            release_unused(allocator.as_ref(), &lease).await;
             return Err(StartError::ClockBehind { behind_ms });
+        }
+
+        // Store the bound before issuing anything, so a crash before the first
+        // heartbeat still leaves the next holder a floor above our ids.
+        let valid_until = lease_deadline(requested_at, ttl);
+        if let Err(err) = allocator.renew(&lease, valid_until).await {
+            release_unused(allocator.as_ref(), &lease).await;
+            return Err(err.into());
         }
 
         let generator = Arc::new(Self {
             clock,
             sequencer: Mutex::new(SnowflakeSequencer::new(lease.worker, lease.floor_ms)),
-            valid_until_ms: AtomicU64::new(lease_deadline(requested_at, ttl)),
+            valid_until_ms: AtomicU64::new(valid_until),
         });
         tracing::info!(
             worker = lease.worker.get(),
@@ -116,6 +122,13 @@ impl SnowflakeIdGenerator {
         self.sequencer
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// Gives back a lease no id was issued under, leaving its floor as it was.
+async fn release_unused(allocator: &dyn WorkerIdAllocator, lease: &WorkerLease) {
+    if let Err(err) = allocator.release(lease, lease.floor_ms).await {
+        tracing::warn!(%err, "could not release worker id lease after refusing to start");
     }
 }
 
@@ -217,15 +230,17 @@ async fn heartbeat(
             _ = &mut stopped => return,
             _ = ticks.tick() => {}
         }
-        let sent_at = generator.clock.now_ms();
+        // Every id issued until the next renewal is below this deadline, so
+        // storing it keeps the database's last_ms ahead of us if we crash.
+        let valid_until = lease_deadline(generator.clock.now_ms(), ttl);
         let renewed = tokio::select! {
             _ = &mut stopped => return,
-            renewed = allocator.renew(&lease, generator.last_ms()) => renewed,
+            renewed = allocator.renew(&lease, valid_until) => renewed,
         };
         match renewed {
             Ok(()) => generator
                 .valid_until_ms
-                .store(lease_deadline(sent_at, ttl), Ordering::Release),
+                .store(valid_until, Ordering::Release),
             Err(LeaseError::Lost) => {
                 generator.valid_until_ms.store(0, Ordering::Release);
                 tracing::error!(
@@ -251,16 +266,34 @@ mod tests {
     struct FakeAllocator {
         floor_ms: u64,
         renew: Result<(), LeaseError>,
+        /// Renewals before this many calls succeed regardless of `renew`.
+        renew_fails_from: usize,
+        renewed: Mutex<Vec<u64>>,
         released: Mutex<Option<u64>>,
     }
 
     impl FakeAllocator {
+        /// `renew` answers every heartbeat; the renewal made at startup succeeds.
         fn new(floor_ms: u64, renew: Result<(), LeaseError>) -> Arc<Self> {
+            Self::failing_from(floor_ms, renew, 1)
+        }
+
+        fn failing_from(
+            floor_ms: u64,
+            renew: Result<(), LeaseError>,
+            renew_fails_from: usize,
+        ) -> Arc<Self> {
             Arc::new(Self {
                 floor_ms,
                 renew,
+                renew_fails_from,
+                renewed: Mutex::new(Vec::new()),
                 released: Mutex::new(None),
             })
+        }
+
+        fn renewed(&self) -> Vec<u64> {
+            self.renewed.lock().unwrap().clone()
         }
 
         fn released(&self) -> Option<u64> {
@@ -278,8 +311,13 @@ mod tests {
             })
         }
 
-        async fn renew(&self, _: &WorkerLease, _: u64) -> Result<(), LeaseError> {
-            self.renew.clone()
+        async fn renew(&self, _: &WorkerLease, last_ms: u64) -> Result<(), LeaseError> {
+            let mut renewed = self.renewed.lock().unwrap();
+            if renewed.len() >= self.renew_fails_from {
+                self.renew.clone()?;
+            }
+            renewed.push(last_ms);
+            Ok(())
         }
 
         async fn release(&self, _: &WorkerLease, last_ms: u64) -> Result<(), LeaseError> {
@@ -299,6 +337,57 @@ mod tests {
         let ids: Vec<_> = (0..20_000).map(|_| generator.next_id().unwrap()).collect();
         assert!(ids.windows(2).all(|w| w[0] < w[1]));
         assert!(ids.iter().all(|id| id.worker().get() == 5));
+        heartbeat.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn startup_records_an_upper_bound_before_the_first_id() {
+        let allocator = FakeAllocator::new(0, Ok(()));
+        let (generator, heartbeat) =
+            SnowflakeIdGenerator::start(allocator.clone(), Duration::from_secs(30))
+                .await
+                .unwrap();
+
+        let recorded = allocator.renewed();
+        let id = generator.next_id().unwrap();
+        assert_eq!(recorded.len(), 1, "one renewal before any id: {recorded:?}");
+        assert!(id.timestamp_ms() < recorded[0], "{recorded:?} vs {id:?}");
+        heartbeat.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn start_fails_and_releases_when_the_bound_cannot_be_recorded() {
+        let allocator =
+            FakeAllocator::failing_from(7, Err(LeaseError::Unavailable("down".into())), 0);
+
+        let result = SnowflakeIdGenerator::start(allocator.clone(), Duration::from_secs(30)).await;
+        assert!(matches!(
+            result,
+            Err(StartError::Lease(LeaseError::Unavailable(_)))
+        ));
+        assert_eq!(allocator.released(), Some(7));
+    }
+
+    #[tokio::test]
+    async fn renewals_keep_ids_flowing_and_bound_every_issued_id() {
+        let allocator = FakeAllocator::new(0, Ok(()));
+        let (generator, heartbeat) =
+            SnowflakeIdGenerator::start(allocator.clone(), Duration::from_millis(90))
+                .await
+                .unwrap();
+
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_millis(300) {
+            let id = generator.next_id().expect("renewed lease keeps issuing");
+            let recorded = *allocator.renewed().last().unwrap();
+            assert!(
+                id.timestamp_ms() < recorded,
+                "the stored bound {recorded} must exceed issued {}",
+                id.timestamp_ms()
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(allocator.renewed().len() >= 5, "{:?}", allocator.renewed());
         heartbeat.shutdown().await.unwrap();
     }
 

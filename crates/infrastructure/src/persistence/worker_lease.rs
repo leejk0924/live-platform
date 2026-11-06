@@ -81,7 +81,7 @@ impl WorkerIdAllocator for PgWorkerIdAllocator {
     async fn release(&self, lease: &WorkerLease, last_ms: u64) -> Result<(), LeaseError> {
         sqlx::query(
             "UPDATE worker_leases \
-             SET holder = NULL, expires_at = now(), last_ms = GREATEST(last_ms, $3) \
+             SET holder = NULL, expires_at = now(), last_ms = $3 \
              WHERE worker_id = $1 AND holder = $2",
         )
         .bind(lease.worker.get() as i16)

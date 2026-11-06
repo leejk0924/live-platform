@@ -56,11 +56,14 @@ pub enum LeaseError {
 pub trait WorkerIdAllocator: Send + Sync {
     async fn acquire(&self) -> Result<WorkerLease, LeaseError>;
 
-    /// Extends the lease and records `last_ms`, the highest ms this holder
-    /// has used so far.
+    /// Extends the lease and raises the stored `last_ms` to at least
+    /// `last_ms`, an upper bound of every ms this holder may use until the
+    /// next renewal. A crashed holder thus leaves a floor above all its ids.
     async fn renew(&self, lease: &WorkerLease, last_ms: u64) -> Result<(), LeaseError>;
 
-    /// Gives the worker id back. Calling it on an already released or lost
-    /// lease succeeds without effect.
+    /// Gives the worker id back and stores `last_ms` as is: the exact last ms
+    /// used replaces the renewal's bound, so a clean restart is not pushed
+    /// ahead of the clock. Calling it on an already released or lost lease
+    /// succeeds without effect.
     async fn release(&self, lease: &WorkerLease, last_ms: u64) -> Result<(), LeaseError>;
 }
