@@ -514,3 +514,69 @@ async fn a_signed_in_list_is_the_same_cacheable_response(pool: PgPool) {
     );
     assert_eq!(signed_in.body, anonymous.body);
 }
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn concurrent_updates_with_one_version_let_exactly_one_through(pool: PgPool) {
+    let router = router(&pool, false).await;
+    let actors = actors(&router).await;
+
+    for round in 0..20 {
+        let id = created_id(&router, &actors.owner, "원래 제목").await;
+        let (a, b) = tokio::join!(
+            update(&router, Some(&actors.owner), &id, Some("\"1\""), "a"),
+            update(&router, Some(&actors.owner), &id, Some("\"1\""), "b"),
+        );
+
+        let (winner, loser) = match (a.status, b.status) {
+            (StatusCode::OK, StatusCode::CONFLICT) => ("a", b),
+            (StatusCode::CONFLICT, StatusCode::OK) => ("b", a),
+            other => panic!("round {round}: {other:?}"),
+        };
+        assert_eq!(loser.code(), "VERSION_CONFLICT", "round {round}");
+        let expected = Stored {
+            title: winner.into(),
+            version: 2,
+            deleted: false,
+        };
+        assert_eq!(stored(&pool, &id).await, expected, "round {round}");
+    }
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_concurrent_update_and_delete_leave_a_deleted_row(pool: PgPool) {
+    let router = router(&pool, false).await;
+    let actors = actors(&router).await;
+
+    for round in 0..20 {
+        let id = created_id(&router, &actors.owner, "원래 제목").await;
+        let (updated, deleted) = tokio::join!(
+            update(
+                &router,
+                Some(&actors.owner),
+                &id,
+                Some("\"1\""),
+                "바뀐 제목"
+            ),
+            delete(&router, Some(&actors.owner), &id),
+        );
+
+        assert_eq!(deleted.status, StatusCode::NO_CONTENT, "round {round}");
+        let expected = match updated.status {
+            StatusCode::OK => Stored {
+                title: "바뀐 제목".into(),
+                version: 3,
+                deleted: true,
+            },
+            StatusCode::NOT_FOUND => Stored {
+                title: "원래 제목".into(),
+                version: 2,
+                deleted: true,
+            },
+            other => panic!("round {round}: update gave {other}: {}", updated.body),
+        };
+        assert_eq!(stored(&pool, &id).await, expected, "round {round}");
+        assert_eq!(get(&router, &id).await.status, StatusCode::NOT_FOUND);
+    }
+}
