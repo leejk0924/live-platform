@@ -1,4 +1,5 @@
-import type { ErrorBody } from './types.ts'
+import createClient from 'openapi-fetch'
+import type { paths } from './schema.d.ts'
 
 export class ApiError extends Error {
   readonly status: number
@@ -14,38 +15,36 @@ export class ApiError extends Error {
   }
 }
 
-type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+export const api = createClient<paths>({ credentials: 'same-origin' })
 
-export async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json' }
-  // The server rejects state-changing requests without this header (CSRF guard).
-  if (method !== 'GET') headers['X-Requested-With'] = 'live-platform'
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+api.use({
+  onRequest({ request }) {
+    // The server rejects state-changing requests without this header (CSRF guard).
+    if (request.method !== 'GET') request.headers.set('X-Requested-With', 'live-platform')
+  },
+  onError() {
+    return new ApiError(0, 'NETWORK_ERROR', '서버에 연결할 수 없습니다.')
+  },
+})
 
-  let res: Response
-  try {
-    res = await fetch(path, {
-      method,
-      headers,
-      credentials: 'same-origin',
-      body: body === undefined ? undefined : JSON.stringify(body),
-    })
-  } catch {
-    throw new ApiError(0, 'NETWORK_ERROR', '서버에 연결할 수 없습니다.')
-  }
+type Outcome<T> = { data?: T; error?: unknown; response: Response }
 
-  if (!res.ok) throw await toApiError(res)
-  if (res.status === 204) return undefined as T
-  return (await res.json()) as T
+export async function unwrap<T>(pending: Promise<Outcome<T>>): Promise<T> {
+  const { data, error, response } = await pending
+  if (!response.ok) throw toApiError(response.status, error)
+  return data as T
 }
 
-async function toApiError(res: Response): Promise<ApiError> {
-  const body = (await res.json().catch(() => null)) as Partial<ErrorBody> | null
-  if (body && typeof body.code === 'string' && typeof body.message === 'string') {
-    return new ApiError(res.status, body.code, body.message, body.traceId)
-  }
+function toApiError(status: number, body: unknown): ApiError {
+  if (isErrorBody(body)) return new ApiError(status, body.code, body.message, body.traceId)
   // A proxy error page (e.g. Caddy 502) has no envelope.
-  return new ApiError(res.status, 'UNEXPECTED_RESPONSE', `요청에 실패했습니다. (${res.status})`)
+  return new ApiError(status, 'UNEXPECTED_RESPONSE', `요청에 실패했습니다. (${status})`)
+}
+
+function isErrorBody(body: unknown): body is { code: string; message: string; traceId?: string } {
+  if (typeof body !== 'object' || body === null) return false
+  const { code, message } = body as Record<string, unknown>
+  return typeof code === 'string' && typeof message === 'string'
 }
 
 export function errorMessage(error: unknown): string {
