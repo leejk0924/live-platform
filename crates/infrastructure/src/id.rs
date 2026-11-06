@@ -29,6 +29,8 @@ pub enum StartError {
     Lease(#[from] LeaseError),
     #[error("clock is {behind_ms} ms behind the worker id's last use")]
     ClockBehind { behind_ms: u64 },
+    #[error("wall clock is before the snowflake epoch")]
+    ClockBeforeEpoch,
 }
 
 /// Milliseconds since the snowflake epoch that never go backwards: the wall
@@ -39,11 +41,18 @@ struct MonotonicClock {
 }
 
 impl MonotonicClock {
-    fn start() -> Self {
-        Self {
-            base_ms: wall_ms_since_epoch(),
+    fn start() -> Result<Self, StartError> {
+        Self::at_unix_ms(wall_unix_ms())
+    }
+
+    fn at_unix_ms(unix_ms: u64) -> Result<Self, StartError> {
+        let base_ms = unix_ms
+            .checked_sub(EPOCH_UNIX_MS)
+            .ok_or(StartError::ClockBeforeEpoch)?;
+        Ok(Self {
+            base_ms,
             started: Instant::now(),
-        }
+        })
     }
 
     fn now_ms(&self) -> u64 {
@@ -51,11 +60,10 @@ impl MonotonicClock {
     }
 }
 
-fn wall_ms_since_epoch() -> u64 {
-    let unix_ms = SystemTime::now()
+fn wall_unix_ms() -> u64 {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64);
-    unix_ms.saturating_sub(EPOCH_UNIX_MS)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 /// Stop issuing a third of the TTL before the database could hand the worker
@@ -78,7 +86,7 @@ impl SnowflakeIdGenerator {
         allocator: Arc<dyn WorkerIdAllocator>,
         ttl: Duration,
     ) -> Result<(Arc<Self>, HeartbeatHandle), StartError> {
-        let clock = MonotonicClock::start();
+        let clock = MonotonicClock::start()?;
         let requested_at = clock.now_ms();
         let lease = allocator.acquire().await?;
 
@@ -420,9 +428,23 @@ mod tests {
         heartbeat.shutdown().await.unwrap();
     }
 
+    #[test]
+    fn a_wall_clock_before_the_snowflake_epoch_is_refused() {
+        assert!(matches!(
+            MonotonicClock::at_unix_ms(EPOCH_UNIX_MS - 1),
+            Err(StartError::ClockBeforeEpoch)
+        ));
+        assert!(matches!(
+            MonotonicClock::at_unix_ms(0),
+            Err(StartError::ClockBeforeEpoch)
+        ));
+        let clock = MonotonicClock::at_unix_ms(EPOCH_UNIX_MS + 5).unwrap();
+        assert!(clock.now_ms() >= 5);
+    }
+
     #[tokio::test]
     async fn start_refuses_a_large_clock_regression() {
-        let floor_ms = wall_ms_since_epoch() + 60_000;
+        let floor_ms = (wall_unix_ms() - EPOCH_UNIX_MS) + 60_000;
         let allocator = FakeAllocator::new(floor_ms, Ok(()));
 
         let result = SnowflakeIdGenerator::start(allocator.clone(), Duration::from_secs(30)).await;
@@ -436,7 +458,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_waits_until_the_clock_passes_the_floor() {
-        let floor_ms = wall_ms_since_epoch() + 300;
+        let floor_ms = (wall_unix_ms() - EPOCH_UNIX_MS) + 300;
         let allocator = FakeAllocator::new(floor_ms, Ok(()));
 
         let started = Instant::now();
