@@ -101,8 +101,9 @@ impl PasswordHasher for Argon2Hasher {
     }
 }
 
-/// Entries of SecLists' `10k-most-common.txt` that are long enough to pass
-/// the length policy; shorter ones are rejected before this list is asked.
+/// Entries of SecLists' `xato-net-10-million-passwords-1000000.txt` that pass
+/// the 10..=128 length policy, lowercased and deduplicated; shorter ones are
+/// rejected before this list is asked.
 const BREACHED_LIST: &str = include_str!("../data/breached-passwords.txt");
 
 pub struct BreachedPasswordList(HashSet<String>);
