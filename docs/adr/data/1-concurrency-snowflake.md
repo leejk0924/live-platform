@@ -43,3 +43,7 @@ API 인스턴스가 여러 대로 늘어나도 안전해야 한다. 경쟁 지�
 - 메모리 상태를 source of truth로 쓰지 않는다. 캐시로만.
 - 영향 행 0인 UPDATE는 "권한 없음 / 상태 불일치 / 없음"을 구분해 응답해야 한다.
 - Snowflake ID를 숫자로 프론트에 보내면 조용히 깨진다.
+
+## Follow-up (2026-11-06)
+
+"재시작 시 `now > last_ms`까지 대기"는 크래시 경로에서 그대로는 성립하지 않았다. 이슈 #4에서 heartbeat가 실제 `last_ms` 대신 발급 상한을 기록하고, 정상 반납만 정확한 값을 쓰도록 바꿨다. 상세는 [`data/4-snowflake-worker-lease`](4-snowflake-worker-lease.md).

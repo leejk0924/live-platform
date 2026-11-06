@@ -2,7 +2,7 @@
 issue: 4
 area: data
 summary: Snowflake 발급을 domain 순수 상태 머신과 PG worker lease로 나누고, 에러 응답 봉투는 미들웨어가 traceId와 함께 쓴다
-status: in-progress
+status: confirmed
 date: 2026-11-06
 paths: [crates/domain/src/id.rs, crates/infrastructure/src/id.rs, crates/infrastructure/src/persistence/worker_lease.rs, crates/api/src/error.rs, crates/api/src/config.rs]
 related: [1]
@@ -50,3 +50,19 @@ related: [1]
 - 시퀀스 소진 시 std `Mutex`를 쥔 채 1ms 미만 spin한다. 발급 경합이 커지면 tokio worker 스레드가 막힌다.
 - 응답 봉투는 `ErrorPayload` extension이 붙은 응답만 바꾼다. axum이 직접 만드는 응답(405, extractor rejection, panic)은 봉투를 거치지 않는다.
 - Snowflake ID를 JSON에 넣을 때는 반드시 `api::json::snowflake_id`를 쓴다. 숫자로 나가면 JS에서 2^53 이상이 조용히 깨진다.
+
+## Follow-up (2026-11-06)
+
+코드 리뷰 결과를 반영해 lease 동작을 바꿨다. 위 Cautions의 처음 두 항목(크래시 시 `last_ms` 지연, `Lost` 후 발급 영구 중단)은 이 변경으로 해소됐다.
+
+| 결정 | 이유 |
+|---|---|
+| renew는 실제 `last_ms` 대신 이번 갱신의 발급 상한 `lease_deadline`을 기록한다. 기동 직후 첫 ID 전에도 한 번 기록하고, 실패하면 lease를 반납하고 기동을 거부한다 | 크래시해도 DB의 `last_ms`가 이 holder가 발급했을 수 있는 모든 ms보다 크다. 시계 오차 가정이 필요 없어진다 |
+| 정상 반납은 `GREATEST` 없이 정확한 `last_ms`로 덮어쓴다 | 상한은 최대 2/3·TTL 미래 값이다. `GREATEST`로 남기면 정상 재시작이 `MAX_STARTUP_BACKWARD`(10초)에 걸려 거부된다. 발급을 먼저 멈추고 반납하므로 정확한 값이 안전하다 |
+| lease를 잃거나 heartbeat task가 멈추면 graceful shutdown 후 실패 코드로 종료한다 | 같은 프로세스에서 worker id를 바꾸는 상태 전이를 만들지 않는다. compose `restart: unless-stopped`가 새 lease로 다시 띄운다 |
+| 벽시계가 Snowflake epoch 이전이면 lease를 잡기 전에 기동을 거부한다 | timestamp 0 근처의 ID를 조용히 발급하지 않는다 |
+| 405와 handler panic도 `{code,message,traceId}` 봉투로 응답한다(`tower-http` `CatchPanicLayer`, api 전용) | 에러 응답 형식 규칙을 프레임워크 응답까지 지킨다. panic 내용은 로그에만 남는다 |
+
+남은 주의:
+- 반납 직후 같은 슬롯을 다시 받으면 floor가 정확한 값이라 바로 기동한다. 크래시 후에는 floor가 상한이라 TTL 만료를 기다린 시점에는 대개 이미 지나 있다. (unverified) 인스턴스 간 시계 오차가 TTL/3보다 크면 크래시 뒤 재획득 시 최대 그만큼 기동이 늦어지거나 10초 한도에 걸려 거부될 수 있다.
+- extractor rejection(JSON·Path 파싱 실패)은 아직 봉투를 거치지 않는다. 첫 extractor를 쓰는 handler에서 처리한다.
