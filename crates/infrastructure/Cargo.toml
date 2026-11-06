@@ -13,10 +13,10 @@ sqlx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-argon2 = "0.6"
-sha2 = "0.11"
-getrandom = "0.4"
-base64ct = { version = "1", features = ["alloc"] }
+argon2.workspace = true
+sha2.workspace = true
+getrandom.workspace = true
+base64ct.workspace = true
 
 [lints]
 workspace = true
