@@ -281,6 +281,44 @@ async fn sessions_expire_after_30_idle_minutes_or_7_days(pool: PgPool) {
 
 #[sqlx::test(migrations = "../infrastructure/migrations")]
 #[ignore = "requires DATABASE_URL (Postgres)"]
+async fn last_seen_at_is_rewritten_at_most_once_a_minute(pool: PgPool) {
+    let router = router(&pool, false).await;
+    let token = sign_up(&router, "alice", PASSWORD).await.token();
+    let last_seen = |sql: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>(sql)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    let before = last_seen(
+        "UPDATE sessions SET last_seen_at = now() - interval '30 seconds' \
+         RETURNING last_seen_at::text",
+    )
+    .await;
+    assert_eq!(me(&router, &token).await.status, StatusCode::OK);
+    let after = last_seen("SELECT last_seen_at::text FROM sessions").await;
+    assert_eq!(before, after, "a recent last_seen_at is left alone");
+
+    last_seen(
+        "UPDATE sessions SET last_seen_at = now() - interval '61 seconds' \
+         RETURNING last_seen_at::text",
+    )
+    .await;
+    assert_eq!(me(&router, &token).await.status, StatusCode::OK);
+    let slid: bool =
+        sqlx::query_scalar("SELECT last_seen_at > now() - interval '5 seconds' FROM sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(slid, "a stale last_seen_at is refreshed");
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
 async fn the_database_holds_only_the_token_sha256(pool: PgPool) {
     let router = router(&pool, false).await;
     let token = sign_up(&router, "alice", PASSWORD).await.token();

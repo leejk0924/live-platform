@@ -13,6 +13,10 @@ use sqlx::PgPool;
 
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 pub const ABSOLUTE_TIMEOUT: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+/// `resolve` refreshes `last_seen_at` only once it is this old, so a busy
+/// session costs a write per minute instead of per request. The idle timeout
+/// may therefore fire up to this much early.
+const SLIDE_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Sessions in the `sessions` table, keyed by SHA-256 of the token so a
 /// leaked table cannot be replayed. Expiry is judged by the database's
@@ -68,14 +72,21 @@ impl SessionStore for PgSessionStore {
 
     async fn resolve(&self, token: &SessionToken) -> Result<Option<UserId>, PortError> {
         let user_id: Option<i64> = sqlx::query_scalar(
-            "UPDATE sessions SET last_seen_at = now() \
-             WHERE token_hash = $1 \
-               AND last_seen_at > now() - make_interval(secs => $2) \
-               AND expires_at > now() \
-             RETURNING user_id",
+            "WITH live AS ( \
+                 SELECT token_hash, user_id, last_seen_at FROM sessions \
+                 WHERE token_hash = $1 \
+                   AND last_seen_at > now() - make_interval(secs => $2) \
+                   AND expires_at > now() \
+             ), slide AS ( \
+                 UPDATE sessions s SET last_seen_at = now() FROM live \
+                 WHERE s.token_hash = live.token_hash \
+                   AND live.last_seen_at <= now() - make_interval(secs => $3) \
+             ) \
+             SELECT user_id FROM live",
         )
         .bind(token_hash(token).as_slice())
         .bind(IDLE_TIMEOUT.as_secs_f64())
+        .bind(SLIDE_INTERVAL.as_secs_f64())
         .fetch_optional(&self.pool)
         .await
         .map_err(port_error)?;
