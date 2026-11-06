@@ -214,7 +214,10 @@ impl HeartbeatHandle {
     /// the next holder starts after it.
     pub async fn shutdown(self) -> Result<(), LeaseError> {
         let _ = self.stop.send(());
-        let _ = self.task.await;
+        // The task is never aborted, so a join error can only be a panic.
+        if let Err(err) = self.task.await {
+            tracing::warn!(%err, "worker id lease renewal task panicked");
+        }
         self.generator.valid_until_ms.store(0, Ordering::Release);
         // Taking the lock waits out an in-flight next_id, so last_ms is final.
         let last_ms = self.generator.last_ms();
