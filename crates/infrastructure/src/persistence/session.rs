@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use application::ports::auth::{PortError, SessionStore};
+use application::ports::{PortError, auth::SessionStore};
 use async_trait::async_trait;
 use base64ct::{Base64UrlUnpadded, Encoding};
 use domain::{

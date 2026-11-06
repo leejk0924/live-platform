@@ -10,7 +10,8 @@ use domain::{
 use thiserror::Error;
 
 use crate::ports::{
-    auth::{BreachedPasswords, Inserted, PasswordHasher, PortError, SessionStore, UserRepository},
+    PortError,
+    auth::{BreachedPasswords, Inserted, PasswordHasher, SessionStore, UserRepository},
     id::{IdGenerationError, IdGenerator},
 };
 

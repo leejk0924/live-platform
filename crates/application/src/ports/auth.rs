@@ -1,12 +1,7 @@
 use async_trait::async_trait;
 use domain::auth::{Password, PasswordHash, SessionToken, User, UserId, Username};
-use thiserror::Error;
 
-/// An adapter could not do its job (database down, hashing failed). The
-/// message is for logs only.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("{0}")]
-pub struct PortError(pub String);
+use super::PortError;
 
 #[async_trait]
 pub trait PasswordHasher: Send + Sync {

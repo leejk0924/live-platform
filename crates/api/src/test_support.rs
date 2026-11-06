@@ -4,7 +4,8 @@ use std::{
 };
 
 use application::ports::{
-    auth::{Inserted, PasswordHasher, PortError, SessionStore, UserRepository},
+    PortError,
+    auth::{Inserted, PasswordHasher, SessionStore, UserRepository},
     id::{IdGenerationError, IdGenerator},
 };
 use async_trait::async_trait;
