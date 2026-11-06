@@ -60,9 +60,13 @@ async fn get(router: &Router, id: &str) -> Reply {
 }
 
 async fn list(router: &Router, query: &str) -> Reply {
+    list_as(router, None, query).await
+}
+
+async fn list_as(router: &Router, token: Option<&str>, query: &str) -> Reply {
     send(
         router,
-        request(Method::GET, &format!("/api/broadcasts{query}"), None, None),
+        request(Method::GET, &format!("/api/broadcasts{query}"), None, token),
     )
     .await
 }
@@ -487,4 +491,26 @@ async fn the_list_is_public_cacheable_and_paged_newest_first(pool: PgPool) {
         assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{query}");
         assert_eq!(reply.code(), code, "{query}");
     }
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_signed_in_list_is_the_same_cacheable_response(pool: PgPool) {
+    let router = router(&pool, false).await;
+    let actors = actors(&router).await;
+    created_id(&router, &actors.owner, "공개 목록").await;
+
+    let anonymous = list(&router, "").await;
+    let signed_in = list_as(&router, Some(&actors.owner), "").await;
+
+    assert_eq!(signed_in.status, StatusCode::OK, "{}", signed_in.body);
+    assert!(
+        !signed_in.headers.contains_key(header::SET_COOKIE),
+        "a shared cache would hand this cookie to everyone"
+    );
+    assert_eq!(
+        signed_in.headers[header::CACHE_CONTROL],
+        anonymous.headers[header::CACHE_CONTROL]
+    );
+    assert_eq!(signed_in.body, anonymous.body);
 }
