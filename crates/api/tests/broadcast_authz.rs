@@ -9,7 +9,7 @@ use axum::{
     http::{HeaderValue, Method, StatusCode, header},
 };
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use support::{PASSWORD, Reply, request, router, send, sign_up, state};
 
 struct Actors {
@@ -433,8 +433,14 @@ async fn broadcasts_survive_a_restart(pool: PgPool) {
         let actors = actors(&router).await;
         created_id(&router, &actors.owner, "재시작 전").await
     };
+    let options = pool.connect_options();
+    pool.close().await;
 
-    let restarted = app(state(&pool, false).await);
+    let fresh = PgPoolOptions::new()
+        .connect_with((*options).clone())
+        .await
+        .unwrap();
+    let restarted = app(state(&fresh, false).await);
     let reply = get(&restarted, &id).await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     assert_eq!(reply.body["title"], "재시작 전");
