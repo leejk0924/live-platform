@@ -221,4 +221,26 @@ mod tests {
         );
         limits.login(&ClientKey("client-9".into()), "bob").unwrap();
     }
+
+    #[test]
+    fn login_allows_ten_per_client_across_usernames() {
+        let limits = RateLimits::default();
+        let a = ClientKey("a".into());
+        for i in 0..10 {
+            limits.login(&a, &format!("user-{i}")).unwrap();
+        }
+        assert!(limits.login(&a, "user-10").is_err());
+        limits.login(&ClientKey("b".into()), "user-10").unwrap();
+    }
+
+    #[test]
+    fn demo_login_allows_ten_per_client() {
+        let limits = RateLimits::default();
+        let a = ClientKey("a".into());
+        for _ in 0..10 {
+            limits.demo_login(&a).unwrap();
+        }
+        assert!(limits.demo_login(&a).is_err());
+        limits.demo_login(&ClientKey("b".into())).unwrap();
+    }
 }
