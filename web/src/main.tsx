@@ -6,6 +6,7 @@ import { AuthProvider } from './auth/AuthProvider.tsx'
 import Layout from './Layout.tsx'
 import Home from './pages/Home.tsx'
 import Login from './pages/Login.tsx'
+import Signup from './pages/Signup.tsx'
 import NotFound from './pages/NotFound.tsx'
 
 const router = createBrowserRouter([
@@ -14,6 +15,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Home /> },
       { path: 'login', element: <Login /> },
+      { path: 'signup', element: <Signup /> },
       { path: '*', element: <NotFound /> },
     ],
   },
