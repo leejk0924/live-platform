@@ -35,3 +35,7 @@ todo = "deny"
 
 [profile.release]
 strip = true
+
+# Unoptimized argon2 takes about a second per hash, which dominates test time.
+[profile.dev.package.argon2]
+opt-level = 3
