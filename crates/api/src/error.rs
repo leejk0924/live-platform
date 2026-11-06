@@ -65,6 +65,30 @@ impl ApiError {
         )
     }
 
+    pub fn invalid_query() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "INVALID_QUERY",
+            "query parameters are invalid",
+        )
+    }
+
+    pub fn if_match_required() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "IF_MATCH_REQUIRED",
+            "If-Match header with the version to update is required",
+        )
+    }
+
+    pub fn invalid_if_match() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "INVALID_IF_MATCH",
+            "If-Match must be one version tag such as \"3\"",
+        )
+    }
+
     pub fn csrf_rejected() -> Self {
         Self::new(
             StatusCode::FORBIDDEN,
@@ -83,6 +107,10 @@ impl ApiError {
                 "too many requests, try again later",
             )
         }
+    }
+
+    pub fn code(&self) -> &'static str {
+        self.code
     }
 
     fn new(status: StatusCode, code: &'static str, message: &str) -> Self {

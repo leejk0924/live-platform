@@ -1,125 +1,23 @@
 //! The auth endpoints end to end: the real router, real adapters and a fresh
 //! Postgres database per test.
 
-use std::{sync::Arc, time::Duration};
+mod support;
 
 use api::{
-    AppState, app,
-    auth::{AuthPorts, AuthUser, MaybeUser},
-    config::Origin,
+    app,
+    auth::{AuthUser, MaybeUser},
 };
 use axum::{
     Router,
     body::{Body, to_bytes},
-    http::{HeaderMap, Method, Request, StatusCode, header},
+    http::{Method, Request, StatusCode, header},
     routing::get,
 };
-use infrastructure::{
-    auth::{Argon2Hasher, BreachedPasswordList},
-    id::SnowflakeIdGenerator,
-    persistence::{PgSessionStore, PgUserRepository, PgWorkerIdAllocator},
-};
-use serde_json::{Value, json};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
+use support::{ORIGIN, PASSWORD, Reply, request, router, send, sign_up, state};
 use tower::ServiceExt;
-
-const ORIGIN: &str = "https://app.test";
-const PASSWORD: &str = "correct horse battery";
-
-async fn router(pool: &PgPool, demo_login_enabled: bool) -> Router {
-    app(state(pool, demo_login_enabled).await)
-}
-
-async fn state(pool: &PgPool, demo_login_enabled: bool) -> AppState {
-    let ttl = Duration::from_secs(30);
-    let allocator = Arc::new(PgWorkerIdAllocator::new(pool.clone(), ttl));
-    let (ids, heartbeat) = SnowflakeIdGenerator::start(allocator, ttl).await.unwrap();
-    // Without renewals ids stay valid for 20 s, far longer than a test.
-    drop(heartbeat);
-    let ports = AuthPorts {
-        ids,
-        users: Arc::new(PgUserRepository::new(pool.clone())),
-        sessions: Arc::new(PgSessionStore::new(pool.clone())),
-        hasher: Arc::new(Argon2Hasher::new().unwrap()),
-        breached: Arc::new(BreachedPasswordList::load()),
-    };
-    let state = AppState::new(
-        ports,
-        vec![Origin::parse(ORIGIN).unwrap()],
-        demo_login_enabled,
-    );
-    state.auth.demo_log_in.seed().await.unwrap();
-    state
-}
-
-struct Reply {
-    status: StatusCode,
-    headers: HeaderMap,
-    body: Value,
-}
-
-impl Reply {
-    fn set_cookie(&self) -> &str {
-        self.headers[header::SET_COOKIE].to_str().unwrap()
-    }
-
-    /// The token from `Set-Cookie: __Host-session=<token>; ...`.
-    fn token(&self) -> String {
-        let cookie = self.set_cookie();
-        let pair = cookie.split(';').next().unwrap();
-        pair.strip_prefix("__Host-session=").unwrap().to_owned()
-    }
-
-    fn code(&self) -> &str {
-        self.body["code"].as_str().unwrap_or_default()
-    }
-}
-
-fn request(method: Method, path: &str, body: Option<Value>, token: Option<&str>) -> Request<Body> {
-    let mut builder = Request::builder().method(method.clone()).uri(path);
-    if method != Method::GET {
-        builder = builder
-            .header(header::ORIGIN, ORIGIN)
-            .header("x-requested-with", "live-platform");
-    }
-    if let Some(token) = token {
-        builder = builder.header(header::COOKIE, format!("other=1; __Host-session={token}"));
-    }
-    match body {
-        Some(body) => builder
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(body.to_string())),
-        None => builder.body(Body::empty()),
-    }
-    .unwrap()
-}
-
-async fn send(router: &Router, request: Request<Body>) -> Reply {
-    let response = router.clone().oneshot(request).await.unwrap();
-    let status = response.status();
-    let headers = response.headers().clone();
-    let bytes = to_bytes(response.into_body(), 64 * 1024).await.unwrap();
-    let body = if bytes.is_empty() {
-        Value::Null
-    } else {
-        serde_json::from_slice(&bytes).unwrap()
-    };
-    Reply {
-        status,
-        headers,
-        body,
-    }
-}
-
-async fn sign_up(router: &Router, username: &str, password: &str) -> Reply {
-    let body = json!({"username": username, "password": password});
-    send(
-        router,
-        request(Method::POST, "/api/auth/signup", Some(body), None),
-    )
-    .await
-}
 
 async fn log_in(router: &Router, username: &str, password: &str, token: Option<&str>) -> Reply {
     let body = json!({"username": username, "password": password});
