@@ -259,12 +259,189 @@ mod tests {
         }
     }
 
+    struct FixedIds;
+
+    impl IdGenerator for FixedIds {
+        fn next_id(&self) -> Result<SnowflakeId, IdGenerationError> {
+            Ok(SnowflakeId::try_from(8).unwrap())
+        }
+    }
+
+    const RIGHT: &str = "correct horse battery";
+    const STORED: &str = "stored hash";
+
+    /// Matches only `RIGHT` against `STORED`, and counts its calls.
+    #[derive(Default)]
+    struct CountingHasher {
+        hashes: Mutex<usize>,
+        verifies: Mutex<usize>,
+    }
+
+    #[async_trait]
+    impl PasswordHasher for CountingHasher {
+        async fn hash(&self, _: &Password) -> Result<PasswordHash, PortError> {
+            *self.hashes.lock().unwrap() += 1;
+            Ok(PasswordHash::new(STORED.into()))
+        }
+
+        async fn verify(
+            &self,
+            password: &Password,
+            hash: Option<&PasswordHash>,
+        ) -> Result<bool, PortError> {
+            *self.verifies.lock().unwrap() += 1;
+            Ok(password.expose() == RIGHT && hash.is_some_and(|h| h.as_str() == STORED))
+        }
+    }
+
+    struct BreachedOnly(&'static str);
+
+    impl BreachedPasswords for BreachedOnly {
+        fn contains(&self, password: &Password) -> bool {
+            password.expose() == self.0
+        }
+    }
+
     fn user(username: Username, credential: Credential) -> User {
         User {
             id: SnowflakeId::try_from(7).unwrap(),
             username,
             credential,
         }
+    }
+
+    fn named(raw: &str) -> Username {
+        Username::parse(raw).unwrap()
+    }
+
+    fn secret(raw: &str) -> Secret<String> {
+        Secret::new(raw.to_owned())
+    }
+
+    struct Fixture {
+        hasher: Arc<CountingHasher>,
+        sessions: Arc<RecordingSessions>,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            Self {
+                hasher: Arc::default(),
+                sessions: Arc::default(),
+            }
+        }
+
+        fn log_in(&self, row: User) -> LogIn {
+            LogIn {
+                users: Arc::new(OneUser(row)),
+                hasher: self.hasher.clone(),
+                sessions: self.sessions.clone(),
+            }
+        }
+
+        fn sign_up(&self, existing: User) -> SignUp {
+            SignUp {
+                ids: Arc::new(FixedIds),
+                users: Arc::new(OneUser(existing)),
+                hasher: self.hasher.clone(),
+                breached: Arc::new(BreachedOnly("password1234")),
+                sessions: self.sessions.clone(),
+            }
+        }
+
+        fn hashes(&self) -> usize {
+            *self.hasher.hashes.lock().unwrap()
+        }
+
+        fn verifies(&self) -> usize {
+            *self.hasher.verifies.lock().unwrap()
+        }
+
+        fn sessions_created(&self) -> usize {
+            self.sessions.0.lock().unwrap().len()
+        }
+    }
+
+    fn alice() -> User {
+        user(
+            named("alice"),
+            Credential::Password(PasswordHash::new(STORED.into())),
+        )
+    }
+
+    #[tokio::test]
+    async fn log_in_with_the_right_password_verifies_once_and_signs_in() {
+        let fixture = Fixture::new();
+        let signed_in = fixture
+            .log_in(alice())
+            .run("alice", secret(RIGHT), None)
+            .await
+            .unwrap();
+        assert_eq!(signed_in.user.username, named("alice"));
+        assert_eq!(fixture.verifies(), 1);
+        assert_eq!(fixture.sessions_created(), 1);
+    }
+
+    #[tokio::test]
+    async fn every_failed_log_in_verifies_once_and_looks_the_same() {
+        let cases = [
+            ("unknown user", alice(), "nobody", RIGHT),
+            ("wrong password", alice(), "alice", "not the password"),
+            (
+                "demo-only account",
+                user(DemoAccount::Viewer.username(), Credential::DemoOnly),
+                "demo-viewer",
+                RIGHT,
+            ),
+        ];
+        for (case, row, username, password) in cases {
+            let fixture = Fixture::new();
+            let result = fixture
+                .log_in(row.clone())
+                .run(username, secret(password), None)
+                .await;
+            assert!(
+                matches!(result, Err(Error::Rejected(AuthError::InvalidCredentials))),
+                "{case}: {result:?}"
+            );
+            assert_eq!(fixture.verifies(), 1, "{case}");
+            assert_eq!(fixture.sessions_created(), 0, "{case}");
+        }
+    }
+
+    #[tokio::test]
+    async fn sign_up_never_hashes_a_reserved_name_or_a_breached_password() {
+        let cases = [
+            ("demo-mallory", RIGHT, AuthError::InvalidUsername),
+            ("mallory", "password1234", AuthError::PasswordBreached),
+        ];
+        for (username, password, expected) in cases {
+            let fixture = Fixture::new();
+            let result = fixture
+                .sign_up(alice())
+                .run(username, secret(password), None)
+                .await;
+            assert!(
+                matches!(&result, Err(Error::Rejected(err)) if *err == expected),
+                "{username}: {result:?}"
+            );
+            assert_eq!(fixture.hashes(), 0, "{username}");
+            assert_eq!(fixture.sessions_created(), 0, "{username}");
+        }
+    }
+
+    #[tokio::test]
+    async fn sign_up_with_a_taken_username_creates_no_session() {
+        let fixture = Fixture::new();
+        let result = fixture
+            .sign_up(alice())
+            .run("alice", secret(RIGHT), None)
+            .await;
+        assert!(
+            matches!(result, Err(Error::Rejected(AuthError::UsernameTaken))),
+            "{result:?}"
+        );
+        assert_eq!(fixture.sessions_created(), 0);
     }
 
     fn demo_log_in(row: User) -> (DemoLogIn, Arc<RecordingSessions>) {
