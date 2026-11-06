@@ -52,3 +52,45 @@ main {
 .status-unreachable {
   color: crimson;
 }
+
+.credentials,
+.demo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.credentials label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+input,
+button {
+  font: inherit;
+  font-size: 1rem;
+}
+
+input {
+  padding: 0.5rem;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+.hint {
+  margin-top: -0.5rem;
+  opacity: 0.75;
+}
+
+.demo {
+  margin-top: 2rem;
+}
+
+.demo h2 {
+  margin: 0;
+  font-size: 1rem;
+}
