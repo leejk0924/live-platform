@@ -14,7 +14,7 @@ use application::ports::id::{
 use domain::id::{EPOCH_UNIX_MS, NextIdError, SnowflakeId, SnowflakeSequencer};
 use thiserror::Error;
 use tokio::{
-    sync::oneshot,
+    sync::{oneshot, watch},
     task::JoinHandle,
     time::{MissedTickBehavior, interval_at},
 };
@@ -147,6 +147,7 @@ impl IdGenerator for SnowflakeIdGenerator {
 pub struct HeartbeatHandle {
     stop: oneshot::Sender<()>,
     task: JoinHandle<()>,
+    lost: watch::Receiver<bool>,
     generator: Arc<SnowflakeIdGenerator>,
     allocator: Arc<dyn WorkerIdAllocator>,
     lease: WorkerLease,
@@ -160,19 +161,31 @@ impl HeartbeatHandle {
         ttl: Duration,
     ) -> Self {
         let (stop, stopped) = oneshot::channel();
+        let (lost_tx, lost) = watch::channel(false);
         let task = tokio::spawn(heartbeat(
             Arc::clone(&generator),
             Arc::clone(&allocator),
             lease.clone(),
             ttl,
             stopped,
+            lost_tx,
         ));
         Self {
             stop,
             task,
+            lost,
             generator,
             allocator,
             lease,
+        }
+    }
+
+    /// Resolves once the lease is lost or the renewal task has ended without
+    /// being stopped; either way this process can no longer issue ids.
+    pub fn lease_lost(&self) -> impl Future<Output = ()> + Send + 'static {
+        let mut lost = self.lost.clone();
+        async move {
+            let _ = lost.wait_for(|lost| *lost).await;
         }
     }
 
@@ -194,6 +207,7 @@ async fn heartbeat(
     lease: WorkerLease,
     ttl: Duration,
     mut stopped: oneshot::Receiver<()>,
+    lost: watch::Sender<bool>,
 ) {
     let period = (ttl / 3).max(Duration::from_millis(1));
     let mut ticks = interval_at(tokio::time::Instant::now() + period, period);
@@ -218,6 +232,7 @@ async fn heartbeat(
                     worker = lease.worker.get(),
                     "worker id lease lost, id generation stopped"
                 );
+                lost.send_replace(true);
                 return;
             }
             Err(err) => tracing::warn!(%err, "worker id lease renewal failed, will retry"),
@@ -302,14 +317,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lost_lease_stops_ids_at_the_next_heartbeat() {
+    async fn lost_lease_is_announced_to_the_owner() {
         let allocator = FakeAllocator::new(0, Err(LeaseError::Lost));
-        let (generator, heartbeat) = SnowflakeIdGenerator::start(allocator, Duration::from_secs(3))
-            .await
-            .unwrap();
-        assert!(generator.next_id().is_ok());
+        let (generator, heartbeat) =
+            SnowflakeIdGenerator::start(allocator, Duration::from_millis(300))
+                .await
+                .unwrap();
 
-        tokio::time::sleep(Duration::from_millis(1_200)).await;
+        tokio::time::timeout(Duration::from_secs(2), heartbeat.lease_lost())
+            .await
+            .expect("lease loss resolves lease_lost");
         assert_eq!(generator.next_id(), Err(IdGenerationError::LeaseExpired));
         heartbeat.shutdown().await.unwrap();
     }

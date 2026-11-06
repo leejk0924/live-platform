@@ -17,7 +17,7 @@ use infrastructure::{
     id::SnowflakeIdGenerator,
     persistence::{self, PgWorkerIdAllocator},
 };
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::oneshot};
 use tracing_subscriber::EnvFilter;
 
 const DB_MAX_CONNECTIONS: u32 = 10;
@@ -79,8 +79,18 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         .map_err(|err| format!("id generator start failed: {err}"))?;
 
     tracing::info!(addr = %config.listen_addr, "listening");
+    let lease_lost = heartbeat.lease_lost();
+    let (lost_tx, mut lost_rx) = oneshot::channel();
     let served = axum::serve(listener, app(AppState { ids }))
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(async move {
+            tokio::select! {
+                () = shutdown_signal() => {}
+                () = lease_lost => {
+                    tracing::error!("worker id lease lost, draining connections before exit");
+                    let _ = lost_tx.send(());
+                }
+            }
+        })
         .await;
 
     match heartbeat.shutdown().await {
@@ -88,7 +98,12 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         Err(err) => tracing::warn!(%err, "could not release worker id lease"),
     }
     pool.close().await;
-    Ok(served?)
+    served?;
+    if lost_rx.try_recv().is_ok() {
+        // Exit non-zero so the container restarts with a fresh lease.
+        return Err("worker id lease lost".into());
+    }
+    Ok(())
 }
 
 async fn shutdown_signal() {
