@@ -43,6 +43,7 @@ related: [10]                          # 관련 이슈 번호
 | data | [1-concurrency-snowflake](data/1-concurrency-snowflake.md) | 조건부 UPDATE·version·UNIQUE·advisory lock, Snowflake ID |
 | data | [4-snowflake-worker-lease](data/4-snowflake-worker-lease.md) | Snowflake 상태 머신·PG worker lease·에러 응답 봉투 |
 | auth | [1-hybrid-session-jwt](auth/1-hybrid-session-jwt.md) | 웹은 DB 세션 쿠키, 송출은 1회용 단기 JWT |
+| auth | [5-session-auth-structure](auth/5-session-auth-structure.md) | Credential enum, adapter 안 토큰 해시, CSRF 미들웨어, 인스턴스별 속도 제한 |
 | media | [1-mediamtx-whip-llhls](media/1-mediamtx-whip-llhls.md) | MediaMTX에 미디어 중계, WHIP 송출, LL-HLS·WHEP 시청 |
 | comment | [1-realtime-sse-comments](comment/1-realtime-sse-comments.md) | REST 쓰기 + SSE push, 샘플링 없이 쓰기 측 제어 |
 | infra | [1-aws-single-ec2-compose](infra/1-aws-single-ec2-compose.md) | EC2 t3.medium 1대 + compose, 컨테이너 스로틀링 |
