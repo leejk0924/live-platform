@@ -31,8 +31,13 @@ use domain::{
 };
 use serde::{Deserialize, Serialize};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use utoipa::{IntoParams, ToSchema};
 
-use crate::{AppState, auth::AuthUser, error::ApiError};
+use crate::{
+    AppState,
+    auth::AuthUser,
+    error::{ApiError, ErrorBody},
+};
 
 /// The list is the same for every viewer, so shared caches may hold it
 /// briefly.
@@ -120,8 +125,9 @@ fn etag(version: Version) -> HeaderValue {
     HeaderValue::try_from(format!("\"{}\"", version.get())).expect("digits are a valid header")
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[schema(as = BroadcastStatus)]
 pub enum BroadcastStatusDto {
     Ready,
     Live,
@@ -140,19 +146,25 @@ impl From<BroadcastStatus> for BroadcastStatusDto {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+#[schema(as = Broadcast)]
 pub struct BroadcastDto {
+    /// Snowflake id as a decimal string.
     #[serde(with = "crate::json::snowflake_id")]
+    #[schema(value_type = String, example = "112007303372210176")]
     id: SnowflakeId,
     #[serde(with = "crate::json::snowflake_id")]
+    #[schema(value_type = String, example = "112007302751453184")]
     owner_id: SnowflakeId,
     owner_name: String,
     title: String,
     description: String,
     status: BroadcastStatusDto,
+    /// Send back as `If-Match: "<version>"` to update.
+    #[schema(minimum = 1)]
     version: i32,
-    /// RFC 3339.
+    #[schema(format = DateTime)]
     created_at: String,
 }
 
@@ -178,11 +190,12 @@ impl From<BroadcastView> for BroadcastDto {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BroadcastPage {
     items: Vec<BroadcastDto>,
     /// Pass as `before` for the next page; `null` on the last page.
+    #[schema(required = true)]
     next_before: Option<String>,
 }
 
@@ -195,15 +208,21 @@ impl From<Page> for BroadcastPage {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 pub struct BroadcastInput {
+    /// Trimmed, then 1 to 100 characters.
     title: String,
+    /// At most 2000 characters; may be empty.
     description: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListParams {
+    /// Only broadcasts older than this id: the previous page's `nextBefore`.
     before: Option<String>,
+    /// Page size, 1 to 50. Defaults to 20.
+    #[param(minimum = 1, maximum = 50)]
     limit: Option<u32>,
 }
 
@@ -213,7 +232,20 @@ fn tagged(status: StatusCode, view: BroadcastView) -> Response {
     (status, [(ETAG, tag)], Json(BroadcastDto::from(view))).into_response()
 }
 
-async fn list(
+#[utoipa::path(
+    get,
+    path = "/api/broadcasts",
+    operation_id = "listBroadcasts",
+    tag = "broadcasts",
+    summary = "List broadcasts, newest first",
+    params(ListParams),
+    responses(
+        (status = 200, body = BroadcastPage, description = "The same for every viewer.",
+            headers(("Cache-Control" = String, description = "`public, max-age=5`"))),
+        (status = 400, body = ErrorBody, description = "`INVALID_QUERY` or `INVALID_PAGE_SIZE`"),
+    ),
+)]
+pub(crate) async fn list(
     State(state): State<AppState>,
     params: Result<Query<ListParams>, QueryRejection>,
 ) -> Result<Response, ApiError> {
@@ -236,7 +268,20 @@ async fn list(
         .into_response())
 }
 
-async fn get_one(
+#[utoipa::path(
+    get,
+    path = "/api/broadcasts/{id}",
+    operation_id = "getBroadcast",
+    tag = "broadcasts",
+    summary = "Get one broadcast",
+    params(("id" = String, Path, description = "Broadcast id")),
+    responses(
+        (status = 200, body = BroadcastDto, description = "The broadcast.",
+            headers(("ETag" = String, description = "The version as `\"<version>\"`"))),
+        (status = 404, body = ErrorBody, description = "`BROADCAST_NOT_FOUND`, also for deleted broadcasts"),
+    ),
+)]
+pub(crate) async fn get_one(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
@@ -249,7 +294,26 @@ async fn get_one(
     Ok(tagged(StatusCode::OK, view))
 }
 
-async fn create(
+#[utoipa::path(
+    post,
+    path = "/api/broadcasts",
+    operation_id = "createBroadcast",
+    tag = "broadcasts",
+    summary = "Register a broadcast owned by the signed-in user",
+    request_body = BroadcastInput,
+    security(("session" = [])),
+    responses(
+        (status = 201, body = BroadcastDto, description = "Created in `READY` at version 1.",
+            headers(
+                ("Location" = String, description = "`/api/broadcasts/<id>`"),
+                ("ETag" = String, description = "`\"1\"`"),
+            )),
+        (status = 400, body = ErrorBody, description = "`INVALID_TITLE`, `INVALID_DESCRIPTION` or `INVALID_REQUEST`"),
+        (status = 401, body = ErrorBody, description = "`UNAUTHENTICATED`"),
+        (status = 403, body = ErrorBody, description = "`CSRF_REJECTED`"),
+    ),
+)]
+pub(crate) async fn create(
     State(state): State<AppState>,
     AuthUser(actor): AuthUser,
     body: Result<Json<BroadcastInput>, JsonRejection>,
@@ -268,7 +332,29 @@ async fn create(
     Ok(response)
 }
 
-async fn update(
+#[utoipa::path(
+    put,
+    path = "/api/broadcasts/{id}",
+    operation_id = "updateBroadcast",
+    tag = "broadcasts",
+    summary = "Replace title and description; owner only",
+    params(
+        ("id" = String, Path, description = "Broadcast id"),
+        ("If-Match" = String, Header, description = "The version being edited, as returned in `ETag`: `\"3\"` (`W/\"3\"` is accepted)"),
+    ),
+    request_body = BroadcastInput,
+    security(("session" = [])),
+    responses(
+        (status = 200, body = BroadcastDto, description = "Updated.",
+            headers(("ETag" = String, description = "The new version"))),
+        (status = 400, body = ErrorBody, description = "`IF_MATCH_REQUIRED`, `INVALID_IF_MATCH`, `INVALID_TITLE`, `INVALID_DESCRIPTION` or `INVALID_REQUEST`"),
+        (status = 401, body = ErrorBody, description = "`UNAUTHENTICATED`"),
+        (status = 403, body = ErrorBody, description = "`NOT_BROADCAST_OWNER` or `CSRF_REJECTED`"),
+        (status = 404, body = ErrorBody, description = "`BROADCAST_NOT_FOUND`"),
+        (status = 409, body = ErrorBody, description = "`VERSION_CONFLICT`: changed since it was loaded"),
+    ),
+)]
+pub(crate) async fn update(
     State(state): State<AppState>,
     AuthUser(actor): AuthUser,
     Path(id): Path<String>,
@@ -287,7 +373,23 @@ async fn update(
     Ok(tagged(StatusCode::OK, view))
 }
 
-async fn delete(
+#[utoipa::path(
+    delete,
+    path = "/api/broadcasts/{id}",
+    operation_id = "deleteBroadcast",
+    tag = "broadcasts",
+    summary = "Delete a READY or ENDED broadcast; owner only",
+    params(("id" = String, Path, description = "Broadcast id")),
+    security(("session" = [])),
+    responses(
+        (status = 204, description = "Deleted"),
+        (status = 401, body = ErrorBody, description = "`UNAUTHENTICATED`"),
+        (status = 403, body = ErrorBody, description = "`NOT_BROADCAST_OWNER` or `CSRF_REJECTED`"),
+        (status = 404, body = ErrorBody, description = "`BROADCAST_NOT_FOUND`"),
+        (status = 409, body = ErrorBody, description = "`BROADCAST_NOT_DELETABLE`: live or interrupted"),
+    ),
+)]
+pub(crate) async fn delete(
     State(state): State<AppState>,
     AuthUser(actor): AuthUser,
     Path(id): Path<String>,

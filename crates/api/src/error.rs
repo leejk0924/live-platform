@@ -20,6 +20,7 @@ use axum::{
 use domain::error::{DomainError, ErrorKind};
 use serde::Serialize;
 use tracing::Instrument;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub const TRACE_ID_HEADER: &str = "x-trace-id";
@@ -175,11 +176,15 @@ impl IntoResponse for ApiError {
     }
 }
 
-#[derive(Serialize)]
+/// The body of every error response.
+#[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct ErrorBody<'a> {
+pub struct ErrorBody<'a> {
+    /// Stable SCREAMING_SNAKE identifier to match on, such as `VERSION_CONFLICT`.
     code: &'a str,
+    /// Human-readable; do not match on it.
     message: &'a str,
+    /// Also in the `x-trace-id` header; quote it when reporting a problem.
     trace_id: &'a str,
 }
 

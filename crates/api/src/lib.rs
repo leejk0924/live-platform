@@ -7,6 +7,7 @@ pub mod config;
 pub mod csrf;
 pub mod error;
 pub mod json;
+pub mod openapi;
 pub mod rate_limit;
 #[cfg(test)]
 mod test_support;
@@ -57,6 +58,7 @@ impl AppState {
 pub fn app(state: AppState) -> Router {
     let api = Router::new()
         .route("/healthz", get(healthz))
+        .route("/openapi.json", get(openapi::spec))
         .nest("/auth", auth::routes())
         .merge(broadcast::routes())
         .layer(middleware::from_fn_with_state(
@@ -103,6 +105,25 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), 64).await.unwrap();
         assert_eq!(&body[..], b"ok");
+    }
+
+    #[tokio::test]
+    async fn openapi_json_is_served() {
+        let response = app(test_state())
+            .oneshot(
+                Request::get("/api/openapi.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.unwrap())
+                .unwrap();
+        assert_eq!(body["info"]["title"], "live-platform API");
+        assert!(body["paths"]["/api/broadcasts/{id}"]["put"].is_object());
     }
 
     async fn envelope_of(router: Router, request: Request<Body>) -> (StatusCode, Value) {

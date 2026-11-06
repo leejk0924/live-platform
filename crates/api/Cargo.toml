@@ -20,6 +20,7 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 governor = "0.10"
 time = { version = "0.3", features = ["formatting"] }
+utoipa = "6"
 
 [dev-dependencies]
 async-trait.workspace = true
