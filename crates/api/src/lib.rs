@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use application::ports::id::IdGenerator;
 use axum::{Router, middleware, routing::get};
+use tower_http::catch_panic::CatchPanicLayer;
 
 use crate::error::ApiError;
 
@@ -21,11 +22,19 @@ pub struct AppState {
 }
 
 pub fn app(state: AppState) -> Router {
-    Router::new()
-        .nest("/api", Router::new().route("/healthz", get(healthz)))
-        .fallback(|| async { ApiError::not_found() })
-        .layer(middleware::from_fn(error::trace_id))
+    with_envelope(Router::new().nest("/api", Router::new().route("/healthz", get(healthz))))
         .with_state(state)
+}
+
+/// Wraps `routes` so that every error, including the ones axum produces
+/// itself, leaves as the JSON envelope with a trace id.
+fn with_envelope(routes: Router<AppState>) -> Router<AppState> {
+    routes
+        .fallback(|| async { ApiError::not_found() })
+        .method_not_allowed_fallback(|| async { ApiError::method_not_allowed() })
+        // Inside trace_id, so the panic response still gets the envelope.
+        .layer(CatchPanicLayer::custom(error::panic_response))
+        .layer(middleware::from_fn(error::trace_id))
 }
 
 async fn healthz() -> &'static str {
@@ -54,6 +63,44 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), 64).await.unwrap();
         assert_eq!(&body[..], b"ok");
+    }
+
+    async fn envelope_of(router: Router, request: Request<Body>) -> (StatusCode, Value) {
+        let response = router.oneshot(request).await.unwrap();
+        let status = response.status();
+        let trace = response.headers()[error::TRACE_ID_HEADER]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap())
+                .unwrap_or_else(|err| panic!("{status} body is not JSON: {err}"));
+        assert_eq!(body["traceId"], trace, "{body}");
+        (status, body)
+    }
+
+    #[tokio::test]
+    async fn wrong_method_is_a_method_not_allowed_envelope() {
+        let request = Request::post("/api/healthz").body(Body::empty()).unwrap();
+        let (status, body) = envelope_of(app(test_state()), request).await;
+
+        assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(body["code"], "METHOD_NOT_ALLOWED");
+    }
+
+    #[tokio::test]
+    async fn handler_panic_is_an_internal_envelope_without_the_payload() {
+        async fn panics() -> &'static str {
+            panic!("secret detail")
+        }
+        let router =
+            with_envelope(Router::new().route("/api/panic", get(panics))).with_state(test_state());
+        let request = Request::get("/api/panic").body(Body::empty()).unwrap();
+        let (status, body) = envelope_of(router, request).await;
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body["code"], "INTERNAL");
+        assert!(!body.to_string().contains("secret detail"), "{body}");
     }
 
     #[tokio::test]

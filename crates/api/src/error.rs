@@ -4,7 +4,7 @@
 //! [`ErrorPayload`]. The [`trace_id`] middleware owns the trace id, so it is
 //! the one that writes the JSON body.
 
-use std::fmt::Display;
+use std::{any::Any, fmt::Display};
 
 use axum::{
     Extension,
@@ -43,6 +43,14 @@ impl ApiError {
         }
     }
 
+    pub fn method_not_allowed() -> Self {
+        Self {
+            status: StatusCode::METHOD_NOT_ALLOWED,
+            code: "METHOD_NOT_ALLOWED",
+            message: "method not allowed".into(),
+        }
+    }
+
     pub fn not_found() -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
@@ -67,6 +75,17 @@ impl<E: DomainError> From<E> for ApiError {
             message: err.to_string(),
         }
     }
+}
+
+/// Turns a handler panic into the generic 500. The payload goes to the log
+/// only.
+pub fn panic_response(payload: Box<dyn Any + Send + 'static>) -> Response {
+    let detail = payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("non-string panic payload");
+    ApiError::internal(format_args!("handler panicked: {detail}")).into_response()
 }
 
 #[derive(Debug, Clone)]
