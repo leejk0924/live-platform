@@ -4,15 +4,24 @@ use std::{collections::HashSet, sync::Arc};
 
 use application::ports::auth::{BreachedPasswords, PasswordHasher, PortError};
 use argon2::{
-    Argon2,
+    Algorithm, Argon2, Params, Version,
     password_hash::{Error as HashError, PasswordHasher as _, PasswordVerifier as _},
 };
 use async_trait::async_trait;
 use domain::auth::{Password, PasswordHash};
 use tokio::sync::Semaphore;
 
-/// Argon2id with the OWASP minimum: 19 MiB memory, 2 passes, 1 lane. These
-/// are also `argon2`'s defaults; the test below pins them.
+/// The OWASP minimum for Argon2id: 19 MiB memory, 2 passes, 1 lane. Named
+/// here so a change of the crate's defaults cannot silently change new hashes.
+const ARGON2_PARAMS: Params = match Params::new(19 * 1024, 2, 1, None) {
+    Ok(params) => params,
+    Err(_) => panic!("invalid argon2 parameters"),
+};
+
+fn argon2() -> Argon2<'static> {
+    Argon2::new(Algorithm::Argon2id, Version::V0x13, ARGON2_PARAMS)
+}
+
 pub struct Argon2Hasher {
     dummy: Arc<str>,
     permits: Arc<Semaphore>,
@@ -51,14 +60,14 @@ impl Argon2Hasher {
 }
 
 fn hash_blocking(password: &[u8]) -> Result<String, PortError> {
-    Argon2::default()
+    argon2()
         .hash_password(password)
         .map(|hash| hash.to_string())
         .map_err(|err| PortError(format!("password hashing failed: {err}")))
 }
 
 fn verify_blocking(password: &[u8], phc: &str) -> Result<bool, PortError> {
-    match Argon2::default().verify_password(password, phc) {
+    match argon2().verify_password(password, phc) {
         Ok(()) => Ok(true),
         Err(HashError::PasswordInvalid) => Ok(false),
         Err(err) => Err(PortError(format!("password verification failed: {err}"))),
