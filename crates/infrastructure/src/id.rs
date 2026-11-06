@@ -141,6 +141,8 @@ async fn release_unused(allocator: &dyn WorkerIdAllocator, lease: &WorkerLease) 
 }
 
 impl IdGenerator for SnowflakeIdGenerator {
+    /// Holds the lock while spinning for under 1 ms when the current
+    /// millisecond's sequence is exhausted.
     fn next_id(&self) -> Result<SnowflakeId, IdGenerationError> {
         let mut sequencer = self.lock();
         loop {
