@@ -15,6 +15,19 @@ concurrency:
 jobs:
   rust:
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        # Same image digest as compose.yml so tests run against the deployed version.
+        image: postgres:17.11-trixie@sha256:748a18a54d3842d43bc156f0840d78029b8d349e0feca98c12b9c4ce3404a6b3
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -24,7 +37,9 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --all-targets -- -D warnings
-      - run: cargo test --locked --workspace
+      - run: cargo test --locked --workspace -- --include-ignored
+        env:
+          DATABASE_URL: postgres://postgres:test@localhost:5432/postgres
       - run: bash scripts/check-layer-deps.sh
 
   cargo-deny:
