@@ -17,6 +17,36 @@ pub struct Config {
     pub listen_addr: SocketAddr,
     pub database_url: Secret<String>,
     pub worker_lease_ttl: Duration,
+    pub allowed_origins: Vec<Origin>,
+    pub demo_login_enabled: bool,
+}
+
+/// A browser origin, `scheme://host[:port]`, in the form browsers send it in
+/// the `Origin` header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Origin(String);
+
+impl Origin {
+    pub fn parse(raw: &str) -> Option<Self> {
+        let (scheme, authority) = raw.split_once("://")?;
+        if !matches!(scheme, "http" | "https") {
+            return None;
+        }
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        };
+        let host_ok = !host.is_empty()
+            && host
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-');
+        let port_ok = port.is_none_or(|p| p.parse::<u16>().is_ok_and(|p| p != 0));
+        (host_ok && port_ok).then(|| Self(raw.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Messages name the variable but never echo a secret variable's value.
@@ -30,6 +60,12 @@ pub enum ConfigError {
     DatabaseUrlNotUnicode,
     #[error("WORKER_LEASE_TTL_SECS must be an integer of at least {MIN_LEASE_TTL_SECS}, got {0:?}")]
     LeaseTtl(String),
+    #[error(
+        "ALLOWED_ORIGINS must be a comma separated list of origins like https://example.com, got {0:?}"
+    )]
+    AllowedOrigins(String),
+    #[error("DEMO_LOGIN_ENABLED must be true or false, got {0:?}")]
+    DemoLoginEnabled(String),
 }
 
 impl Config {
@@ -52,12 +88,34 @@ impl Config {
                 _ => return Err(ConfigError::LeaseTtl(raw)),
             },
         };
+        let allowed_origins = match lookup("ALLOWED_ORIGINS") {
+            Ok(raw) => allowed_origins(&raw).ok_or(ConfigError::AllowedOrigins(raw))?,
+            Err(err) => return Err(ConfigError::AllowedOrigins(err.to_string())),
+        };
+        let demo_login_enabled = match lookup("DEMO_LOGIN_ENABLED") {
+            Err(VarError::NotPresent) => false,
+            Ok(raw) if raw == "true" => true,
+            Ok(raw) if raw == "false" => false,
+            Ok(raw) => return Err(ConfigError::DemoLoginEnabled(raw)),
+            Err(err) => return Err(ConfigError::DemoLoginEnabled(err.to_string())),
+        };
         Ok(Self {
             listen_addr,
             database_url,
             worker_lease_ttl,
+            allowed_origins,
+            demo_login_enabled,
         })
     }
+}
+
+/// At least one origin; blanks around commas are ignored.
+fn allowed_origins(raw: &str) -> Option<Vec<Origin>> {
+    let origins = raw
+        .split(',')
+        .map(|entry| Origin::parse(entry.trim()))
+        .collect::<Option<Vec<_>>>()?;
+    (!origins.is_empty()).then_some(origins)
 }
 
 /// Also used alone by the `healthcheck` subcommand, which needs nothing else.
@@ -77,8 +135,15 @@ mod tests {
     use crate::test_support::LogBuffer;
 
     const URL: &str = "postgres://app:s3cr3t-pw@db:5432/app";
+    const ORIGIN: &str = "https://localhost";
 
+    /// `DATABASE_URL` and `ALLOWED_ORIGINS` are filled in unless `vars` sets them.
     fn from(vars: &[(&str, &str)]) -> Result<Config, ConfigError> {
+        let required = [("DATABASE_URL", URL), ("ALLOWED_ORIGINS", ORIGIN)];
+        from_exact(&[&required[..], vars].concat())
+    }
+
+    fn from_exact(vars: &[(&str, &str)]) -> Result<Config, ConfigError> {
         let vars: HashMap<String, String> = vars
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -87,16 +152,21 @@ mod tests {
     }
 
     #[test]
-    fn defaults_apply_when_only_database_url_is_set() {
-        let config = from(&[("DATABASE_URL", URL)]).unwrap();
+    fn defaults_apply_when_only_required_variables_are_set() {
+        let config = from(&[]).unwrap();
         assert_eq!(config.listen_addr, SocketAddr::from(([0, 0, 0, 0], 8080)));
         assert_eq!(config.database_url.expose(), URL);
         assert_eq!(config.worker_lease_ttl, Duration::from_secs(30));
+        assert_eq!(config.allowed_origins, [Origin::parse(ORIGIN).unwrap()]);
+        assert!(!config.demo_login_enabled);
     }
 
     #[test]
     fn database_url_is_required() {
-        assert!(matches!(from(&[]), Err(ConfigError::MissingDatabaseUrl)));
+        assert!(matches!(
+            from_exact(&[("ALLOWED_ORIGINS", ORIGIN)]),
+            Err(ConfigError::MissingDatabaseUrl)
+        ));
         assert!(matches!(
             from(&[("DATABASE_URL", "")]),
             Err(ConfigError::MissingDatabaseUrl)
@@ -105,7 +175,7 @@ mod tests {
 
     #[test]
     fn lease_ttl_must_be_at_least_three_seconds() {
-        let ttl = |raw| from(&[("DATABASE_URL", URL), ("WORKER_LEASE_TTL_SECS", raw)]);
+        let ttl = |raw| from(&[("WORKER_LEASE_TTL_SECS", raw)]);
         assert_eq!(ttl("3").unwrap().worker_lease_ttl, Duration::from_secs(3));
         for bad in ["2", "0", "-5", "abc", ""] {
             assert!(
@@ -117,14 +187,14 @@ mod tests {
 
     #[test]
     fn errors_never_contain_the_database_url() {
-        let err = from(&[("DATABASE_URL", URL), ("API_ADDR", "nope")]).unwrap_err();
+        let err = from(&[("API_ADDR", "nope")]).unwrap_err();
         assert!(matches!(err, ConfigError::ListenAddr(_)));
         assert!(!err.to_string().contains("s3cr3t-pw"));
     }
 
     #[test]
     fn logging_the_config_redacts_the_database_url() {
-        let config = from(&[("DATABASE_URL", URL)]).unwrap();
+        let config = from(&[]).unwrap();
         let logs = LogBuffer::default();
 
         tracing::subscriber::with_default(logs.subscriber(), || tracing::info!(?config, "loaded"));
@@ -135,6 +205,55 @@ mod tests {
             "config should be logged: {logged}"
         );
         assert!(!logged.contains("s3cr3t-pw"), "password leaked: {logged}");
+    }
+
+    #[test]
+    fn allowed_origins_is_a_required_list_of_origins() {
+        let origins = |raw| from(&[("ALLOWED_ORIGINS", raw)]).map(|c| c.allowed_origins);
+        assert_eq!(
+            origins(" https://a.example , http://localhost:5173").unwrap(),
+            [
+                Origin::parse("https://a.example").unwrap(),
+                Origin::parse("http://localhost:5173").unwrap()
+            ]
+        );
+        assert!(matches!(
+            from_exact(&[("DATABASE_URL", URL)]),
+            Err(ConfigError::AllowedOrigins(_))
+        ));
+        for bad in [
+            "",
+            ",",
+            "https://a.example,",
+            "localhost",
+            "https://",
+            "ftp://a.example",
+            "https://a.example/",
+            "https://a.example/path",
+            "https://A.example",
+            "https://a.example:0",
+            "https://a.example:99999",
+            "https://user@a.example",
+            "*",
+        ] {
+            assert!(
+                matches!(origins(bad), Err(ConfigError::AllowedOrigins(_))),
+                "{bad:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn demo_login_flag_accepts_only_true_or_false() {
+        let demo = |raw| from(&[("DEMO_LOGIN_ENABLED", raw)]).map(|c| c.demo_login_enabled);
+        assert!(demo("true").unwrap());
+        assert!(!demo("false").unwrap());
+        for bad in ["", "1", "TRUE", "yes", " true"] {
+            assert!(
+                matches!(demo(bad), Err(ConfigError::DemoLoginEnabled(_))),
+                "{bad:?} should be rejected"
+            );
+        }
     }
 
     #[test]
