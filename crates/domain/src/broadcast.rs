@@ -122,11 +122,11 @@ pub struct Broadcast {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum BroadcastError {
-    #[error("title must be 1 to 100 characters")]
+    #[error("title must be 1 to {TITLE_MAX_CHARS} characters")]
     InvalidTitle,
-    #[error("description must be at most 2000 characters")]
+    #[error("description must be at most {DESCRIPTION_MAX_CHARS} characters")]
     InvalidDescription,
-    #[error("page size must be between 1 and 50")]
+    #[error("page size must be between 1 and {PAGE_SIZE_MAX}")]
     InvalidPageSize,
     #[error("broadcast not found")]
     NotFound,
