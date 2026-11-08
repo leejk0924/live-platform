@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod broadcast;
 pub mod comment;
+pub mod donation;
 pub mod live;
 pub mod media;
 pub mod playback;

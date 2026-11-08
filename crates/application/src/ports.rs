@@ -1,9 +1,11 @@
 pub mod auth;
 pub mod broadcast;
 pub mod comment;
+pub mod donation;
 pub mod event_bus;
 pub mod id;
 pub mod media;
+pub mod payment;
 pub mod rate_limit;
 pub mod recording;
 
