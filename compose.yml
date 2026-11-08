@@ -59,6 +59,7 @@ services:
       ALLOWED_ORIGINS: https://localhost
       DEMO_LOGIN_ENABLED: ${DEMO_LOGIN_ENABLED:-false}
       PUBLISH_JWT_PRIVATE_KEY: ${PUBLISH_JWT_PRIVATE_KEY:?set PUBLISH_JWT_PRIVATE_KEY in .env}
+      MEDIA_HOOK_SECRET: ${MEDIA_HOOK_SECRET:?set MEDIA_HOOK_SECRET in .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -82,6 +83,8 @@ services:
       context: .
       dockerfile: docker/mediamtx.Dockerfile
     user: "65532:65532"
+    environment:
+      MTX_AUTHHTTPADDRESS: http://mediamtx:${MEDIA_HOOK_SECRET:?set MEDIA_HOOK_SECRET in .env}@api:8080/internal/media/auth
     ports:
       - "8189:8189/udp"
       - "8189:8189/tcp"

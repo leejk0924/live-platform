@@ -25,6 +25,11 @@ impl IngestRouter for MediaMtxIngestRouter {
             whip_url: format!("/media/webrtc/live/{broadcast}/whip"),
         }
     }
+
+    fn broadcast_of(&self, path: &StreamPath) -> Option<BroadcastId> {
+        let id: BroadcastId = path.as_str().strip_prefix("live/")?.parse().ok()?;
+        (self.route(id).path == *path).then_some(id)
+    }
 }
 
 /// Kicks a path's publisher through the Control API, authenticating with a
@@ -104,7 +109,7 @@ impl MediaMtxStreamTerminator {
 impl StreamTerminator for MediaMtxStreamTerminator {
     /// WHIP is the only way in; every other protocol is off in mediamtx.yml.
     async fn kick(&self, path: &StreamPath) -> Result<(), PortError> {
-        let token = self.key.api_token()?;
+        let token = self.key.control_token()?;
         for id in self.sessions_on(path, &token).await? {
             let response = self
                 .http
@@ -134,6 +139,34 @@ mod tests {
         assert_eq!(
             endpoint.whip_url,
             "/media/webrtc/live/112007303372210176/whip"
+        );
+        assert_eq!(MediaMtxIngestRouter.broadcast_of(&endpoint.path), Some(id));
+    }
+
+    #[test]
+    fn only_paths_the_router_would_produce_name_a_broadcast() {
+        for raw in [
+            "live/",
+            "live/abc",
+            "live/-1",
+            "live/+7",
+            "live/007",
+            "live/7/x",
+            "live/7 ",
+            "other/7",
+            "7",
+            "",
+            "live/99999999999999999999",
+        ] {
+            assert_eq!(
+                MediaMtxIngestRouter.broadcast_of(&StreamPath::new(raw.into())),
+                None,
+                "{raw:?}"
+            );
+        }
+        assert_eq!(
+            MediaMtxIngestRouter.broadcast_of(&StreamPath::new("live/7".into())),
+            BroadcastId::try_from(7).ok()
         );
     }
 }

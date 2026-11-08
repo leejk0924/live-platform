@@ -77,9 +77,9 @@ pub struct StopBroadcast {
 
 impl StopBroadcast {
     /// Ends the broadcast, then disconnects its publisher once the status
-    /// change is stored. This does not stop a reconnect: the media server
-    /// never reads the status, so the publish credential still works on the
-    /// ended broadcast until it expires.
+    /// change is stored. A reconnect is refused: the media server asks
+    /// [`crate::media::AdmitMediaAccess`] first, which admits publishers only
+    /// to active broadcasts.
     pub async fn run(&self, actor: UserId, id: BroadcastId) -> Result<Stopped, Error> {
         // The write only matches the actor's own broadcast, so the actor is
         // the owner the view names. Reading it first leaves nothing fallible
@@ -245,6 +245,10 @@ mod tests {
                 path: StreamPath::new(format!("live/{broadcast}")),
                 whip_url: format!("/whip/{broadcast}"),
             }
+        }
+
+        fn broadcast_of(&self, _: &StreamPath) -> Option<BroadcastId> {
+            unreachable!()
         }
     }
 

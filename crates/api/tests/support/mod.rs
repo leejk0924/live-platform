@@ -22,13 +22,14 @@ use axum::{
     body::{Body, to_bytes},
     http::{HeaderMap, Method, Request, StatusCode, header},
 };
+use domain::secret::Secret;
 use infrastructure::{
     auth::{Argon2Hasher, BreachedPasswordList},
     id::SnowflakeIdGenerator,
     media::{JwtPublishAuthorizer, MediaMtxIngestRouter, PublishKey},
     persistence::{
-        PgBroadcastQuery, PgBroadcastRepository, PgSessionStore, PgUserRepository,
-        PgWorkerIdAllocator,
+        PgBroadcastQuery, PgBroadcastRepository, PgPublishTicketLedger, PgSessionStore,
+        PgUserRepository, PgWorkerIdAllocator,
     },
 };
 use serde_json::{Value, json};
@@ -37,6 +38,15 @@ use tower::ServiceExt;
 
 pub const ORIGIN: &str = "https://app.test";
 pub const PASSWORD: &str = "correct horse battery";
+/// What MediaMTX sends on `/internal/*` in these tests.
+pub const MEDIA_SECRET: &str = "0123456789abcdef0123456789abcdef";
+/// The signing key of every test app, so a test can mint the API's own
+/// Control API token.
+const PUBLISH_SEED: &str = "nWGxne/9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A=";
+
+pub fn publish_key() -> PublishKey {
+    PublishKey::from_base64_seed(&Secret::new(PUBLISH_SEED.to_owned())).unwrap()
+}
 
 pub async fn router(pool: &PgPool, demo_login_enabled: bool) -> Router {
     app(state(pool, demo_login_enabled).await)
@@ -99,13 +109,16 @@ pub async fn live_state_with(
         hasher: Arc::new(Argon2Hasher::new().unwrap()),
         breached: Arc::new(BreachedPasswordList::load()),
     };
-    let key = Arc::new(PublishKey::generate());
+    let key = Arc::new(publish_key());
+    let tokens = Arc::new(JwtPublishAuthorizer::new(key.clone()));
     let broadcast_ports = BroadcastPorts {
         repository: Arc::new(PgBroadcastRepository::new(pool.clone())),
         query: Arc::new(PgBroadcastQuery::new(pool.clone())),
         ingest: Arc::new(MediaMtxIngestRouter),
-        authorizer: Arc::new(JwtPublishAuthorizer::new(key.clone())),
+        authorizer: tokens.clone(),
         terminator,
+        verifier: tokens,
+        tickets: Arc::new(PgPublishTicketLedger::new(pool.clone())),
     };
     let state = AppState::new(
         ports,
@@ -113,6 +126,7 @@ pub async fn live_state_with(
         vec![Origin::parse(ORIGIN).unwrap()],
         demo_login_enabled,
         key.public_jwk(),
+        Secret::new(MEDIA_SECRET.into()),
     );
     state.auth.demo_log_in.seed().await.unwrap();
     state

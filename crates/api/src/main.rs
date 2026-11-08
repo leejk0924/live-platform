@@ -20,8 +20,8 @@ use infrastructure::{
     id::SnowflakeIdGenerator,
     media::{JwtPublishAuthorizer, MediaMtxIngestRouter, MediaMtxStreamTerminator},
     persistence::{
-        self, PgBroadcastQuery, PgBroadcastRepository, PgSessionStore, PgUserRepository,
-        PgWorkerIdAllocator,
+        self, PgBroadcastQuery, PgBroadcastRepository, PgPublishTicketLedger, PgSessionStore,
+        PgUserRepository, PgWorkerIdAllocator,
     },
 };
 use tokio::{net::TcpListener, sync::oneshot};
@@ -99,12 +99,15 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
     let publish_jwk = config.publish_key.public_jwk();
     let publish_key = Arc::new(config.publish_key);
     let terminator = MediaMtxStreamTerminator::new(config.mediamtx_api_url, publish_key.clone())?;
+    let tokens = Arc::new(JwtPublishAuthorizer::new(publish_key));
     let broadcast_ports = BroadcastPorts {
         repository: Arc::new(PgBroadcastRepository::new(pool.clone())),
         query: Arc::new(PgBroadcastQuery::new(pool.clone())),
         ingest: Arc::new(MediaMtxIngestRouter),
-        authorizer: Arc::new(JwtPublishAuthorizer::new(publish_key)),
+        authorizer: tokens.clone(),
         terminator: Arc::new(terminator),
+        verifier: tokens,
+        tickets: Arc::new(PgPublishTicketLedger::new(pool.clone())),
     };
     let state = AppState::new(
         ports,
@@ -112,6 +115,7 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         config.allowed_origins,
         config.demo_login_enabled,
         publish_jwk,
+        config.media_secret,
     );
     if let Err(err) = state.auth.demo_log_in.seed().await {
         if let Err(release_err) = heartbeat.shutdown().await {

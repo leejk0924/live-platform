@@ -10,11 +10,15 @@ use application::{
         UpdateBroadcast,
     },
     live::{StartBroadcast, StopBroadcast},
+    media::AdmitMediaAccess,
     ports::{
         auth::UserRepository,
         broadcast::{BroadcastQuery, BroadcastRepository, BroadcastView},
         id::IdGenerator,
-        media::{IngestRouter, PublishAuthorizer, StreamTerminator},
+        media::{
+            IngestRouter, MediaCredentialVerifier, PublishAuthorizer, PublishTicketLedger,
+            StreamTerminator,
+        },
     },
 };
 use axum::{
@@ -53,6 +57,8 @@ pub struct BroadcastUseCases {
     pub list: ListBroadcasts,
     pub start: StartBroadcast,
     pub stop: StopBroadcast,
+    /// Answers MediaMTX's question whether to let a publisher in.
+    pub admit: AdmitMediaAccess,
 }
 
 /// The ports the broadcast use cases need beyond the auth ones.
@@ -62,6 +68,8 @@ pub struct BroadcastPorts {
     pub ingest: Arc<dyn IngestRouter>,
     pub authorizer: Arc<dyn PublishAuthorizer>,
     pub terminator: Arc<dyn StreamTerminator>,
+    pub verifier: Arc<dyn MediaCredentialVerifier>,
+    pub tickets: Arc<dyn PublishTicketLedger>,
 }
 
 impl BroadcastUseCases {
@@ -76,6 +84,8 @@ impl BroadcastUseCases {
             ingest,
             authorizer,
             terminator,
+            verifier,
+            tickets,
         } = ports;
         Self {
             create: CreateBroadcast {
@@ -94,6 +104,11 @@ impl BroadcastUseCases {
                 broadcasts: repository.clone(),
                 ingest: ingest.clone(),
                 authorizer,
+            },
+            admit: AdmitMediaAccess {
+                verifier,
+                ingest: ingest.clone(),
+                tickets,
             },
             stop: StopBroadcast {
                 broadcasts: repository,

@@ -11,7 +11,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Public key that verifies publish tokens; read by the media server */
+        /** Public key that verifies publish tokens */
         get: operations["getJwks"];
         put?: never;
         post?: never;
@@ -278,13 +278,13 @@ export interface components {
         PublishGrant: {
             /**
              * Format: int64
-             * @description Seconds until the token expires. The media server also ends the
-             *     publish session then.
+             * @description Seconds the token may wait before its one use. The publish session it
+             *     opens lasts until the publisher leaves or the broadcast ends.
              */
             expiresIn: number;
             /**
              * @description Send as `Authorization: Bearer <token>` on the WHIP request. Allows
-             *     publishing to this broadcast only.
+             *     publishing to this broadcast only, once.
              */
             token: string;
             /**

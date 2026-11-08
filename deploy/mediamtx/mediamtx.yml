@@ -1,16 +1,13 @@
 logLevel: info
 logDestinations: [stdout]
 
-# Anyone may watch. Publishing and the Control API need a JWT signed by the API's key:
-# a publish token covers one path, and the API signs its own short `api` token to kick.
-# MediaMTX fetches the JWKS on the first JWT check (not at startup), retries on failure,
-# and then keeps it for an hour; after rotating PUBLISH_JWT_PRIVATE_KEY, restart mediamtx.
-authMethod: jwt
-authJWTJWKS: http://api:8080/api/.well-known/jwks.json
-authJWTClaimKey: mediamtx_permissions
-# Must equal infrastructure::media::jwt::ISSUER.
-authJWTIssuer: live-platform
-authJWTExclude:
+# Anyone may watch without asking anyone. Publishing and the Control API ask the API
+# (POST /internal/media/auth), which checks the bearer token, uses up a publish token and
+# requires the broadcast to be on air. The address carries MEDIA_HOOK_SECRET as Basic
+# credentials, so it is set through MTX_AUTHHTTPADDRESS in compose; Go strips the password
+# from the URL in its own error messages.
+authMethod: http
+authHTTPExclude:
   - action: read
   - action: playback
 

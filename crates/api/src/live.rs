@@ -1,5 +1,5 @@
-//! Going live and ending a broadcast, and the public key MediaMTX verifies
-//! publish tokens with.
+//! Going live and ending a broadcast, and the public key that verifies
+//! publish tokens.
 
 use application::{live::PublishGrant, ports::media::PublishCredential};
 use axum::{
@@ -21,7 +21,7 @@ use crate::{
     error::{ApiError, ErrorBody},
 };
 
-/// MediaMTX fetches the key set again at most hourly, so a short shared cache
+/// The key changes only when the operator rotates it, so a short shared cache
 /// costs nothing.
 pub const JWKS_CACHE_CONTROL: &str = "public, max-age=300";
 
@@ -40,10 +40,10 @@ pub struct PublishGrantDto {
     #[schema(example = "/media/webrtc/live/112007303372210176/whip")]
     whip_url: String,
     /// Send as `Authorization: Bearer <token>` on the WHIP request. Allows
-    /// publishing to this broadcast only.
+    /// publishing to this broadcast only, once.
     token: String,
-    /// Seconds until the token expires. The media server also ends the
-    /// publish session then.
+    /// Seconds the token may wait before its one use. The publish session it
+    /// opens lasts until the publisher leaves or the broadcast ends.
     expires_in: u64,
 }
 
@@ -179,7 +179,7 @@ impl From<PublicJwk> for Jwks {
     path = "/api/.well-known/jwks.json",
     operation_id = "getJwks",
     tag = "broadcasts",
-    summary = "Public key that verifies publish tokens; read by the media server",
+    summary = "Public key that verifies publish tokens",
     responses(
         (status = 200, body = Jwks, description = "The current signing key.",
             headers(("Cache-Control" = String, description = "`public, max-age=300`"))),

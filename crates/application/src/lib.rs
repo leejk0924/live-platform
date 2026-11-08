@@ -3,4 +3,5 @@
 pub mod auth;
 pub mod broadcast;
 pub mod live;
+pub mod media;
 pub mod ports;

@@ -28,8 +28,9 @@
 
 ```bash
 cp .env.example .env
-# 송출 JWT 서명 키는 로컬에서도 만들어야 API가 뜬다 (macOS sed도 동작):
+# 송출 JWT 서명 키와 MediaMTX 공유 비밀값은 로컬에서도 만들어야 API가 뜬다 (macOS sed도 동작):
 sed -i.bak "s|^PUBLISH_JWT_PRIVATE_KEY=.*|PUBLISH_JWT_PRIVATE_KEY=$(openssl rand -base64 32)|" .env && rm .env.bak
+sed -i.bak "s|^MEDIA_HOOK_SECRET=.*|MEDIA_HOOK_SECRET=$(openssl rand -hex 32)|" .env && rm .env.bak
 # 나머지는 그대로 둬도 동작한다. 비밀번호도 무작위로 바꾸려면:
 sed -i.bak "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 24)/" .env && rm .env.bak
 bash deploy/deploy.sh local
@@ -75,7 +76,8 @@ chmod 600 .env
 | `DOMAIN` | `<이름>.duckdns.org` |
 | `PUBLIC_IP` | 서버 공인 IP (WebRTC ICE 후보로 쓰인다) |
 | `DEMO_LOGIN_ENABLED` | 데모 계정 로그인을 열려면 `true`, 아니면 `false` |
-| `PUBLISH_JWT_PRIVATE_KEY` | `openssl rand -base64 32` 결과. 송출 토큰 서명 키라 API만 가진다. 바꾼 뒤에는 MediaMTX가 공개키를 다시 받도록 `docker compose restart mediamtx` |
+| `PUBLISH_JWT_PRIVATE_KEY` | `openssl rand -base64 32` 결과. 송출 토큰 서명 키라 API만 가진다. 송출 허가는 MediaMTX가 매번 API에 묻기 때문에 바꿔도 MediaMTX를 재시작할 필요가 없다. 바꾸기 전에 발급한 토큰(유효 60초)만 거부된다 |
+| `MEDIA_HOOK_SECRET` | `openssl rand -hex 32` 결과. MediaMTX가 API의 `/internal/media/*`(송출 허가, 송출 시작·끊김 알림)를 부를 때 내는 공유 비밀값이다. api와 mediamtx 둘 다 쓰므로 바꾼 뒤 `deploy.sh`로 둘을 함께 다시 띄운다 |
 
 ```bash
 bash deploy/deploy.sh prod

@@ -90,6 +90,15 @@ impl ApiError {
         )
     }
 
+    /// A caller without valid credentials, where no more detail is given.
+    pub fn unauthenticated() -> Self {
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            "UNAUTHENTICATED",
+            "authentication required",
+        )
+    }
+
     pub fn csrf_rejected() -> Self {
         Self::new(
             StatusCode::FORBIDDEN,

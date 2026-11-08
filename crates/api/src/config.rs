@@ -13,6 +13,8 @@ const DEFAULT_MEDIAMTX_API_URL: &str = "http://mediamtx:9997";
 const DEFAULT_LEASE_TTL_SECS: u64 = 30;
 /// The heartbeat renews every TTL/3, so shorter TTLs leave no room for a slow renewal.
 const MIN_LEASE_TTL_SECS: u64 = 3;
+/// `openssl rand -hex 32` prints 64.
+const MIN_MEDIA_SECRET_LEN: usize = 32;
 
 #[derive(Debug)]
 pub struct Config {
@@ -25,6 +27,9 @@ pub struct Config {
     /// MediaMTX Control API base URL, reachable only inside the compose
     /// network.
     pub mediamtx_api_url: String,
+    /// What MediaMTX presents on `/internal/*`. Letters and digits only, so
+    /// it can sit in the URL MediaMTX calls without escaping.
+    pub media_secret: Secret<String>,
 }
 
 /// A browser origin, `scheme://host[:port]`, in the form browsers send it in
@@ -92,6 +97,12 @@ pub enum ConfigError {
     /// Leaves the value out: it would carry the credentials.
     #[error("MEDIAMTX_API_URL must not contain user:password@; the API signs its own token")]
     MediaMtxApiUrlCredentials,
+    #[error("MEDIA_HOOK_SECRET is not set")]
+    MissingMediaSecret,
+    #[error(
+        "MEDIA_HOOK_SECRET must be at least {MIN_MEDIA_SECRET_LEN} letters or digits (openssl rand -hex 32)"
+    )]
+    InvalidMediaSecret,
 }
 
 impl Config {
@@ -144,6 +155,17 @@ impl Config {
             Ok(raw) => return Err(ConfigError::MediaMtxApiUrl(raw)),
             Err(err) => return Err(ConfigError::MediaMtxApiUrl(err.to_string())),
         };
+        let media_secret = match lookup("MEDIA_HOOK_SECRET") {
+            Ok(raw)
+                if raw.len() >= MIN_MEDIA_SECRET_LEN
+                    && raw.bytes().all(|b| b.is_ascii_alphanumeric()) =>
+            {
+                Secret::new(raw)
+            }
+            Ok(raw) if raw.is_empty() => return Err(ConfigError::MissingMediaSecret),
+            Err(VarError::NotPresent) => return Err(ConfigError::MissingMediaSecret),
+            Ok(_) | Err(VarError::NotUnicode(_)) => return Err(ConfigError::InvalidMediaSecret),
+        };
         Ok(Self {
             listen_addr,
             database_url,
@@ -152,6 +174,7 @@ impl Config {
             demo_login_enabled,
             publish_key,
             mediamtx_api_url,
+            media_secret,
         })
     }
 }
@@ -193,14 +216,16 @@ mod tests {
     const ORIGIN: &str = "https://localhost";
     /// RFC 8037 appendix A.1's private key.
     const KEY: &str = "nWGxne/9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A=";
+    const MEDIA_SECRET: &str = "0123456789abcdef0123456789abcdef";
 
-    /// `DATABASE_URL`, `ALLOWED_ORIGINS` and `PUBLISH_JWT_PRIVATE_KEY` are
-    /// filled in unless `vars` sets them.
+    /// `DATABASE_URL`, `ALLOWED_ORIGINS`, `PUBLISH_JWT_PRIVATE_KEY` and
+    /// `MEDIA_HOOK_SECRET` are filled in unless `vars` sets them.
     fn from(vars: &[(&str, &str)]) -> Result<Config, ConfigError> {
         let required = [
             ("DATABASE_URL", URL),
             ("ALLOWED_ORIGINS", ORIGIN),
             ("PUBLISH_JWT_PRIVATE_KEY", KEY),
+            ("MEDIA_HOOK_SECRET", MEDIA_SECRET),
         ];
         from_exact(&[&required[..], vars].concat())
     }
@@ -251,6 +276,40 @@ mod tests {
             "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"
         );
         assert!(!format!("{config:?}").contains(KEY));
+    }
+
+    #[test]
+    fn media_secret_is_required_long_alphanumeric_and_never_echoed() {
+        assert!(matches!(
+            from_exact(&[
+                ("DATABASE_URL", URL),
+                ("ALLOWED_ORIGINS", ORIGIN),
+                ("PUBLISH_JWT_PRIVATE_KEY", KEY),
+            ]),
+            Err(ConfigError::MissingMediaSecret)
+        ));
+        let short = "a".repeat(MIN_MEDIA_SECRET_LEN - 1);
+        let with_symbol = format!("{}@x", "a".repeat(MIN_MEDIA_SECRET_LEN));
+        for bad in [
+            "",
+            "change-me",
+            short.as_str(),
+            with_symbol.as_str(),
+            "0123456789abcdef0123456789abcdef ",
+        ] {
+            let err = from(&[("MEDIA_HOOK_SECRET", bad)]).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    ConfigError::MissingMediaSecret | ConfigError::InvalidMediaSecret
+                ),
+                "{bad:?}"
+            );
+            assert!(bad.is_empty() || !err.to_string().contains(bad), "{err}");
+        }
+        let config = from(&[]).unwrap();
+        assert_eq!(config.media_secret.expose(), MEDIA_SECRET);
+        assert!(!format!("{config:?}").contains(MEDIA_SECRET));
     }
 
     #[test]

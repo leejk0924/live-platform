@@ -12,7 +12,8 @@ use application::ports::{
     },
     id::{IdGenerationError, IdGenerator},
     media::{
-        IngestEndpoint, IngestRouter, PublishAuthorizer, PublishCredential, StreamPath,
+        IngestEndpoint, IngestRouter, MediaCredentialVerifier, PublishAuthorizer,
+        PublishCredential, PublishTicket, PublishTicketLedger, RedeemRejection, StreamPath,
         StreamTerminator,
     },
 };
@@ -21,6 +22,7 @@ use domain::{
     auth::{Password, PasswordHash, SessionToken, User, UserId, Username},
     broadcast::{Broadcast, BroadcastDescription, BroadcastId, BroadcastTitle, Version},
     id::SnowflakeId,
+    secret::Secret,
 };
 use infrastructure::{auth::BreachedPasswordList, media::PublishKey};
 use tracing::Subscriber;
@@ -139,6 +141,31 @@ impl IngestRouter for Unavailable {
     fn route(&self, _: BroadcastId) -> IngestEndpoint {
         unreachable!("not available in this test")
     }
+
+    fn broadcast_of(&self, _: &StreamPath) -> Option<BroadcastId> {
+        unreachable!("not available in this test")
+    }
+}
+
+impl MediaCredentialVerifier for Unavailable {
+    fn publish_ticket(&self, _: &Secret<String>) -> Option<PublishTicket> {
+        unreachable!("not available in this test")
+    }
+
+    fn is_control_credential(&self, _: &Secret<String>) -> bool {
+        unreachable!("not available in this test")
+    }
+}
+
+#[async_trait]
+impl PublishTicketLedger for Unavailable {
+    async fn redeem(
+        &self,
+        _: &PublishTicket,
+        _: BroadcastId,
+    ) -> Result<Result<(), RedeemRejection>, PortError> {
+        unavailable()
+    }
 }
 
 #[async_trait]
@@ -156,6 +183,7 @@ impl StreamTerminator for Unavailable {
 }
 
 pub const TEST_ORIGIN: &str = "https://app.test";
+pub const TEST_MEDIA_SECRET: &str = "0123456789abcdef0123456789abcdef";
 
 pub fn test_state() -> AppState {
     let ports = AuthPorts {
@@ -171,6 +199,8 @@ pub fn test_state() -> AppState {
         ingest: Arc::new(Unavailable),
         authorizer: Arc::new(Unavailable),
         terminator: Arc::new(Unavailable),
+        verifier: Arc::new(Unavailable),
+        tickets: Arc::new(Unavailable),
     };
     AppState::new(
         ports,
@@ -178,6 +208,7 @@ pub fn test_state() -> AppState {
         vec![Origin::parse(TEST_ORIGIN).unwrap()],
         false,
         PublishKey::generate().public_jwk(),
+        Secret::new(TEST_MEDIA_SECRET.into()),
     )
 }
 

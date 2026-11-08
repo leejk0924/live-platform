@@ -18,17 +18,14 @@ use domain::{
 };
 use sqlx::{PgPool, types::time::OffsetDateTime};
 
+use super::status_names;
+
 fn port_error(err: sqlx::Error) -> PortError {
     PortError(err.to_string())
 }
 
 /// The partial unique index that keeps one active broadcast per owner.
 const ONE_ACTIVE_PER_OWNER: &str = "broadcasts_one_active_per_owner";
-
-/// A status set as the `TEXT[]` a `status = ANY($n)` condition binds.
-fn status_names(statuses: &[BroadcastStatus]) -> Vec<&'static str> {
-    statuses.iter().map(|status| status.as_str()).collect()
-}
 
 /// A macro rather than a const so `concat!` builds every statement at
 /// compile time; no SQL is assembled at run time.

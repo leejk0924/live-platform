@@ -1,13 +1,14 @@
 //! PostgreSQL adapters.
 
 mod broadcast;
+mod publish_ticket;
 mod session;
 mod user;
 mod worker_lease;
 
 use std::str::FromStr;
 
-use domain::secret::Secret;
+use domain::{broadcast::BroadcastStatus, secret::Secret};
 use sqlx::{
     PgPool,
     migrate::MigrateError,
@@ -15,10 +16,16 @@ use sqlx::{
 };
 
 pub use broadcast::{PgBroadcastQuery, PgBroadcastRepository};
+pub use publish_ticket::PgPublishTicketLedger;
 pub use session::{ABSOLUTE_TIMEOUT, IDLE_TIMEOUT, PgSessionStore};
 pub use sqlx::Error as DbError;
 pub use user::PgUserRepository;
 pub use worker_lease::PgWorkerIdAllocator;
+
+/// A status set as the `TEXT[]` a `status = ANY($n)` condition binds.
+fn status_names(statuses: &[BroadcastStatus]) -> Vec<&'static str> {
+    statuses.iter().map(|status| status.as_str()).collect()
+}
 
 pub async fn connect(
     database_url: &Secret<String>,
