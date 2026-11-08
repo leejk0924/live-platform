@@ -8,6 +8,15 @@ publish.workspace = true
 [dependencies]
 domain.workspace = true
 application.workspace = true
+async-trait.workspace = true
+sqlx = { workspace = true, features = ["time"] }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+argon2.workspace = true
+sha2.workspace = true
+getrandom.workspace = true
+base64ct.workspace = true
 
 [lints]
 workspace = true

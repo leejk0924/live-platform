@@ -72,6 +72,7 @@ chmod 600 .env
 | `ACME_EMAIL` | 인증서 만료 알림을 받을 이메일 |
 | `DOMAIN` | `<이름>.duckdns.org` |
 | `PUBLIC_IP` | 서버 공인 IP (WebRTC ICE 후보로 쓰인다) |
+| `DEMO_LOGIN_ENABLED` | 데모 계정 로그인을 열려면 `true`, 아니면 `false` |
 
 ```bash
 bash deploy/deploy.sh prod

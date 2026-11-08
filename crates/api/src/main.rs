@@ -1,36 +1,60 @@
 use std::{
-    env::{self, VarError},
+    env,
+    error::Error,
     ffi::OsStr,
     io::{self, BufRead, BufReader, Read, Write},
-    net::{AddrParseError, IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream},
     process::ExitCode,
+    sync::Arc,
     time::Duration,
 };
 
-use axum::{Router, routing::get};
-use tokio::net::TcpListener;
+use api::{
+    AppState, app,
+    auth::AuthPorts,
+    broadcast::BroadcastPorts,
+    config::{Config, listen_addr},
+};
+use infrastructure::{
+    auth::{Argon2Hasher, BreachedPasswordList},
+    id::SnowflakeIdGenerator,
+    persistence::{
+        self, PgBroadcastQuery, PgBroadcastRepository, PgSessionStore, PgUserRepository,
+        PgWorkerIdAllocator,
+    },
+};
+use tokio::{net::TcpListener, sync::oneshot};
 use tracing_subscriber::EnvFilter;
 
-const DEFAULT_ADDR: &str = "0.0.0.0:8080";
+const DB_MAX_CONNECTIONS: u32 = 10;
+const RATE_LIMIT_CLEANUP: Duration = Duration::from_secs(60);
 
 fn main() -> ExitCode {
-    let addr = match listen_addr(env::var("API_ADDR")) {
-        Ok(addr) => addr,
-        Err(err) => {
-            eprintln!("invalid API_ADDR: {err}");
-            return ExitCode::FAILURE;
-        }
-    };
     let command = env::args_os().nth(1);
     match command.as_deref().map(OsStr::to_str) {
-        None => match serve(addr) {
-            Ok(()) => ExitCode::SUCCESS,
+        None => {
+            let config = match Config::from_lookup(|key| env::var(key)) {
+                Ok(config) => config,
+                Err(err) => {
+                    eprintln!("invalid configuration: {err}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match serve(config) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(err) => {
+                    eprintln!("server error: {err}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some(Some("healthcheck")) => match listen_addr(env::var("API_ADDR")) {
+            Ok(addr) => healthcheck(addr),
             Err(err) => {
-                eprintln!("server error: {err}");
+                eprintln!("invalid API_ADDR: {err}");
                 ExitCode::FAILURE
             }
         },
-        Some(Some("healthcheck")) => healthcheck(addr),
         Some(_) => {
             eprintln!("unknown command: {:?}", command.unwrap_or_default());
             ExitCode::FAILURE
@@ -38,34 +62,93 @@ fn main() -> ExitCode {
     }
 }
 
-fn listen_addr(var: Result<String, VarError>) -> Result<SocketAddr, String> {
-    match var {
-        Ok(raw) => raw.parse().map_err(|err: AddrParseError| err.to_string()),
-        Err(VarError::NotPresent) => Ok(DEFAULT_ADDR.parse().expect("default address is valid")),
-        Err(err @ VarError::NotUnicode(_)) => Err(err.to_string()),
-    }
-}
-
 #[tokio::main]
-async fn serve(addr: SocketAddr) -> io::Result<()> {
+async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt()
         .json()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
+    tracing::info!(?config, "starting");
 
-    let listener = TcpListener::bind(addr).await?;
-    tracing::info!(%addr, "listening");
-    axum::serve(listener, app())
-        .with_graceful_shutdown(shutdown_signal())
+    let listener = TcpListener::bind(config.listen_addr).await?;
+    let pool = persistence::connect(&config.database_url, DB_MAX_CONNECTIONS)
         .await
-}
+        .map_err(|err| format!("database connection failed: {err}"))?;
+    persistence::migrate(&pool)
+        .await
+        .map_err(|err| format!("database migration failed: {err}"))?;
+    let hasher = tokio::task::spawn_blocking(Argon2Hasher::new)
+        .await?
+        .map_err(|err| format!("password hasher start failed: {err}"))?;
+    let allocator = Arc::new(PgWorkerIdAllocator::new(
+        pool.clone(),
+        config.worker_lease_ttl,
+    ));
+    let (ids, heartbeat) = SnowflakeIdGenerator::start(allocator, config.worker_lease_ttl)
+        .await
+        .map_err(|err| format!("id generator start failed: {err}"))?;
 
-fn app() -> Router {
-    Router::new().nest("/api", Router::new().route("/healthz", get(healthz)))
-}
+    let ports = AuthPorts {
+        ids,
+        users: Arc::new(PgUserRepository::new(pool.clone())),
+        sessions: Arc::new(PgSessionStore::new(pool.clone())),
+        hasher: Arc::new(hasher),
+        breached: Arc::new(BreachedPasswordList::load()),
+    };
+    let broadcast_ports = BroadcastPorts {
+        repository: Arc::new(PgBroadcastRepository::new(pool.clone())),
+        query: Arc::new(PgBroadcastQuery::new(pool.clone())),
+    };
+    let state = AppState::new(
+        ports,
+        broadcast_ports,
+        config.allowed_origins.clone(),
+        config.demo_login_enabled,
+    );
+    if let Err(err) = state.auth.demo_log_in.seed().await {
+        if let Err(release_err) = heartbeat.shutdown().await {
+            tracing::warn!(%release_err, "could not release worker id lease");
+        }
+        return Err(format!("demo account seeding failed: {err}").into());
+    }
+    let limits = Arc::clone(&state.limits);
+    tokio::spawn(async move {
+        let mut ticks = tokio::time::interval(RATE_LIMIT_CLEANUP);
+        loop {
+            ticks.tick().await;
+            limits.forget_idle();
+        }
+    });
 
-async fn healthz() -> &'static str {
-    "ok"
+    tracing::info!(addr = %config.listen_addr, "listening");
+    let lease_lost = heartbeat.lease_lost();
+    let (lost_tx, mut lost_rx) = oneshot::channel();
+    let served = axum::serve(
+        listener,
+        app(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        tokio::select! {
+            () = shutdown_signal() => {}
+            () = lease_lost => {
+                tracing::error!("worker id lease lost, draining connections before exit");
+                let _ = lost_tx.send(());
+            }
+        }
+    })
+    .await;
+
+    match heartbeat.shutdown().await {
+        Ok(()) => tracing::info!("worker id lease released"),
+        Err(err) => tracing::warn!(%err, "could not release worker id lease"),
+    }
+    pool.close().await;
+    served?;
+    if lost_rx.try_recv().is_ok() {
+        // Exit non-zero so the container restarts with a fresh lease.
+        return Err("worker id lease lost".into());
+    }
+    Ok(())
 }
 
 async fn shutdown_signal() {
@@ -137,31 +220,16 @@ fn probe(target: SocketAddr) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use axum::{
-        body::{Body, to_bytes},
-        http::{Request, StatusCode},
-    };
-    use tower::ServiceExt;
+    use axum::{Router, routing::get};
 
     use super::*;
-
-    #[tokio::test]
-    async fn healthz_returns_ok() {
-        let response = app()
-            .oneshot(Request::get("/api/healthz").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = to_bytes(response.into_body(), 64).await.unwrap();
-        assert_eq!(&body[..], b"ok");
-    }
 
     #[tokio::test]
     async fn healthcheck_probe_reports_server_health() {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move { axum::serve(listener, app()).await });
+        let healthz = Router::new().route("/api/healthz", get(|| async { "ok" }));
+        tokio::spawn(async move { axum::serve(listener, healthz).await });
 
         let healthy = tokio::task::spawn_blocking(move || probe(addr))
             .await
@@ -184,25 +252,6 @@ mod tests {
             err.to_string().contains("HTTP/1.1 404 Not Found"),
             "error should carry the received status line, got: {err}"
         );
-    }
-
-    #[test]
-    fn listen_addr_defaults_only_when_unset() {
-        assert_eq!(
-            listen_addr(Err(VarError::NotPresent)),
-            Ok(SocketAddr::from(([0, 0, 0, 0], 8080)))
-        );
-        assert!(listen_addr(Err(VarError::NotUnicode(std::ffi::OsString::new()))).is_err());
-        assert!(listen_addr(Ok(String::new())).is_err());
-        assert_eq!(
-            listen_addr(Ok("127.0.0.1:9000".into())),
-            Ok(SocketAddr::from(([127, 0, 0, 1], 9000)))
-        );
-    }
-
-    #[test]
-    fn listen_addr_rejects_garbage() {
-        assert!(listen_addr(Ok("nope".into())).is_err());
     }
 
     #[test]
