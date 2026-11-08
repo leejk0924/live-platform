@@ -6,57 +6,69 @@ const run = (events: ReplayEvent[], from: ReplayState = initialReplay) => events
 const at = { time: 42, playing: true }
 
 test('a fetched URL is played', () => {
-  assert.deepEqual(run([{ type: 'urlLoaded', url: '/a' }]), { kind: 'ready', url: '/a', resume: null, retried: false })
+  assert.deepEqual(run([{ type: 'urlLoaded', url: '/a', now: 0 }]), {
+    kind: 'ready',
+    url: '/a',
+    loadedAt: 0,
+    resume: null,
+    retried: false,
+  })
 })
 
 test('a media error asks for a new URL and remembers where playback was', () => {
-  const state = run([{ type: 'urlLoaded', url: '/a' }, { type: 'progressed', time: 42 }, { type: 'mediaError', at }])
+  const state = run([{ type: 'urlLoaded', url: '/a', now: 0 }, { type: 'mediaError', at, now: 1000 }])
   assert.deepEqual(state, { kind: 'loading', resume: at, retried: true })
 })
 
 test('the new URL resumes from that position', () => {
-  const state = run([{ type: 'urlLoaded', url: '/a' }, { type: 'mediaError', at }, { type: 'urlLoaded', url: '/b' }])
-  assert.deepEqual(state, { kind: 'ready', url: '/b', resume: at, retried: true })
+  const state = run([
+    { type: 'urlLoaded', url: '/a', now: 0 },
+    { type: 'mediaError', at, now: 1000 },
+    { type: 'urlLoaded', url: '/b', now: 2000 },
+  ])
+  assert.deepEqual(state, { kind: 'ready', url: '/b', loadedAt: 2000, resume: at, retried: true })
 })
 
 test('a second failure in a row gives up, keeping the first position', () => {
   const state = run([
-    { type: 'urlLoaded', url: '/a' },
-    { type: 'mediaError', at },
-    { type: 'urlLoaded', url: '/b' },
-    { type: 'mediaError', at: { time: 0, playing: false } },
+    { type: 'urlLoaded', url: '/a', now: 0 },
+    { type: 'mediaError', at, now: 1000 },
+    { type: 'urlLoaded', url: '/b', now: 2000 },
+    { type: 'mediaError', at: { time: 0, playing: false }, now: 3000 },
   ])
   assert.deepEqual(state, { kind: 'failed', resume: at, error: null })
 })
 
 test('a fresh URL that loads but fails at the same spot gives up', () => {
   const state = run([
-    { type: 'urlLoaded', url: '/a' },
-    { type: 'progressed', time: 42 },
-    { type: 'mediaError', at },
-    { type: 'urlLoaded', url: '/b' },
-    { type: 'progressed', time: 42.5 },
-    { type: 'mediaError', at },
+    { type: 'urlLoaded', url: '/a', now: 0 },
+    { type: 'mediaError', at, now: 1000 },
+    { type: 'urlLoaded', url: '/b', now: 2000 },
+    { type: 'mediaError', at, now: 4000 },
   ])
   assert.deepEqual(state, { kind: 'failed', resume: at, error: null })
 })
 
-test('playing on past the restored position resets the count, so a later expiry refreshes again', () => {
-  const later = { time: 300, playing: true }
+test('an error on a URL that has worked for a while refreshes from where it stopped, even after rewinding', () => {
+  const rewound = { time: 460, playing: true }
   const state = run([
-    { type: 'urlLoaded', url: '/a' },
-    { type: 'mediaError', at },
-    { type: 'urlLoaded', url: '/b' },
-    { type: 'progressed', time: 44 },
-    { type: 'mediaError', at: later },
+    { type: 'urlLoaded', url: '/a', now: 0 },
+    { type: 'mediaError', at: { time: 3000, playing: true }, now: 400_000 },
+    { type: 'urlLoaded', url: '/b', now: 401_000 },
+    { type: 'mediaError', at: rewound, now: 800_000 },
   ])
-  assert.deepEqual(state, { kind: 'loading', resume: later, retried: true })
+  assert.deepEqual(state, { kind: 'loading', resume: rewound, retried: true })
 })
 
-test('after a manual retry, playing on drops the old position', () => {
-  const failed: ReplayState = { kind: 'failed', resume: at, error: null }
-  const state = run([{ type: 'retry' }, { type: 'urlLoaded', url: '/b' }, { type: 'progressed', time: 60 }], failed)
-  assert.deepEqual(state, { kind: 'ready', url: '/b', resume: null, retried: false })
+test('a paused viewer whose refreshed URL expires gets another one', () => {
+  const paused = { time: 600, playing: false }
+  const state = run([
+    { type: 'urlLoaded', url: '/a', now: 0 },
+    { type: 'mediaError', at: paused, now: 300_000 },
+    { type: 'urlLoaded', url: '/b', now: 301_000 },
+    { type: 'mediaError', at: { time: 600.5, playing: true }, now: 700_000 },
+  ])
+  assert.equal(state.kind, 'loading')
 })
 
 test('failing to get a URL shows the API error', () => {
@@ -71,7 +83,7 @@ test('retrying after giving up starts over from the kept position', () => {
 
 test('a media error while a URL is being fetched is ignored', () => {
   const loading: ReplayState = { kind: 'loading', resume: at, retried: true }
-  assert.equal(run([{ type: 'mediaError', at: { time: 0, playing: false } }], loading), loading)
+  assert.equal(run([{ type: 'mediaError', at: { time: 0, playing: false }, now: 0 }], loading), loading)
 })
 
 const durations = [

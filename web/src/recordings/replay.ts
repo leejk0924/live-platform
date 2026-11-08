@@ -1,41 +1,39 @@
 // Where to pick up after a new URL loads: the position and whether it was playing.
 export type Resume = { time: number; playing: boolean }
 
-// `retried`: the URL in hand replaced one that failed, and playback has not yet moved past `resume`.
-// Another media error then gives up instead of asking again, so a recording that loads but fails at
-// the same spot does not loop. Playing on past it means the URL worked, so a later expiry asks again.
+// `retried`: the URL in hand replaced one that failed less than `EXPIRY_SUSPECT_MS` after it was
+// loaded. Another quick media error then gives up instead of asking again, so a recording that fails
+// at the same spot does not loop. An error on a URL that has been in use longer may be its expiry
+// (the server signs for five minutes), so it always asks again from where playback stopped.
 // `error` is the API error when asking for a URL failed, `null` when the media itself failed.
 export type ReplayState =
   | { kind: 'loading'; resume: Resume | null; retried: boolean }
-  | { kind: 'ready'; url: string; resume: Resume | null; retried: boolean }
+  | { kind: 'ready'; url: string; loadedAt: number; resume: Resume | null; retried: boolean }
   | { kind: 'failed'; resume: Resume | null; error: unknown }
 
 export type ReplayEvent =
-  | { type: 'urlLoaded'; url: string }
+  | { type: 'urlLoaded'; url: string; now: number }
   | { type: 'urlFailed'; error: unknown }
-  | { type: 'progressed'; time: number }
-  | { type: 'mediaError'; at: Resume }
+  | { type: 'mediaError'; at: Resume; now: number }
   | { type: 'retry' }
 
-// More than the jitter between seeking to the restored position and the first time update after it.
-const PROGRESS_SECONDS = 1
+const EXPIRY_SUSPECT_MS = 60_000
 
 export const initialReplay: ReplayState = { kind: 'loading', resume: null, retried: false }
 
 export function replayReducer(state: ReplayState, event: ReplayEvent): ReplayState {
   switch (event.type) {
     case 'urlLoaded':
-      return state.kind === 'loading' ? { ...state, kind: 'ready', url: event.url } : state
+      return state.kind === 'loading' ? { ...state, kind: 'ready', url: event.url, loadedAt: event.now } : state
     case 'urlFailed':
       return state.kind === 'loading' ? { kind: 'failed', resume: state.resume, error: event.error } : state
-    case 'progressed':
-      return state.kind === 'ready' && state.resume && event.time > state.resume.time + PROGRESS_SECONDS
-        ? { ...state, resume: null, retried: false }
-        : state
     case 'mediaError': {
       if (state.kind !== 'ready') return state
-      // A URL that never loaded leaves the earlier position as the one to come back to.
-      const resume = state.resume ?? event.at
+      if (event.now - state.loadedAt >= EXPIRY_SUSPECT_MS) {
+        return { kind: 'loading', resume: event.at, retried: true }
+      }
+      // A replacement URL that fails at once leaves the position it was meant to restore.
+      const resume = state.retried ? (state.resume ?? event.at) : event.at
       return state.retried ? { kind: 'failed', resume, error: null } : { kind: 'loading', resume, retried: true }
     }
     case 'retry':

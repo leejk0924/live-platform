@@ -4,7 +4,7 @@ import { recordingApi } from '../api/recordings.ts'
 import { initialReplay, replayReducer } from './replay.ts'
 
 // The replay URL expires within minutes, so a media error asks for a fresh one and picks up where it
-// stopped. It asks again on a later error only after playback has moved on.
+// stopped. A fresh URL that fails again at once gives up (see replayReducer).
 export default function ReplayPlayer({ recordingId }: { recordingId: string }) {
   const video = useRef<HTMLVideoElement>(null)
   const [state, dispatch] = useReducer(replayReducer, initialReplay)
@@ -13,7 +13,7 @@ export default function ReplayPlayer({ recordingId }: { recordingId: string }) {
     if (state.kind !== 'loading') return
     let active = true
     recordingApi.replay(recordingId).then(
-      (replay) => active && dispatch({ type: 'urlLoaded', url: replay.url }),
+      (replay) => active && dispatch({ type: 'urlLoaded', url: replay.url, now: Date.now() }),
       (error: unknown) => active && dispatch({ type: 'urlFailed', error }),
     )
     return () => {
@@ -30,15 +30,10 @@ export default function ReplayPlayer({ recordingId }: { recordingId: string }) {
     }
   }
 
-  function onTimeUpdate() {
-    const element = video.current
-    if (element) dispatch({ type: 'progressed', time: element.currentTime })
-  }
-
   function onError() {
     const element = video.current
     if (!element) return
-    dispatch({ type: 'mediaError', at: { time: element.currentTime, playing: !element.paused } })
+    dispatch({ type: 'mediaError', at: { time: element.currentTime, playing: !element.paused }, now: Date.now() })
   }
 
   return (
@@ -51,7 +46,6 @@ export default function ReplayPlayer({ recordingId }: { recordingId: string }) {
         src={state.kind === 'ready' ? state.url : undefined}
         hidden={state.kind === 'failed'}
         onLoadedMetadata={onLoadedMetadata}
-        onTimeUpdate={onTimeUpdate}
         onError={onError}
       />
       {state.kind === 'loading' && <p role="status">영상을 불러오는 중…</p>}
