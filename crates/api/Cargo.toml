@@ -30,6 +30,7 @@ ed25519-dalek.workspace = true
 sha2.workspace = true
 tower.workspace = true
 sqlx.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true
