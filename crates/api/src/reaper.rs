@@ -7,6 +7,8 @@ use application::{
     reaper::{REAP_INTERVAL, Reaped, Reaper},
 };
 use domain::broadcast::BroadcastId;
+
+use crate::audit::{AuditEvent, audit};
 use tokio::{
     sync::oneshot,
     task::{JoinError, JoinHandle},
@@ -90,15 +92,26 @@ fn report_pass(finished: Result<Result<Option<Reaped>, PortError>, JoinError>) {
         tracing::warn!(%err, "reaper could not list the streams on air; nothing reconciled");
     }
     for (broadcast, err) in &reaped.kick_failures {
-        tracing::warn!(%err, %broadcast, "publisher was not disconnected; the next pass retries");
+        audit!(
+            warn,
+            AuditEvent::KickFailed,
+            %err,
+            %broadcast,
+            by = "reaper",
+            "publisher was not disconnected; the next pass retries"
+        );
     }
     for err in &reaped.housekeeping_failures {
         tracing::warn!(%err, "reaper housekeeping step failed; the next pass retries");
     }
-    if !reaped.not_active.is_empty() {
-        tracing::warn!(
-            broadcasts = %joined(&reaped.not_active),
-            "disconnecting publishers of broadcasts that are not active"
+    let failed = |id: &BroadcastId| reaped.kick_failures.iter().any(|(f, _)| f == id);
+    for broadcast in reaped.not_active.iter().filter(|id| !failed(id)) {
+        audit!(
+            warn,
+            AuditEvent::PublisherKicked,
+            %broadcast,
+            by = "reaper",
+            "publisher disconnect sent for a broadcast that is not active"
         );
     }
     let changed = !reaped.expired.is_empty()
@@ -131,4 +144,71 @@ fn joined(ids: &[BroadcastId]) -> String {
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(",")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{io, sync::Mutex};
+
+    use super::*;
+
+    #[derive(Clone, Default)]
+    struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl io::Write for LogBuffer {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().write(buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn id(raw: i64) -> BroadcastId {
+        BroadcastId::try_from(raw).unwrap()
+    }
+
+    #[test]
+    fn report_pass_audits_each_kicked_broadcast_except_failed_ones() {
+        let logs = LogBuffer::default();
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .with_writer(move || writer.clone())
+            .finish();
+        let (kicked, failed) = (id(1_001), id(1_002));
+        let reaped = Reaped {
+            not_active: vec![kicked, failed],
+            kick_failures: vec![(failed, PortError("media server down".into()))],
+            ..Reaped::default()
+        };
+
+        tracing::subscriber::with_default(subscriber, || report_pass(Ok(Ok(Some(reaped)))));
+
+        let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        let audits = |event: &str| -> Vec<&str> {
+            let event = format!(r#""event":"{event}""#);
+            logged
+                .lines()
+                .filter(|line| line.contains(r#""target":"audit""#) && line.contains(&event))
+                .collect()
+        };
+        let [kick] = audits("publisher_kicked")[..] else {
+            panic!("one publisher_kicked audit expected in {logged}");
+        };
+        assert!(
+            kick.contains(&format!(r#""broadcast":"{kicked}""#)),
+            "{kick}"
+        );
+        assert!(kick.contains(r#""by":"reaper""#), "{kick}");
+        let [failure] = audits("kick_failed")[..] else {
+            panic!("one kick_failed audit expected in {logged}");
+        };
+        assert!(
+            failure.contains(&format!(r#""broadcast":"{failed}""#)),
+            "{failure}"
+        );
+        assert!(failure.contains(r#""by":"reaper""#), "{failure}");
+    }
 }

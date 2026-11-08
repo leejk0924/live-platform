@@ -4,8 +4,9 @@
 #![allow(dead_code)]
 
 use std::{
+    io,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -35,6 +36,7 @@ use infrastructure::{
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
+use tracing_subscriber::fmt::MakeWriter;
 
 pub const ORIGIN: &str = "https://app.test";
 pub const PASSWORD: &str = "correct horse battery";
@@ -208,4 +210,55 @@ pub async fn sign_up(router: &Router, username: &str, password: &str) -> Reply {
         request(Method::POST, "/api/auth/signup", Some(body), None),
     )
     .await
+}
+
+/// Captures JSON log lines, request span fields included, so tests can
+/// assert what reached the logs.
+#[derive(Clone, Default)]
+pub struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+impl LogBuffer {
+    /// Starts capturing on this thread until the guard drops.
+    pub fn capture() -> (Self, tracing::subscriber::DefaultGuard) {
+        let logs = Self::default();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .with_current_span(true)
+            .with_writer(logs.clone())
+            .finish();
+        let guard = tracing::subscriber::set_default(subscriber);
+        (logs, guard)
+    }
+
+    pub fn contents(&self) -> String {
+        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+    }
+
+    /// The audit lines whose `event` is `event`.
+    pub fn audits(&self, event: &str) -> Vec<String> {
+        let event = format!(r#""event":"{event}""#);
+        self.contents()
+            .lines()
+            .filter(|line| line.contains(r#""target":"audit""#) && line.contains(&event))
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+impl io::Write for LogBuffer {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> MakeWriter<'a> for LogBuffer {
+    type Writer = LogBuffer;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
 }

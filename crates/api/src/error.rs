@@ -23,6 +23,11 @@ use tracing::Instrument;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use crate::{
+    audit::{AuditEvent, audit},
+    rate_limit::ClientKey,
+};
+
 pub const TRACE_ID_HEADER: &str = "x-trace-id";
 
 #[derive(Debug)]
@@ -142,7 +147,6 @@ impl ApiError {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn code(&self) -> &'static str {
         self.code
     }
@@ -221,19 +225,29 @@ pub struct ErrorBody<'a> {
     trace_id: &'a str,
 }
 
-/// Gives each request a trace id, runs it inside a span carrying that id,
-/// returns the id in `x-trace-id`, and renders [`ApiError`] responses.
+/// Gives each request a trace id, runs it inside a span carrying that id and
+/// the client (the signed-in user is recorded on it once known), returns the
+/// id in `x-trace-id`, renders [`ApiError`] responses, and audits every 403.
 pub async fn trace_id(request: Request, next: Next) -> Response {
     let trace_id = Uuid::new_v4().simple().to_string();
+    let client = ClientKey::of(request.headers(), request.extensions());
     let span = tracing::info_span!(
         "request",
         trace_id = %trace_id,
+        client = client.as_str(),
+        user = tracing::field::Empty,
         method = %request.method(),
         path = %request.uri().path(),
     );
-    let mut response = next.run(request).instrument(span).await;
+    let mut response = next.run(request).instrument(span.clone()).await;
+    let payload = response.extensions_mut().remove::<ErrorPayload>();
 
-    if let Some(payload) = response.extensions_mut().remove::<ErrorPayload>() {
+    if response.status() == StatusCode::FORBIDDEN {
+        let code = payload.as_ref().map(|payload| payload.code);
+        span.in_scope(|| audit!(warn, AuditEvent::Forbidden, code, "request forbidden"));
+    }
+
+    if let Some(payload) = payload {
         let body = ErrorBody {
             code: payload.code,
             message: &payload.message,

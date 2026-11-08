@@ -5,8 +5,7 @@
 mod support;
 
 use std::{
-    io,
-    sync::{Arc, Mutex, atomic::Ordering},
+    sync::{Arc, atomic::Ordering},
     time::Duration,
 };
 
@@ -20,10 +19,10 @@ use infrastructure::media::jwt::PUBLISH_TOKEN_TTL;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use support::{
-    CountingTerminator, KICK_FAILURE, PASSWORD, Reply, live_state_with, request, send, sign_up,
+    CountingTerminator, KICK_FAILURE, LogBuffer, PASSWORD, Reply, live_state_with, request, send,
+    sign_up,
 };
 use tokio::task::JoinSet;
-use tracing_subscriber::fmt::MakeWriter;
 
 struct World {
     pool: PgPool,
@@ -595,27 +594,6 @@ async fn a_client_that_hangs_up_mid_stop_still_gets_its_publisher_kicked(pool: P
     assert_eq!(world.stored(&id).await.status, "ENDED");
 }
 
-#[derive(Clone, Default)]
-struct LogBuffer(Arc<Mutex<Vec<u8>>>);
-
-impl io::Write for LogBuffer {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.lock().unwrap().write(buf)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> MakeWriter<'a> for LogBuffer {
-    type Writer = LogBuffer;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        self.clone()
-    }
-}
-
 #[sqlx::test(migrations = "../infrastructure/migrations")]
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn a_failed_kick_ends_the_broadcast_and_only_reaches_the_logs(pool: PgPool) {
@@ -628,12 +606,7 @@ async fn a_failed_kick_ends_the_broadcast_and_only_reaches_the_logs(pool: PgPool
     )
     .await;
     let id = world.broadcast_in("LIVE").await;
-    let logs = LogBuffer::default();
-    let subscriber = tracing_subscriber::fmt()
-        .json()
-        .with_writer(logs.clone())
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let (logs, _guard) = LogBuffer::capture();
 
     let reply = call(&world.router, Op::Stop, &id, Some(&world.owner)).await;
 
@@ -646,12 +619,16 @@ async fn a_failed_kick_ends_the_broadcast_and_only_reaches_the_logs(pool: PgPool
     );
     assert_eq!(world.stored(&id).await.status, "ENDED");
     assert_eq!(world.kicks(), 1);
-    let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
-    let warning = logged
-        .lines()
-        .find(|line| line.contains("the publisher was not disconnected"))
-        .unwrap_or_else(|| panic!("no warning in {logged}"));
+    let warnings = logs.audits("kick_failed");
+    let [warning] = warnings.as_slice() else {
+        panic!("one kick_failed audit expected in {}", logs.contents());
+    };
+    assert!(
+        warning.contains("the publisher was not disconnected"),
+        "{warning}"
+    );
     assert!(warning.contains(r#""level":"WARN""#), "{warning}");
+    assert!(warning.contains(r#""by":"owner""#), "{warning}");
     assert!(warning.contains(KICK_FAILURE), "{warning}");
     assert!(warning.contains(&id), "{warning}");
 }

@@ -4,14 +4,29 @@
 	skip_install_trust
 	# Clients send no SNI for an IP address, so a LAN test served on an IP needs a default to pick its certificate.
 	default_sni {$SITE_ADDRESS:localhost}
+	# Slowloris: a client that trickles its headers or body is cut off instead of holding a connection.
+	# No write timeout, so long-lived responses (LL-HLS blocking reloads, SSE) keep streaming.
+	servers {
+		timeouts {
+			read_header 10s
+			read_body 30s
+			idle 2m
+		}
+		max_header_size 32KB
+	}
 }
 
 {$SITE_ADDRESS:localhost} {
 	encode zstd gzip
 
 	header {
+		# hls.js runs its demuxer in a blob: worker and plays through a blob: MediaSource URL.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+		# compose.yml sets 0 for localhost: HSTS there would stop browsers from accepting the internal CA by hand.
+		Strict-Transport-Security "max-age={$HSTS_MAX_AGE:31536000}"
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(self), microphone=(self), display-capture=(self), geolocation=()"
 		-Server
 	}
 
@@ -38,4 +53,10 @@
 		try_files {path} /index.html
 		file_server
 	}
+}
+
+# Written out instead of left to automatic HTTPS: the redirect server Caddy adds on its own
+# does not get the global server timeouts above. ACME HTTP challenges are still answered here.
+http://{$SITE_ADDRESS:localhost} {
+	redir https://{host}{uri} 308
 }

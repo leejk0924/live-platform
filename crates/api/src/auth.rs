@@ -22,7 +22,8 @@ use axum::{
     routing::{get, post},
 };
 use domain::{
-    auth::{AuthError, DemoAccount, SessionToken, User, UserId},
+    auth::{AuthError, DemoAccount, SessionToken, User, UserId, Username},
+    error::DomainError,
     id::SnowflakeId,
     secret::Secret,
 };
@@ -32,6 +33,7 @@ use utoipa::ToSchema;
 
 use crate::{
     AppState,
+    audit::{AuditEvent, audit},
     error::{ApiError, ErrorBody},
     rate_limit::ClientKey,
 };
@@ -161,7 +163,10 @@ impl FromRequestParts<AppState> for MaybeUser {
             return Ok(Self(None));
         };
         match state.auth.authenticate.user_id(&token).await {
-            Ok(id) => Ok(Self(Some(id))),
+            Ok(id) => {
+                tracing::Span::current().record("user", tracing::field::display(id));
+                Ok(Self(Some(id)))
+            }
             Err(Error::Rejected(_)) => Ok(Self(None)),
             Err(err) => Err(api_error(err)),
         }
@@ -306,7 +311,22 @@ pub(crate) async fn log_in(
     body: Result<Json<Credentials>, JsonRejection>,
 ) -> Result<Response, ApiError> {
     let Json(body) = body.map_err(invalid_request)?;
-    state.limits.login(&client, &body.username)?;
+    // Anything that is not a username may be a password typed into the
+    // wrong field, so it stays out of the log.
+    let username = Username::parse(&body.username).ok();
+    let refused = |code: &str| {
+        audit!(
+            warn,
+            AuditEvent::LoginFailed,
+            code,
+            username = username.as_ref().map_or("<invalid>", Username::as_str),
+            "login refused"
+        );
+    };
+    if let Err(err) = state.limits.login(&client, &body.username) {
+        refused(err.code());
+        return Err(err);
+    }
     let result = state
         .auth
         .log_in
@@ -315,9 +335,11 @@ pub(crate) async fn log_in(
             Secret::new(body.password),
             previous.as_ref(),
         )
-        .await
-        .map_err(api_error)?;
-    Ok(signed_in(StatusCode::OK, result))
+        .await;
+    if let Err(Error::Rejected(err)) = &result {
+        refused(err.code());
+    }
+    Ok(signed_in(StatusCode::OK, result.map_err(api_error)?))
 }
 
 #[utoipa::path(
