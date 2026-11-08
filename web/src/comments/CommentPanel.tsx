@@ -2,10 +2,10 @@ import { useEffect, useLayoutEffect, useReducer, useRef, useState, type FormEven
 import { Link } from 'react-router'
 import { ApiError, errorMessage } from '../api/client.ts'
 import { commentApi, eventsUrl } from '../api/comments.ts'
-import type { Broadcast, ChatPolicy, Comment } from '../api/types.ts'
+import type { Broadcast, Comment } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
 import { draftAfterSaveError, saveArgs, startEdit, type EditDraft } from './commentEdit.ts'
-import { parseComments } from './events.ts'
+import { parseComments, parsePolicy } from './events.ts'
 import { commentsReducer, initialComments, visibleComments, type CommentsAction } from './commentsState.ts'
 
 const MAX_CHARS = 500
@@ -55,7 +55,9 @@ export default function CommentPanel({ broadcast }: { broadcast: Broadcast }) {
           else reload()
         })
         stream.addEventListener('policy', (e: MessageEvent<string>) => {
-          dispatch({ type: 'policy', slowModeSeconds: (JSON.parse(e.data) as ChatPolicy).slowModeSeconds })
+          const policy = parsePolicy(e.data)
+          if (policy) dispatch({ type: 'policy', slowModeSeconds: policy.slowModeSeconds })
+          else reload()
         })
         stream.addEventListener('reset', reload)
         stream.onerror = () => {
