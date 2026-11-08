@@ -15,17 +15,18 @@ const REFRESH_MS = 5000
 export default function BroadcastDetail() {
   const { id = '' } = useParams()
   const { state, reload } = useBroadcast(id)
-  const ended = state.status === 'loaded' && state.broadcast.status === 'ENDED'
 
-  // Viewers learn about start, interruption and end only by asking again.
+  // Viewers learn about start, interruption and end only by asking again. The next ask waits for the
+  // previous answer, since a new ask discards the one in flight: on a fixed interval, an answer slower
+  // than the interval would never land. A failed load stops asking and offers a retry instead.
   useEffect(() => {
-    if (ended) return
-    const timer = window.setInterval(reload, REFRESH_MS)
-    return () => window.clearInterval(timer)
-  }, [ended, reload])
+    if (state.status !== 'loaded' || state.broadcast.status === 'ENDED') return
+    const timer = window.setTimeout(reload, REFRESH_MS)
+    return () => window.clearTimeout(timer)
+  }, [state, reload])
 
   if (state.status === 'loading') return <p>불러오는 중…</p>
-  if (state.status === 'failed') return <LoadFailed error={state.error} />
+  if (state.status === 'failed') return <LoadFailed error={state.error} onRetry={reload} />
   return <BroadcastView broadcast={state.broadcast} onChanged={reload} />
 }
 

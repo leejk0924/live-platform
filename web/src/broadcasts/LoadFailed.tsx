@@ -1,7 +1,7 @@
 import { Link } from 'react-router'
 import { ApiError, errorMessage } from '../api/client.ts'
 
-export default function LoadFailed({ error }: { error: unknown }) {
+export default function LoadFailed({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const notFound = error instanceof ApiError && error.code === 'BROADCAST_NOT_FOUND'
   return (
     <>
@@ -10,6 +10,13 @@ export default function LoadFailed({ error }: { error: unknown }) {
         <p className="error" role="alert">
           {errorMessage(error)}
         </p>
+      )}
+      {!notFound && onRetry && (
+        <div className="actions">
+          <button type="button" onClick={onRetry}>
+            다시 시도
+          </button>
+        </div>
       )}
       <p>
         <Link to="/">홈으로</Link>
