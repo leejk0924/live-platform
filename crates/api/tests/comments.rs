@@ -531,3 +531,29 @@ async fn a_comment_posted_after_listing_an_empty_chat_reaches_the_stream(pool: P
     let replay = events.next().await.expect("the comment posted in between");
     assert_eq!(replay.json(), json!([posted.body]));
 }
+
+/// Ending a broadcast closes posting only: authors may still tidy up what
+/// they wrote.
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn authors_edit_and_delete_their_comments_after_the_broadcast_ends(pool: PgPool) {
+    let chat = chat(&pool).await;
+    let edited = chat.posted(&chat.viewer, "to edit").await;
+    let deleted = chat.posted(&chat.other, "to delete").await;
+    sqlx::query("UPDATE broadcasts SET status = 'ENDED', ended_at = now() WHERE id = $1")
+        .bind(chat.broadcast.parse::<i64>().unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let posted = chat.post(&chat.viewer, "late").await;
+    assert_eq!(posted.status, StatusCode::CONFLICT);
+    assert_eq!(posted.code(), "COMMENTS_CLOSED");
+    let put = chat.edit(&chat.viewer, &edited, "\"1\"", "edited").await;
+    assert_eq!(put.status, StatusCode::OK, "{}", put.body);
+    assert_eq!(put.body["body"], "edited");
+    assert_eq!(
+        chat.delete(&chat.other, &deleted).await.status,
+        StatusCode::NO_CONTENT
+    );
+}
