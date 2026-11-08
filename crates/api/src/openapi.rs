@@ -92,4 +92,18 @@ mod tests {
             path.display()
         );
     }
+
+    #[test]
+    fn description_states_the_request_limits_in_force() {
+        let description = ApiDoc::openapi().info.description.unwrap();
+        for limit in [
+            format!("{} KiB", crate::BODY_LIMIT / 1024),
+            format!("{} seconds", crate::REQUEST_TIMEOUT.as_secs()),
+        ] {
+            assert!(
+                description.contains(&limit),
+                "the description does not say {limit}"
+            );
+        }
+    }
 }
