@@ -6,7 +6,7 @@
 ## 1. 작업 흐름
 
 ```text
-이슈 생성 → 브랜치(worktree) 생성 → 최소 단위로 커밋 → PR → 리뷰 → squash merge → 브랜치 삭제 → 문서 갱신
+이슈 생성 → 브랜치(worktree) 생성 → 최소 단위로 커밋 → PR → 문서 갱신 → 리뷰 → squash merge → 브랜치 삭제 → 문서 마무리
 ```
 
 - 모든 작업은 GitHub 이슈에서 시작한다. 이슈 없는 작업은 하지 않는다.
@@ -146,12 +146,12 @@ cd web && npm run lint && npm run typecheck && npm run build
 
 ### Obsidian (개인 노트)
 
-작업 단위(PR)가 끝나면 Obsidian `개발/live-platform/`을 갱신한다. 저장소에는 들어가지 않는다.
+PR을 만든 뒤 Obsidian `개발/live-platform/`을 갱신한다. PR 번호와 링크가 필요해서 PR보다 먼저 쓰지 않는다. 머지 후 PR의 최종 상태로 맞춘다. 저장소에는 들어가지 않는다.
 
 | 폴더 | 언제 |
 |---|---|
 | `00-Overview/Timeline.md` | PR을 만들 때 한 줄 추가, 머지 후 머지 시각 기록. 이슈별 읽는 순서의 입구 |
-| `ADR/` | 저장소에 ADR을 쓸 때마다. 같은 결정의 상세판(배경, 검토한 방안, 장단점, 선택 이유, 기각 이유, 구현 코드). 형식은 `.claude/skills/issue-cycle/obsidian-adr.md` |
+| `ADR/` | 저장소에 ADR을 쓴 PR을 만들 때. 같은 결정의 상세판(배경, 검토한 방안, 장단점, 선택 이유, 기각 이유, 구현 코드). 형식은 `.claude/skills/issue-cycle/obsidian-adr.md` |
 | `Rust-Learning/` | 새 Rust 개념·패턴을 썼을 때 (Java 관점 설명) |
 | `Devlog/` | 매 작업일. 섹션마다 브랜치와 PR 링크, 머지 후 리뷰 수치를 PR 최종 표에 맞춤 |
 | `Security/` | 위협 모델이 바뀌었을 때 |

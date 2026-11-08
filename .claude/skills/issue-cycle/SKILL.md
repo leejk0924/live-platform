@@ -84,10 +84,7 @@ poteto-mode에 리뷰 결과를 넣고 **각 항목을 수용/거부로 판단�
 - 리뷰 처리에서 설계가 바뀐 결정(거부 이유가 설계 판단인 것 포함)도 ADR에 넣는다.
 - 기록할 결정이 없으면 ADR을 쓰지 않고 이유를 보고에 적는다.
 - 커밋: `docs: <요약> ADR을 남긴다` + `Refs #N`.
-- 같은 결정의 **상세판**을 Obsidian `ADR/<area>/<N>-<slug>.md`에 쓴다. 형식은 [obsidian-adr.md](obsidian-adr.md). 저장소 ADR은 요약판으로 둔다. 기존 ADR에 Follow-up을 붙였으면 상세판에도 같은 Follow-up을 붙인다.
-- Obsidian `Devlog/`와 해당 `Rust-Learning/` 노트를 갱신한다. 각 섹션 제목에 브랜치와 PR 링크를 단다.
-- Obsidian `00-Overview/Timeline.md`에 이 이슈를 한 줄 추가한다. 머지 열은 `(draft)`로 둔다.
-- Obsidian 쪽은 모두 저장소 밖이라 커밋하지 않는다.
+- Obsidian 쪽은 PR 번호와 링크가 필요하므로 7단계에서 한다.
 
 ## 6. push와 draft PR
 
@@ -100,11 +97,21 @@ poteto-mode에 리뷰 결과를 넣고 **각 항목을 수용/거부로 판단�
    - `관련 이슈`: 1단계에서 정한 `Closes #N` 또는 `Refs #N`.
    - `완료 조건`: 이슈의 완료 조건을 체크리스트로, 확인한 것만 체크.
 
-## 7. 보고
+## 7. Obsidian
+
+draft PR이 생긴 뒤에 한다. PR 번호와 링크를 여기서 처음 알 수 있다.
+
+1. 5단계 ADR의 **상세판**을 Obsidian `ADR/<area>/<N>-<slug>.md`에 쓴다. 형식은 [obsidian-adr.md](obsidian-adr.md). 저장소 ADR은 요약판으로 둔다. 기존 ADR에 Follow-up을 붙였으면 상세판에도 같은 Follow-up을 붙인다. 5단계에서 ADR을 쓰지 않았으면 건너뛴다.
+2. Obsidian `Devlog/`와 해당 `Rust-Learning/` 노트를 갱신한다. 각 섹션 제목에 브랜치와 PR 링크를 단다.
+3. Obsidian `00-Overview/Timeline.md`에 이 이슈를 한 줄 추가한다. 머지 열은 `(draft)`로 둔다.
+
+Obsidian 쪽은 모두 저장소 밖이라 커밋하지 않는다.
+
+## 8. 보고
 
 사용자에게 짧게 알린다: draft PR 링크, 리뷰 처리 집계(수용 n / 거부 n / 확인 필요 n)와 확인 필요 행 목록, ADR 경로(저장소와 Obsidian), 후속 이슈 후보, 끝내 확인하지 못한 완료 조건. 머지는 하지 않는다.
 
-## 8. 머지 후 (사용자가 머지를 요청했을 때만)
+## 9. 머지 후 (사용자가 머지를 요청했을 때만)
 
 1. PR의 CI가 모두 통과했는지 확인한다. 코드와 무관한 실패(다운로드 실패 등)는 실패한 job만 다시 돌린다.
 2. draft를 ready로 바꾸고 squash 머지한다. 본문은 이 PR의 커밋만 넣는다: `git log --no-merges --reverse --format='* %B' origin/main..origin/<type>/<N>`.
