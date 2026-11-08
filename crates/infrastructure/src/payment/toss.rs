@@ -91,7 +91,7 @@ enum Answer {
 }
 
 /// A payment from a 2xx answer; a refusal's code from a 4xx one with a JSON
-/// error body. Anything else may change on a retry.
+/// error body, other than 401 and 403. Anything else may change on a retry.
 async fn answer(response: Response) -> Result<Answer, GatewayError> {
     let status = response.status();
     let unavailable = |what: &str| GatewayError::Unavailable(format!("toss: {status}: {what}"));
@@ -114,6 +114,11 @@ async fn answer(response: Response) -> Result<Answer, GatewayError> {
             total_amount: payment.total_amount,
             approved_at: approved_at.map(Into::into),
         }));
+    }
+    // Toss refused our secret key, not the buyer's payment: a configuration
+    // fault for the operator, which the buyer must not read as a card refusal.
+    if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+        return Err(unavailable("secret key refused"));
     }
     let retryable = matches!(
         status,
@@ -378,6 +383,24 @@ mod tests {
                 matches!(result, Err(GatewayError::Unavailable(_))),
                 "{status} {body}: {result:?}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_key_toss_does_not_accept_is_unavailable_not_a_refusal() {
+        for (status, code) in [(401, "UNAUTHORIZED_KEY"), (403, "FORBIDDEN_REQUEST")] {
+            let body = json!({"code": code, "message": "x"});
+            let (base, _) = fake_toss(status, body.clone()).await;
+            let confirmed = toss(base).confirm(&confirmation()).await;
+            let (base, _) = fake_toss(status, body).await;
+            let looked_up = toss(base).lookup(&PaymentKey::parse(KEY).unwrap()).await;
+            for err in [confirmed.unwrap_err(), looked_up.unwrap_err()] {
+                let GatewayError::Unavailable(reason) = &err else {
+                    panic!("{status}: {err:?}");
+                };
+                assert!(reason.contains(&status.to_string()), "{reason}");
+                assert!(!reason.contains(SECRET), "{reason}");
+            }
         }
     }
 
