@@ -9,7 +9,7 @@ mod support;
 use std::sync::Arc;
 
 use api::app;
-use application::ports::payment::GatewayError;
+use application::ports::payment::{GatewayError, GatewayPayment, PaymentStatus};
 use axum::{
     Router,
     body::Body,
@@ -372,5 +372,106 @@ async fn payments_are_audited_without_the_payment_key(pool: PgPool) {
     assert!(
         !logs.contents().contains(KEY),
         "the payment key reached the logs"
+    );
+}
+
+/// A live broadcast by `owner`, and the router with Toss answered by
+/// `gateway`.
+async fn donation_shop(pool: &PgPool, gateway: Arc<FakePaymentGateway>) -> (Router, String) {
+    let router = app(donation_state(pool, gateway).await);
+    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let id = create_broadcast(&router, &owner).await;
+    let started = send(
+        &router,
+        request(
+            Method::POST,
+            &format!("/api/broadcasts/{id}/start"),
+            None,
+            Some(&owner),
+        ),
+    )
+    .await;
+    assert_eq!(started.status, StatusCode::OK, "{}", started.body);
+    (router, id)
+}
+
+async fn ordered(router: &Router, broadcast: &str, donor: &str, amount: i64) -> String {
+    let reply = send(
+        router,
+        request(
+            Method::POST,
+            &format!("/api/broadcasts/{broadcast}/donations"),
+            Some(json!({"amount": amount})),
+            Some(donor),
+        ),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::CREATED, "{}", reply.body);
+    reply.body["orderId"].as_str().unwrap().to_owned()
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn webhook_rechecks_are_audited_without_the_payment_key(pool: PgPool) {
+    const CREDITED: &str = "tgen_webhook_credited_key";
+    const SHORT: &str = "tgen_webhook_short_paid_key";
+    let (logs, _guard) = LogBuffer::capture();
+    let gateway = Arc::new(FakePaymentGateway::default());
+    let (router, broadcast) = donation_shop(&pool, gateway.clone()).await;
+    let viewer = sign_up(&router, "viewer", PASSWORD).await.token();
+    let other = sign_up(&router, "other", PASSWORD).await.token();
+    let credited = ordered(&router, &broadcast, &viewer, 5000).await;
+    let short = ordered(&router, &broadcast, &other, 7000).await;
+
+    for (key, order, amount) in [(CREDITED, &credited, 5000), (SHORT, &short, 1000)] {
+        gateway.answer_lookup(Ok(Some(GatewayPayment {
+            payment_key: key.into(),
+            order_id: order.clone(),
+            status: PaymentStatus::Done,
+            total_amount: amount,
+            approved_at: None,
+        })));
+        let notification = json!({
+            "eventType": "PAYMENT_STATUS_CHANGED",
+            "data": {"paymentKey": key, "orderId": order, "status": "DONE", "totalAmount": amount}
+        });
+        let request = Request::post("/api/payments/toss/webhook")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(notification.to_string()))
+            .unwrap();
+        assert_eq!(send(&router, request).await.status, StatusCode::OK);
+    }
+
+    let audits = logs.audits("payment_webhook_checked");
+    let [credited_line, short_line] = audits.as_slice() else {
+        panic!(
+            "two payment_webhook_checked audits expected in {}",
+            logs.contents()
+        );
+    };
+    assert!(
+        credited_line.contains(r#""outcome":"credited""#),
+        "{credited_line}"
+    );
+    assert!(
+        credited_line.contains(&format!(r#""donation":"{credited}""#)),
+        "{credited_line}"
+    );
+    for field in [
+        r#""outcome":"amount_mismatch""#,
+        r#""expected":7000"#,
+        r#""got":1000"#,
+        r#""level":"WARN""#,
+    ] {
+        assert!(short_line.contains(field), "{short_line}");
+    }
+    assert!(
+        short_line.contains(&format!(r#""donation":"{short}""#)),
+        "{short_line}"
+    );
+    let contents = logs.contents();
+    assert!(
+        !contents.contains(CREDITED) && !contents.contains(SHORT),
+        "a payment key reached the logs"
     );
 }
