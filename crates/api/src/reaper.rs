@@ -92,6 +92,9 @@ fn report_pass(finished: Result<Result<Option<Reaped>, PortError>, JoinError>) {
     for (broadcast, err) in &reaped.kick_failures {
         tracing::warn!(%err, %broadcast, "publisher was not disconnected; the next pass retries");
     }
+    for err in &reaped.housekeeping_failures {
+        tracing::warn!(%err, "reaper housekeeping step failed; the next pass retries");
+    }
     if !reaped.not_active.is_empty() {
         tracing::warn!(
             broadcasts = %joined(&reaped.not_active),

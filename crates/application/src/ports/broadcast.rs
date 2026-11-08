@@ -114,6 +114,11 @@ pub trait ReaperStore: Send + Sync {
 /// One reaper pass. Its writes take effect together at [`ReapPass::finish`];
 /// dropping it unfinished undoes them. Times are the store's clock, and
 /// "now" is when the pass began.
+///
+/// The housekeeping steps ([`ReapPass::forget_spent_tickets`],
+/// [`ReapPass::forget_expired_sessions`], [`ReapPass::reset_demo_broadcasts`])
+/// are independent of the status changes: a failed one undoes only its own
+/// writes, and the pass can still finish.
 #[async_trait]
 pub trait ReapPass: Send {
     /// Applies [`domain::broadcast::BroadcastEvent::Resume`] to the

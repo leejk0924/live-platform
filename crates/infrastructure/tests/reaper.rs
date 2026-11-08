@@ -482,3 +482,48 @@ async fn demo_broadcasts_from_before_today_are_reset_once_they_are_not_active(po
         .unwrap();
     assert!(again.demo_reset.is_empty(), "a second pass resets nothing");
 }
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_failed_housekeeping_step_undoes_only_itself(pool: PgPool) {
+    sqlx::raw_sql(
+        "CREATE FUNCTION refuse() RETURNS trigger LANGUAGE plpgsql AS \
+             $$ BEGIN RAISE EXCEPTION 'sessions are locked'; END $$; \
+         CREATE TRIGGER refuse_delete BEFORE DELETE ON sessions \
+             FOR EACH ROW EXECUTE FUNCTION refuse();",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    owners(&pool, 1).await;
+    sqlx::query("INSERT INTO users (id, username, is_demo) VALUES (2, 'demo2', true)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    broadcast(&pool, 1, "INTERRUPTED", 31.0).await;
+    broadcast(&pool, 2, "ENDED", 60.0).await;
+    created_after_korean_midnight(&pool, 2, -86_400.0).await;
+    session(&pool, 1, 0.0, -1.0).await;
+    let kicks = Arc::new(Kicks::default());
+
+    let reaped = reaper(&pool, Probe::on_air(&[]), kicks.clone())
+        .tick()
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(reaped.housekeeping_failures.len(), 1);
+    assert_eq!(reaped.expired, ids(&[1]));
+    assert_eq!(stored(&pool, 1).await, ("ENDED".into(), 2, false, true));
+    assert_eq!(*kicks.0.lock().unwrap(), ["live/1"]);
+    assert_eq!(
+        session_tags(&pool).await,
+        [1],
+        "the failed step deleted nothing"
+    );
+    assert_eq!(
+        reaped.demo_reset,
+        ids(&[2]),
+        "the step after the failed one still ran"
+    );
+}

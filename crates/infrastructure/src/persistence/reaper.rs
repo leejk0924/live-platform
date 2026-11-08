@@ -9,7 +9,7 @@ use domain::{
     broadcast::{BroadcastEvent, BroadcastId, BroadcastStatus},
     id::SnowflakeId,
 };
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Acquire, PgPool, Postgres, Transaction};
 
 use super::{IDLE_TIMEOUT, status_names};
 
@@ -154,29 +154,34 @@ impl ReapPass for PgReapPass {
     }
 
     async fn forget_spent_tickets(&mut self) -> Result<u64, PortError> {
+        let mut step = self.tx.begin().await.map_err(port_error)?;
         let deleted = sqlx::query(
             "DELETE FROM publish_token_uses WHERE expires_at < now() - make_interval(secs => $1)",
         )
         .bind(SPENT_TICKET_RETENTION.as_secs_f64())
-        .execute(&mut *self.tx)
+        .execute(&mut *step)
         .await
         .map_err(port_error)?;
+        step.commit().await.map_err(port_error)?;
         Ok(deleted.rows_affected())
     }
 
     async fn forget_expired_sessions(&mut self) -> Result<u64, PortError> {
+        let mut step = self.tx.begin().await.map_err(port_error)?;
         let deleted = sqlx::query(
             "DELETE FROM sessions \
              WHERE expires_at <= now() OR last_seen_at <= now() - make_interval(secs => $1)",
         )
         .bind(IDLE_TIMEOUT.as_secs_f64())
-        .execute(&mut *self.tx)
+        .execute(&mut *step)
         .await
         .map_err(port_error)?;
+        step.commit().await.map_err(port_error)?;
         Ok(deleted.rows_affected())
     }
 
     async fn reset_demo_broadcasts(&mut self) -> Result<Vec<BroadcastId>, PortError> {
+        let mut step = self.tx.begin().await.map_err(port_error)?;
         let reset: Vec<i64> = sqlx::query_scalar(
             "UPDATE broadcasts b \
              SET deleted_at = now(), version = b.version + 1, updated_at = now() \
@@ -188,9 +193,10 @@ impl ReapPass for PgReapPass {
         )
         .bind(status_names(&BroadcastStatus::DELETABLE))
         .bind(DEMO_RESET_TIME_ZONE)
-        .fetch_all(&mut *self.tx)
+        .fetch_all(&mut *step)
         .await
         .map_err(port_error)?;
+        step.commit().await.map_err(port_error)?;
         to_ids(reset)
     }
 
