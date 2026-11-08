@@ -20,7 +20,7 @@ DB 테스트는 `#[ignore]`라 `cargo test --workspace -- --include-ignored`로 
 | 위협 | 대응 | 코드 | 검증 |
 |---|---|---|---|
 | 내부 정보 노출 | 모든 에러는 `{code, message, traceId}`만, 500은 원인을 로그에만 | `crates/api/src/error.rs` | `api::error` 단위 테스트 `internal_error_hides_the_detail_and_logs_it`, `api::lib` `handler_panic_is_an_internal_envelope_without_the_payload` |
-| 부인(Repudiation) | 감사 로그: target `audit`, 이벤트 `login_failed` `forbidden` `publisher_kicked` `kick_failed` `media_access_denied`. 요청 span에 `trace_id` `client` `user` | `crates/api/src/audit.rs`, `crates/api/src/error.rs` | `tests/request_logging.rs` `a_forbidden_response_is_one_audit_line_with_the_request_context`, `tests/audit_log.rs` 3개 |
+| 부인(Repudiation) | 감사 로그: target `audit`, 이벤트 `login_failed` `forbidden` `publisher_kicked` `kick_failed` `media_access_denied`. 요청 span에 `trace_id` `client` `user` | `crates/api/src/audit.rs`, `crates/api/src/error.rs` | `tests/request_logging.rs` `a_forbidden_response_is_one_audit_line_with_the_request_context`, `tests/audit_log.rs` 6개, `api::reaper` `report_pass_audits_each_kicked_broadcast_except_failed_ones` |
 | 느린 연결·큰 요청(DoS) | API 요청 10초, 본문 64KB. Caddy가 헤더 10초·본문 30초 안에 오지 않는 연결과 32KB 넘는 헤더를 끊는다 | `crates/api/src/lib.rs`, `deploy/caddy/Caddyfile` | `api::lib` `bounded_request_past_the_time_limit_is_a_timeout_envelope`, `body_over_the_limit_is_a_payload_too_large_envelope`, `deploy/check-hardening.sh` |
 
 ### S2. 로그인·세션
