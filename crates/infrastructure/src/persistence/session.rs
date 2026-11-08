@@ -53,16 +53,11 @@ impl SessionStore for PgSessionStore {
     async fn create(&self, user: UserId) -> Result<SessionToken, PortError> {
         let token = new_token()?;
         sqlx::query(
-            "WITH expired AS ( \
-                 DELETE FROM sessions WHERE user_id = $2 \
-                   AND (expires_at <= now() OR last_seen_at <= now() - make_interval(secs => $3)) \
-             ) \
-             INSERT INTO sessions (token_hash, user_id, expires_at) \
-             VALUES ($1, $2, now() + make_interval(secs => $4))",
+            "INSERT INTO sessions (token_hash, user_id, expires_at) \
+             VALUES ($1, $2, now() + make_interval(secs => $3))",
         )
         .bind(token_hash(&token).as_slice())
         .bind(user.as_i64())
-        .bind(IDLE_TIMEOUT.as_secs_f64())
         .bind(ABSOLUTE_TIMEOUT.as_secs_f64())
         .execute(&self.pool)
         .await

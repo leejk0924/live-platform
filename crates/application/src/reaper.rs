@@ -1,5 +1,6 @@
 //! The reaper: ends broadcasts whose publisher did not come back within the
-//! grace period, and repairs statuses the media server's reports missed.
+//! grace period, repairs statuses the media server's reports missed, and
+//! deletes records nobody can use any more.
 
 use std::{sync::Arc, time::Duration};
 
@@ -25,6 +26,7 @@ pub struct Reaped {
     /// every pass that still sees them.
     pub not_active: Vec<BroadcastId>,
     pub forgotten_tickets: u64,
+    pub forgotten_sessions: u64,
     /// The media server could not be asked, so nothing was reconciled. A
     /// pass never interrupts broadcasts because the media server is
     /// unreachable.
@@ -63,6 +65,7 @@ impl Reaper {
         }
         reaped.expired = pass.expire(INTERRUPT_GRACE).await?;
         reaped.forgotten_tickets = pass.forget_spent_tickets().await?;
+        reaped.forgotten_sessions = pass.forget_expired_sessions().await?;
         pass.finish().await?;
 
         for &id in reaped.expired.iter().chain(&reaped.not_active) {

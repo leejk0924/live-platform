@@ -11,7 +11,7 @@ use domain::{
 };
 use sqlx::{PgPool, Postgres, Transaction};
 
-use super::status_names;
+use super::{IDLE_TIMEOUT, status_names};
 
 /// The advisory lock a pass holds; any 64-bit value no other lock uses.
 pub const REAPER_LOCK_KEY: i64 = 0x6c70_5f72_6561_7072;
@@ -154,6 +154,18 @@ impl ReapPass for PgReapPass {
             "DELETE FROM publish_token_uses WHERE expires_at < now() - make_interval(secs => $1)",
         )
         .bind(SPENT_TICKET_RETENTION.as_secs_f64())
+        .execute(&mut *self.tx)
+        .await
+        .map_err(port_error)?;
+        Ok(deleted.rows_affected())
+    }
+
+    async fn forget_expired_sessions(&mut self) -> Result<u64, PortError> {
+        let deleted = sqlx::query(
+            "DELETE FROM sessions \
+             WHERE expires_at <= now() OR last_seen_at <= now() - make_interval(secs => $1)",
+        )
+        .bind(IDLE_TIMEOUT.as_secs_f64())
         .execute(&mut *self.tx)
         .await
         .map_err(port_error)?;

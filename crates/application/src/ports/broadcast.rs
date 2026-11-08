@@ -139,6 +139,10 @@ pub trait ReapPass: Send {
     /// presented. Returns how many.
     async fn forget_spent_tickets(&mut self) -> Result<u64, PortError>;
 
+    /// Deletes every session past its idle or absolute timeout. Returns how
+    /// many.
+    async fn forget_expired_sessions(&mut self) -> Result<u64, PortError>;
+
     async fn finish(self: Box<Self>) -> Result<(), PortError>;
 }
 

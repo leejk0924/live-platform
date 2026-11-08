@@ -16,7 +16,10 @@ use application::{
 };
 use async_trait::async_trait;
 use domain::broadcast::BroadcastId;
-use infrastructure::{media::MediaMtxIngestRouter, persistence::PgReaperStore};
+use infrastructure::{
+    media::MediaMtxIngestRouter,
+    persistence::{IDLE_TIMEOUT, PgReaperStore},
+};
 use sqlx::PgPool;
 
 /// Says these broadcasts are on air, or fails, after `delay`.
@@ -335,4 +338,78 @@ async fn streams_of_broadcasts_that_are_not_on_air_are_kicked_every_pass(pool: P
         kicks.0.lock().unwrap().clear();
     }
     assert_eq!(stored(&pool, 2).await, ("ENDED".into(), 1, false, false));
+}
+
+/// A session of user 1 whose `last_seen_at` and `expires_at` are these many
+/// seconds from the database's `now()`.
+async fn session(pool: &PgPool, tag: u8, last_seen_secs_ago: f64, expires_in_secs: f64) {
+    sqlx::query(
+        "INSERT INTO sessions (token_hash, user_id, last_seen_at, expires_at) \
+         VALUES ($1, 1, now() - make_interval(secs => $2), now() + make_interval(secs => $3))",
+    )
+    .bind([tag; 32].as_slice())
+    .bind(last_seen_secs_ago)
+    .bind(expires_in_secs)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn session_tags(pool: &PgPool) -> Vec<u8> {
+    let hashes: Vec<Vec<u8>> =
+        sqlx::query_scalar("SELECT token_hash FROM sessions ORDER BY token_hash")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    hashes.into_iter().map(|hash| hash[0]).collect()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn sessions_past_their_idle_or_absolute_timeout_are_forgotten(pool: PgPool) {
+    owners(&pool, 1).await;
+    session(&pool, 1, IDLE_TIMEOUT.as_secs_f64() + 1.0, 3600.0).await;
+    session(&pool, 2, 0.0, -1.0).await;
+    session(&pool, 3, IDLE_TIMEOUT.as_secs_f64() - 60.0, 3600.0).await;
+
+    let reaped = reaper(&pool, Probe::on_air(&[]), Arc::default())
+        .tick()
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(reaped.forgotten_sessions, 2);
+    assert_eq!(session_tags(&pool).await, [3], "the live session is kept");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn two_reapers_forget_expired_sessions_once(pool: PgPool) {
+    owners(&pool, 1).await;
+    session(&pool, 1, IDLE_TIMEOUT.as_secs_f64() + 1.0, 3600.0).await;
+    session(&pool, 2, 0.0, -1.0).await;
+    let slow = reaper(
+        &pool,
+        Probe {
+            on_air: Mutex::new(Some(Vec::new())),
+            delay: Duration::from_millis(500),
+        },
+        Arc::default(),
+    );
+    let other = reaper(&pool, Probe::on_air(&[]), Arc::default());
+
+    let (first, second) = tokio::join!(slow.tick(), async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        other.tick().await
+    });
+
+    assert_eq!(
+        first
+            .unwrap()
+            .expect("the first pass ran")
+            .forgotten_sessions,
+        2
+    );
+    assert_eq!(second.unwrap(), None, "the second found the lock held");
+    assert!(session_tags(&pool).await.is_empty());
 }

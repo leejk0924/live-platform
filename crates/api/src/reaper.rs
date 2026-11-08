@@ -109,6 +109,12 @@ fn report_pass(finished: Result<Result<Option<Reaped>, PortError>, JoinError>) {
             "reaper changed broadcast statuses"
         );
     }
+    if reaped.forgotten_sessions > 0 {
+        tracing::info!(
+            sessions = reaped.forgotten_sessions,
+            "reaper deleted expired sessions"
+        );
+    }
 }
 
 fn joined(ids: &[BroadcastId]) -> String {
