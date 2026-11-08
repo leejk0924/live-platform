@@ -294,6 +294,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/recordings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List recordings, newest first */
+        get: operations["listRecordings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recordings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one recording */
+        get: operations["getRecording"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recordings/{id}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The recording itself, through a URL from getReplay
+         * @description Served only when recordings are kept on the API host; otherwise getReplay points at the CDN. Exempt from the 10-second request limit.
+         */
+        get: operations["getRecordingFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/recordings/{id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A short-lived URL to watch a ready recording */
+        get: operations["getReplay"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -453,6 +524,52 @@ export interface components {
              * @example /media/webrtc/live/112007303372210176/whip
              */
             whipUrl: string;
+        };
+        /**
+         * @description One recorded segment of a broadcast. A broadcast may have several: one
+         *     per publisher connection, and one per 30 minutes of a long one.
+         */
+        Recording: {
+            /** @example 112007303372210176 */
+            broadcastId: string;
+            broadcastTitle: string;
+            /** Format: int64 */
+            durationMs: number;
+            /** @example 112007303372210177 */
+            id: string;
+            ownerName: string;
+            /**
+             * Format: date-time
+             * @description When the segment finished.
+             */
+            recordedAt: string;
+            /**
+             * Format: int64
+             * @description Known once `READY`.
+             */
+            sizeBytes: number | null;
+            status: components["schemas"]["RecordingStatus"];
+        };
+        RecordingPage: {
+            items: components["schemas"]["Recording"][];
+            /** @description Pass as `before` for the next page; `null` on the last page. */
+            nextBefore: string | null;
+        };
+        /** @enum {string} */
+        RecordingStatus: "PENDING" | "READY" | "FAILED";
+        Replay: {
+            /**
+             * Format: date-time
+             * @description When `url` stops working: the recording's length plus five minutes
+             *     from now.
+             */
+            expiresAt: string;
+            /**
+             * @description An MP4 to play in a `<video>` element. It supports range requests,
+             *     so seeking works. Ask again for a new one when playback fails.
+             * @example /api/recordings/112007303372210177/file?expires=1794200000&signature=...
+             */
+            url: string;
         };
         User: {
             /**
@@ -1596,6 +1713,178 @@ export interface operations {
                 };
             };
             /** @description `BROADCAST_NOT_LIVE`: ready or already ended */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    listRecordings: {
+        parameters: {
+            query?: {
+                /** @description Only this broadcast's recordings. */
+                broadcastId?: string;
+                /** @description Only recordings older than this id: the previous page's `nextBefore`. */
+                before?: string;
+                /** @description Page size, 1 to 50. Defaults to 20. */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The same for every viewer. Recordings of deleted broadcasts are left out. */
+            200: {
+                headers: {
+                    /** @description `public, max-age=5` */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingPage"];
+                };
+            };
+            /** @description `INVALID_QUERY` or `INVALID_PAGE_SIZE` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    getRecording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Recording id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The recording. */
+            200: {
+                headers: {
+                    /** @description `public, max-age=5` */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Recording"];
+                };
+            };
+            /** @description `RECORDING_NOT_FOUND`, also when its broadcast was deleted */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    getRecordingFile: {
+        parameters: {
+            query: {
+                /** @description Unix seconds, from the replay URL. */
+                expires: number;
+                /** @description From the replay URL. */
+                signature: string;
+            };
+            header?: never;
+            path: {
+                /** @description Recording id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The whole file. */
+            200: {
+                headers: {
+                    /** @description `private, no-store` */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": unknown;
+                };
+            };
+            /** @description The requested `Range`. */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": unknown;
+                };
+            };
+            /** @description `INVALID_SIGNATURE`: the URL was altered or has expired */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `RECORDING_NOT_FOUND`, also when its broadcast was deleted after the URL was issued */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    getReplay: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Recording id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A URL signed for this request. */
+            200: {
+                headers: {
+                    /** @description `no-store` */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Replay"];
+                };
+            };
+            /** @description `RECORDING_NOT_FOUND`, also when its broadcast was deleted */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `RECORDING_NOT_READY`: pending or failed */
             409: {
                 headers: {
                     [name: string]: unknown;

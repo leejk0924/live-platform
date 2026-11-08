@@ -11,7 +11,7 @@ use utoipa::{
     },
 };
 
-use crate::{auth, broadcast, comment, comment_stream, live};
+use crate::{auth, broadcast, comment, comment_stream, live, recording};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -48,12 +48,17 @@ use crate::{auth, broadcast, comment, comment_stream, live};
         comment::get_policy,
         comment::set_policy,
         comment_stream::follow,
+        recording::list,
+        recording::get_one,
+        recording::replay,
+        recording::file,
     ),
     modifiers(&SessionCookie),
     tags(
         (name = "auth", description = "Accounts and sessions"),
         (name = "broadcasts", description = "Broadcast registration, browsing, going live, ending and watching"),
         (name = "comments", description = "Comments on a broadcast, its chat policy and its live event stream"),
+        (name = "recordings", description = "Recorded segments of broadcasts and their replay"),
     ),
 )]
 pub struct ApiDoc;
