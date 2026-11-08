@@ -362,7 +362,7 @@ async fn payments_are_audited_without_the_payment_key(pool: PgPool) {
     assert!(confirmed.contains(r#""credited":true"#), "{confirmed}");
     let rejected = one("payment_rejected");
     assert!(
-        rejected.contains(r#""gateway_code":"REJECT_CARD_PAYMENT""#),
+        rejected.contains(r#""reason":"REJECT_CARD_PAYMENT""#),
         "{rejected}"
     );
     assert!(
@@ -408,6 +408,51 @@ async fn ordered(router: &Router, broadcast: &str, donor: &str, amount: i64) -> 
     .await;
     assert_eq!(reply.status, StatusCode::CREATED, "{}", reply.body);
     reply.body["orderId"].as_str().unwrap().to_owned()
+}
+
+async fn confirm(router: &Router, donor: &str, order: &str, key: &str, amount: i64) -> Reply {
+    send(
+        router,
+        request(
+            Method::POST,
+            "/api/donations/confirm",
+            Some(json!({"paymentKey": key, "orderId": order, "amount": amount})),
+            Some(donor),
+        ),
+    )
+    .await
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn an_approved_payment_that_is_not_credited_is_audited_without_the_key(pool: PgPool) {
+    const KEY: &str = "tgen_key_paid_another_order";
+    let (logs, _guard) = LogBuffer::capture();
+    let (router, broadcast) = donation_shop(&pool, Arc::default()).await;
+    let viewer = sign_up(&router, "viewer", PASSWORD).await.token();
+    let other = sign_up(&router, "other", PASSWORD).await.token();
+    let paid = ordered(&router, &broadcast, &viewer, 5000).await;
+    let reply = confirm(&router, &viewer, &paid, KEY, 5000).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+
+    let order = ordered(&router, &broadcast, &other, 5000).await;
+    let reply = confirm(&router, &other, &order, KEY, 5000).await;
+
+    assert_eq!(
+        (reply.status, reply.code()),
+        (StatusCode::CONFLICT, "ALREADY_PAID")
+    );
+    let audits = logs.audits("payment_rejected");
+    let [line] = audits.as_slice() else {
+        panic!("one payment_rejected audit expected in {}", logs.contents());
+    };
+    assert!(line.contains(&format!(r#""donation":"{order}""#)), "{line}");
+    assert!(line.contains(r#""reason":"already_paid""#), "{line}");
+    assert!(line.contains(r#""level":"WARN""#), "{line}");
+    assert!(
+        !logs.contents().contains(KEY),
+        "the payment key reached the logs"
+    );
 }
 
 #[sqlx::test(migrations = "../infrastructure/migrations")]

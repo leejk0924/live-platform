@@ -26,6 +26,7 @@ use axum::{
 };
 use domain::{
     donation::{DonationError, DonationId},
+    error::DomainError,
     id::SnowflakeId,
     secret::Secret,
 };
@@ -416,37 +417,38 @@ pub(crate) async fn confirm(
     }
 }
 
-/// The order id as the client sent it is logged only when it is one.
+/// Every refused confirm leaves one line, whether or not the provider was
+/// asked: one it approved but we did not credit must be traceable. The
+/// order id as the client sent it is logged only when it is one.
 fn audit_refused_confirm(order_id: &str, err: &Error) {
     let donation = order_id
         .parse::<DonationId>()
         .map_or_else(|_| "<invalid>".to_owned(), |id| id.to_string());
-    match err {
-        Error::AmountMismatch { expected, got, at } => audit!(
-            warn,
-            AuditEvent::PaymentAmountMismatch,
-            donation,
-            expected,
-            got,
-            at = at.as_str(),
-            "payment amount differs from the order"
-        ),
-        Error::PaymentRejected { code } => audit!(
-            warn,
-            AuditEvent::PaymentRejected,
-            donation,
-            gateway_code = code.as_str(),
-            "payment refused"
-        ),
-        Error::GatewayUnavailable(_) => audit!(
-            warn,
-            AuditEvent::PaymentRejected,
-            donation,
-            gateway_code = "gateway_unavailable",
-            "payment not confirmed: no answer from the gateway"
-        ),
-        Error::Rejected(_) | Error::RateLimited(_) | Error::Internal(_) => {}
-    }
+    let reason = match err {
+        Error::AmountMismatch { expected, got, at } => {
+            return audit!(
+                warn,
+                AuditEvent::PaymentAmountMismatch,
+                donation,
+                expected,
+                got,
+                at = at.as_str(),
+                "payment amount differs from the order"
+            );
+        }
+        Error::PaymentRejected { code } => code.clone(),
+        Error::GatewayUnavailable(_) => "gateway_unavailable".to_owned(),
+        Error::Rejected(err) => err.code().to_ascii_lowercase(),
+        Error::RateLimited(_) => "rate_limited".to_owned(),
+        Error::Internal(_) => "internal".to_owned(),
+    };
+    audit!(
+        warn,
+        AuditEvent::PaymentRejected,
+        donation,
+        reason,
+        "payment not confirmed"
+    );
 }
 
 /// Toss calls this when a payment's status changes, and again until it
