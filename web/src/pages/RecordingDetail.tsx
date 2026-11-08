@@ -8,8 +8,13 @@ import ReplayPlayer from '../recordings/ReplayPlayer.tsx'
 
 type Load = { status: 'loading' } | { status: 'failed'; error: unknown } | { status: 'loaded'; recording: Recording }
 
+// Keyed by id so moving to another recording starts from loading instead of showing the last one.
 export default function RecordingDetail() {
   const { id = '' } = useParams()
+  return <RecordingPage key={id} id={id} />
+}
+
+function RecordingPage({ id }: { id: string }) {
   const [load, setLoad] = useState<Load>({ status: 'loading' })
   const [attempt, setAttempt] = useState(0)
 
