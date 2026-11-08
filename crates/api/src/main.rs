@@ -113,6 +113,15 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
             }
         };
 
+    // Built before the id lease and the event listener start: an early
+    // return past them would skip their shutdown.
+    let payments = match config.payments {
+        Some(toss) => Some(PaymentPorts {
+            gateway: Arc::new(TossPayments::new(TOSS_API_URL.into(), toss.secret_key)?),
+            client_key: toss.client_key,
+        }),
+        None => None,
+    };
     let listener = TcpListener::bind(config.listen_addr).await?;
     let pool = persistence::connect(&config.database_url, DB_MAX_CONNECTIONS)
         .await
@@ -165,13 +174,6 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
             }
             return Err(format!("event listener start failed: {err}").into());
         }
-    };
-    let payments = match config.payments {
-        Some(toss) => Some(PaymentPorts {
-            gateway: Arc::new(TossPayments::new(TOSS_API_URL.into(), toss.secret_key)?),
-            client_key: toss.client_key,
-        }),
-        None => None,
     };
     let limiter = Arc::new(InMemoryRateLimiter::default());
     let donation_query = Arc::new(PgDonationQuery::new(pool.clone()));
