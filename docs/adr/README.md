@@ -40,6 +40,7 @@ related: [10]                          # 관련 이슈 번호
 | area | ADR | 요약 |
 |---|---|---|
 | common | [1-hexagonal-five-planes](common/1-hexagonal-five-planes.md) | Hexagonal 4-crate workspace와 5개 plane 분리 |
+| common | [25-doc-two-tier-timeline](common/25-doc-two-tier-timeline.md) | ADR은 저장소 요약판과 Obsidian 상세판 두 벌, 읽는 순서는 Obsidian Timeline, 머지 후 Devlog 갱신 |
 | data | [1-concurrency-snowflake](data/1-concurrency-snowflake.md) | 조건부 UPDATE·version·UNIQUE·advisory lock, Snowflake ID |
 | data | [4-snowflake-worker-lease](data/4-snowflake-worker-lease.md) | Snowflake 상태 머신·PG worker lease·에러 응답 봉투 |
 | auth | [1-hybrid-session-jwt](auth/1-hybrid-session-jwt.md) | 웹은 DB 세션 쿠키, 송출은 1회용 단기 JWT |

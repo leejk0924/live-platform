@@ -48,3 +48,7 @@ related: [1, 6, 10, 14]
 - 배포 호스트가 IPv6를 받는데 Docker 브리지가 IPv4 전용이면 모든 IPv6 클라이언트가 게이트웨이 IP 한 키로 묶일 수 있다. (unverified) 운영 호스트 설정은 확인하지 않았다.
 - 세션 쿠키는 `__Host-`라 HTTPS(또는 localhost)에서만 동작한다. 로컬 Vite 개발은 `ALLOWED_ORIGINS`에 Vite origin을 넣어야 한다(`web/README.md`).
 - 유출 목록 파일은 비밀번호 문자열 11만여 개다. gitleaks는 현재 이를 탐지하지 않았지만 규칙이 바뀌면 allowlist가 필요할 수 있다.
+
+## Follow-up (2026-11-08, 코드 대조)
+
+"만료 세션 전역 정리는 #10 reaper와 같이 만든다"고 했지만 #10(PR #24)의 reaper는 방송과 송출 토큰만 다룬다. 지금도 로그인 때 그 사용자의 만료 세션만 지운다. #27에서 넣는다.

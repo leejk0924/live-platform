@@ -67,7 +67,10 @@ poteto-mode에 리뷰 결과를 넣고 **각 항목을 수용/거부로 판단�
 - 리뷰 처리에서 설계가 바뀐 결정(거부 이유가 설계 판단인 것 포함)도 ADR에 넣는다.
 - 기록할 결정이 없으면 ADR을 쓰지 않고 이유를 보고에 적는다.
 - 커밋: `docs: <요약> ADR을 남긴다` + `Refs #N`.
-- Obsidian `Devlog/`와 해당 `Rust-Learning/` 노트를 갱신한다 (저장소 밖, 커밋 없음).
+- 같은 결정의 **상세판**을 Obsidian `ADR/<area>/<N>-<slug>.md`에 쓴다. 형식은 [obsidian-adr.md](obsidian-adr.md). 저장소 ADR은 요약판으로 둔다. 기존 ADR에 Follow-up을 붙였으면 상세판에도 같은 Follow-up을 붙인다.
+- Obsidian `Devlog/`와 해당 `Rust-Learning/` 노트를 갱신한다. 각 섹션 제목에 브랜치와 PR 링크를 단다.
+- Obsidian `00-Overview/Timeline.md`에 이 이슈를 한 줄 추가한다. 머지 열은 `(draft)`로 둔다.
+- Obsidian 쪽은 모두 저장소 밖이라 커밋하지 않는다.
 
 ## 6. push와 draft PR
 
@@ -82,4 +85,12 @@ poteto-mode에 리뷰 결과를 넣고 **각 항목을 수용/거부로 판단�
 
 ## 7. 보고
 
-사용자에게 짧게 알린다: draft PR 링크, 리뷰 처리 집계(수용 n / 거부 n / 확인 필요 n)와 확인 필요 행 목록, ADR 경로, 후속 이슈 후보, 끝내 확인하지 못한 완료 조건. 머지는 하지 않는다.
+사용자에게 짧게 알린다: draft PR 링크, 리뷰 처리 집계(수용 n / 거부 n / 확인 필요 n)와 확인 필요 행 목록, ADR 경로(저장소와 Obsidian), 후속 이슈 후보, 끝내 확인하지 못한 완료 조건. 머지는 하지 않는다.
+
+## 8. 머지 후 (사용자가 머지를 요청했을 때만)
+
+1. PR의 CI가 모두 통과했는지 확인한다. 코드와 무관한 실패(다운로드 실패 등)는 실패한 job만 다시 돌린다.
+2. draft를 ready로 바꾸고 squash 머지한다. 본문은 이 PR의 커밋만 넣는다: `git log --no-merges --reverse --format='* %B' origin/main..origin/<type>/<N>`.
+3. Obsidian을 PR의 최종 상태로 맞춘다.
+   - `Devlog/`: 리뷰 수치를 PR 본문 `수정 사항` 표의 최종 행 수로 고치고, 섹션 제목에 머지 시각(KST)을 적는다.
+   - `00-Overview/Timeline.md`: 이 이슈 줄의 `(draft)`를 머지 시각으로 바꾸고, 줄을 머지 순서에 맞는 자리로 옮긴다.

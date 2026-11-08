@@ -52,6 +52,7 @@ cargo deny check
 
 - **ADR(결정 기록)은 저장소 `docs/adr/<area>/<issue>-<slug>.md`**에 쓴다. 형식은 `docs/adr/README.md`. 결정을 구현한 PR에 함께 넣고, PR 본문 `설계 기록(ADR)`에 그 파일 경로를 적는다.
   - `jk:session-summary`: 스킬의 vault 경로(`<vault>/<project>/...`) 대신 **`docs/adr/<area>/<issue>-<slug>.md`**에 저장한다. 임시 파일 작성 → `scan-sensitive.sh` 통과 → 저장 순서는 그대로 지키고, 저장 후 `docs/adr/README.md` 목록에 한 줄 추가한다. 커밋은 작업 흐름대로 해당 PR에 포함한다.
+  - Obsidian `ADR/<area>/<issue>-<slug>.md`에 같은 결정의 상세판(배경, 검토한 방안, 장단점, 선택·기각 이유, 구현 코드)을 함께 쓴다. 형식은 `.claude/skills/issue-cycle/obsidian-adr.md`. 저장소 ADR은 요약판으로 짧게 둔다.
   - `jk:session-context`: 인덱스는 저장소의 `docs/adr`에서 만든다.
     `OBSIDIAN_VAULT="$(git rev-parse --show-toplevel)/docs" bash "<SKILL_DIR>/scripts/build-index.sh" -p adr -m <area>,common -c main`
 - Obsidian은 사용자 개인 노트: `C:\Users\akdir\OneDrive\문서\obsidian\문서관리\개발\live-platform\` (vault 루트는 `문서관리`)

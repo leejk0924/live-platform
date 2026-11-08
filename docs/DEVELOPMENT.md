@@ -144,8 +144,12 @@ cd web && npm run lint && npm run typecheck && npm run build
 
 | 폴더 | 언제 |
 |---|---|
+| `00-Overview/Timeline.md` | PR을 만들 때 한 줄 추가, 머지 후 머지 시각 기록. 이슈별 읽는 순서의 입구 |
+| `ADR/` | 저장소에 ADR을 쓸 때마다. 같은 결정의 상세판(배경, 검토한 방안, 장단점, 선택 이유, 기각 이유, 구현 코드). 형식은 `.claude/skills/issue-cycle/obsidian-adr.md` |
 | `Rust-Learning/` | 새 Rust 개념·패턴을 썼을 때 (Java 관점 설명) |
-| `Devlog/` | 매 작업일 |
+| `Devlog/` | 매 작업일. 섹션마다 브랜치와 PR 링크, 머지 후 리뷰 수치를 PR 최종 표에 맞춤 |
 | `Security/` | 위협 모델이 바뀌었을 때 |
+
+저장소 ADR은 핵심을 빠르게 이해시키는 요약판이고, Obsidian `ADR/`은 학습·회고용 상세판이다. 결정의 원본은 저장소 ADR이다.
 
 저장소 안 문서(`docs/`, README)에는 비밀값, 내부 주소, 개인 정보를 넣지 않는다.

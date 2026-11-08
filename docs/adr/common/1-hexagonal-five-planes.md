@@ -47,3 +47,7 @@ related: []
 - 시간 타입 crate(`time`/`chrono`)는 `domain`에 넣지 않는다. 필요해지면 #6에서 `i64` 밀리초 값 객체와 비교해 다시 결정한다.
 - `serde`는 `domain`에 넣지 않는다. 직렬화는 `api` DTO의 책임이다(mass assignment 방지).
 - 요청 타임아웃은 #4, shutdown drain 상한은 #11(SSE)에서 넣는다.
+
+## Follow-up (2026-11-08, 코드 대조)
+
+"요청 타임아웃은 #4에서 넣는다"고 했지만 #4(PR #20)에 들어가지 않았고 main에도 없다. #27에서 넣는다.

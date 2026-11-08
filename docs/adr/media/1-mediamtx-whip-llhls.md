@@ -84,3 +84,9 @@ PC는 Windows의 Chrome 156.0.8078.8, 휴대폰은 iPhone 15 Pro(iOS 26.6.2) Saf
 ## Follow-up (2026-11-08, #7 송출 구현)
 
 "재연결 시 토큰 재발급 거부"만으로는 재송출을 막지 못한다. 송출 토큰이 12시간 유효하고, MediaMTX는 DB 상태를 보지 않기 때문이다. kick 직후에도 같은 토큰으로 다시 송출할 수 있다. 이 공백은 #10의 publish hook으로 막는다. 결정과 이유는 [media/7-whip-publish-jwt](7-whip-publish-jwt.md).
+
+## Follow-up (2026-11-08, 코드 대조)
+
+- adapter는 `MediaMtxAdapter` 하나가 아니라 셋으로 나뉘었다: `MediaMtxIngestRouter`(`IngestRouter`), `MediaMtxControlApi`(`StreamTerminator`, `StreamProbe`), `JwtPublishAuthorizer`(`PublishAuthorizer`, 송출 허가 검증).
+- 공용 `FakeMediaGateway`는 없고, 테스트가 port마다 Fake를 둔다. 교체 가능성은 port 단위 Fake로 증명한다.
+- `PlaybackResolver`는 아직 없다. #8(플레이어)에서 만든다.
