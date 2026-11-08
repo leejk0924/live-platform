@@ -14,7 +14,10 @@ use application::ports::{
         ChatPolicyStore, ChatTarget, CommentQuery, CommentRepository, CommentView,
         CommentWriteRejection, NewComment, PolicyRejection,
     },
-    donation::{DonationQuery, DonationSummary, DonationView},
+    donation::{
+        DonationOrder, DonationQuery, DonationRepository, DonationSummary, DonationView,
+        NewDonation, Settlement,
+    },
     event_bus::{EventBus, EventSubscription, RealtimeEvent},
     id::{IdGenerationError, IdGenerator},
     media::{
@@ -35,17 +38,22 @@ use domain::{
         Broadcast, BroadcastDescription, BroadcastId, BroadcastStatus, BroadcastTitle, Version,
     },
     comment::{ChatPolicy, CommentBody, CommentId, Revision},
-    donation::DonationId,
+    donation::{DonationId, PaymentKey},
     id::SnowflakeId,
     recording::{RecordingId, RecordingKey, StoreRetry},
     secret::Secret,
 };
-use infrastructure::{auth::BreachedPasswordList, media::PublishKey};
+use infrastructure::{auth::BreachedPasswordList, media::PublishKey, payment::FakePaymentGateway};
 use tracing::Subscriber;
 use tracing_subscriber::fmt::MakeWriter;
 
 use crate::{
-    AppState, auth::AuthPorts, broadcast::BroadcastPorts, comment::CommentPorts, config::Origin,
+    AppState,
+    auth::AuthPorts,
+    broadcast::BroadcastPorts,
+    comment::CommentPorts,
+    config::Origin,
+    donation::{DonationPorts, PaymentPorts},
     recording::RecordingPorts,
 };
 
@@ -296,6 +304,26 @@ impl ChatPolicyStore for Unavailable {
 }
 
 #[async_trait]
+impl DonationRepository for Unavailable {
+    async fn create(&self, _: &NewDonation) -> Result<bool, PortError> {
+        unavailable()
+    }
+
+    async fn order(&self, _: DonationId) -> Result<Option<DonationOrder>, PortError> {
+        unavailable()
+    }
+
+    async fn settle(
+        &self,
+        _: DonationId,
+        _: &PaymentKey,
+        _: std::time::SystemTime,
+    ) -> Result<Settlement, PortError> {
+        unavailable()
+    }
+}
+
+#[async_trait]
 impl DonationQuery for Unavailable {
     async fn list(
         &self,
@@ -386,28 +414,43 @@ impl UrlSigner for Unavailable {
 pub const TEST_ORIGIN: &str = "https://app.test";
 pub const TEST_MEDIA_SECRET: &str = "0123456789abcdef0123456789abcdef";
 
-pub fn test_state() -> AppState {
-    state_with(CommentPorts {
+fn unavailable_comments() -> CommentPorts {
+    CommentPorts {
         repository: Arc::new(Unavailable),
         query: Arc::new(Unavailable),
         policies: Arc::new(Unavailable),
         limiter: Arc::new(Unavailable),
         donations: Arc::new(Unavailable),
         events: Arc::new(Unavailable),
-    })
+    }
+}
+
+/// Donations are off: no Toss keys.
+pub fn test_state() -> AppState {
+    state_with(unavailable_comments(), None)
+}
+
+/// Payments go to `gateway`; every store is unavailable.
+pub fn payments_state(gateway: Arc<FakePaymentGateway>) -> AppState {
+    let payments = PaymentPorts {
+        gateway,
+        client_key: Secret::new("test_ck_example".into()),
+    };
+    state_with(unavailable_comments(), Some(payments))
 }
 
 /// Every broadcast but 404 is live with no comments and no donations, and
 /// events travel over `bus`.
 pub fn chat_state(bus: Arc<dyn EventBus>) -> AppState {
-    state_with(CommentPorts {
+    let comments = CommentPorts {
         repository: Arc::new(Unavailable),
         query: Arc::new(EmptyChat),
         policies: Arc::new(EmptyChat),
         limiter: Arc::new(Unavailable),
         donations: Arc::new(EmptyChat),
         events: bus,
-    })
+    };
+    state_with(comments, None)
 }
 
 struct EmptyChat;
@@ -541,7 +584,7 @@ impl SseReader {
     }
 }
 
-fn state_with(comment_ports: CommentPorts) -> AppState {
+fn state_with(comment_ports: CommentPorts, payments: Option<PaymentPorts>) -> AppState {
     let ports = AuthPorts {
         ids: Arc::new(Unavailable),
         users: Arc::new(Unavailable),
@@ -567,10 +610,16 @@ fn state_with(comment_ports: CommentPorts) -> AppState {
         signer: Arc::new(Unavailable),
         local: None,
     };
+    let donation_ports = DonationPorts {
+        repository: Arc::new(Unavailable),
+        query: Arc::new(Unavailable),
+        payments,
+    };
     AppState::new(
         ports,
         broadcast_ports,
         comment_ports,
+        donation_ports,
         recording_ports,
         vec![Origin::parse(TEST_ORIGIN).unwrap()],
         false,

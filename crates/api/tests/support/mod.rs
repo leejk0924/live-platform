@@ -19,6 +19,7 @@ use api::{
     broadcast::BroadcastPorts,
     comment::CommentPorts,
     config::Origin,
+    donation::{DonationPorts, PaymentPorts},
     recording::{LocalRecordings, RecordingPorts},
 };
 use application::{
@@ -39,10 +40,12 @@ use infrastructure::{
     auth::{Argon2Hasher, BreachedPasswordList},
     id::SnowflakeIdGenerator,
     media::{JwtPublishAuthorizer, MediaMtxIngestRouter, MediaMtxPlaybackResolver, PublishKey},
+    payment::FakePaymentGateway,
     persistence::{
         PgBroadcastQuery, PgBroadcastRepository, PgChatPolicyStore, PgCommentQuery,
-        PgCommentRepository, PgDonationQuery, PgPublishTicketLedger, PgRecordingQuery,
-        PgRecordingRepository, PgSessionStore, PgUserRepository, PgWorkerIdAllocator,
+        PgCommentRepository, PgDonationQuery, PgDonationRepository, PgPublishTicketLedger,
+        PgRecordingQuery, PgRecordingRepository, PgSessionStore, PgUserRepository,
+        PgWorkerIdAllocator,
     },
     rate_limit::InMemoryRateLimiter,
     realtime::PgEventBus,
@@ -115,7 +118,27 @@ pub async fn live_state_with(
     terminator: Arc<CountingTerminator>,
 ) -> AppState {
     let (recording_ports, _) = local_recordings(pool);
-    build_state(pool, demo_login_enabled, terminator, recording_ports).await
+    build_state(pool, demo_login_enabled, terminator, recording_ports, None).await
+}
+
+/// The Toss client key every donation test app hands out.
+pub const TOSS_CLIENT_KEY: &str = "test_ck_example";
+
+/// [`state`] with donations paid through `gateway`.
+pub async fn donation_state(pool: &PgPool, gateway: Arc<FakePaymentGateway>) -> AppState {
+    let (recording_ports, _) = local_recordings(pool);
+    let payments = PaymentPorts {
+        gateway,
+        client_key: Secret::new(TOSS_CLIENT_KEY.into()),
+    };
+    build_state(
+        pool,
+        false,
+        Arc::new(CountingTerminator::default()),
+        recording_ports,
+        Some(payments),
+    )
+    .await
 }
 
 /// Where a test app's recordings live, and the storer that moves them from
@@ -185,6 +208,7 @@ pub async fn recording_state(pool: &PgPool) -> (AppState, RecordingHarness) {
         false,
         Arc::new(CountingTerminator::default()),
         recording_ports,
+        None,
     )
     .await;
     (state, harness)
@@ -195,6 +219,7 @@ async fn build_state(
     demo_login_enabled: bool,
     terminator: Arc<CountingTerminator>,
     recording_ports: RecordingPorts,
+    payments: Option<PaymentPorts>,
 ) -> AppState {
     let ttl = Duration::from_secs(30);
     let allocator = Arc::new(PgWorkerIdAllocator::new(pool.clone(), ttl));
@@ -234,10 +259,16 @@ async fn build_state(
         donations: Arc::new(PgDonationQuery::new(pool.clone())),
         events,
     };
+    let donation_ports = DonationPorts {
+        repository: Arc::new(PgDonationRepository::new(pool.clone())),
+        query: Arc::new(PgDonationQuery::new(pool.clone())),
+        payments,
+    };
     let state = AppState::new(
         ports,
         broadcast_ports,
         comment_ports,
+        donation_ports,
         recording_ports,
         vec![Origin::parse(ORIGIN).unwrap()],
         demo_login_enabled,

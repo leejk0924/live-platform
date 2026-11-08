@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use domain::{
     auth::{UserId, Username},
     broadcast::BroadcastId,
-    donation::{DonationAmount, DonationId, DonationStatus, PaymentKey},
+    donation::{DonationAmount, DonationId, PaymentKey},
 };
 
 use super::PortError;
@@ -37,13 +37,6 @@ pub struct DonationOrder {
 }
 
 impl DonationOrder {
-    pub fn status(&self) -> DonationStatus {
-        match self.paid {
-            None => DonationStatus::Pending,
-            Some(_) => DonationStatus::Done,
-        }
-    }
-
     /// The donation as viewers see it, once paid.
     pub fn view(&self) -> Option<DonationView> {
         self.paid.as_ref().map(|paid| DonationView {

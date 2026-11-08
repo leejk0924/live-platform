@@ -76,7 +76,7 @@ impl From<GatewayError> for Error {
 }
 
 /// What the provider is told on every attempt to confirm `order`.
-pub fn idempotency_key(order: DonationId) -> String {
+fn idempotency_key(order: DonationId) -> String {
     format!("donation-confirm-{order}")
 }
 

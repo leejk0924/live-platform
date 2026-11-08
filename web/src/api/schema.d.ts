@@ -217,6 +217,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/broadcasts/{id}/donations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a broadcast's donations, newest first, with their total */
+        get: operations["listDonations"];
+        put?: never;
+        /**
+         * Order a donation to a broadcast on air, to pay with Toss
+         * @description Open Toss's payment window with the returned `clientKey`, `orderId`, `orderName` and `amount`, then send what Toss hands the success URL to `POST /api/donations/confirm`. Nothing is credited before that.
+         */
+        post: operations["createDonation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/broadcasts/{id}/events": {
         parameters: {
             query?: never;
@@ -290,6 +311,26 @@ export interface paths {
         put?: never;
         /** End a live or interrupted broadcast and disconnect its publisher; owner only */
         post: operations["stopBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/donations/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pay for one's own donation order with the payment Toss authorized
+         * @description Safe to repeat: the same payment again answers `credited: false` and is neither charged nor credited twice.
+         */
+        post: operations["confirmDonation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -455,6 +496,21 @@ export interface components {
              */
             revision: string;
         };
+        ConfirmInput: {
+            /**
+             * Format: int64
+             * @description As Toss handed it to the success URL; must equal the order's.
+             */
+            amount: number;
+            orderId: string;
+            /** @description As Toss handed it to the success URL. */
+            paymentKey: string;
+        };
+        ConfirmedDto: {
+            /** @description `false` when an earlier request had already credited this payment. */
+            credited: boolean;
+            donation: components["schemas"]["Donation"];
+        };
         Credentials: {
             /**
              * Format: password
@@ -471,6 +527,55 @@ export interface components {
         };
         DemoStatus: {
             enabled: boolean;
+        };
+        Donation: {
+            /**
+             * Format: int64
+             * @description Won.
+             */
+            amount: number;
+            /** Format: date-time */
+            approvedAt: string;
+            /** @example 112007302751453184 */
+            broadcastId: string;
+            /** @description Plain text: escape it when rendering. */
+            donorName: string;
+            /** @example 112007303372210176 */
+            id: string;
+        };
+        DonationInput: {
+            /**
+             * Format: int64
+             * @description Won, 1000 to 1000000.
+             */
+            amount: number;
+        };
+        /** @description What the browser passes to Toss's payment window. */
+        DonationOrderDto: {
+            /** Format: int64 */
+            amount: number;
+            /** @description The Toss client key to open the payment window with. */
+            clientKey: string;
+            /**
+             * @description Toss's `orderId`.
+             * @example 112007303372210176
+             */
+            orderId: string;
+            /** @description Toss's `orderName`. */
+            orderName: string;
+        };
+        DonationPageDto: {
+            /** Format: int64 */
+            count: number;
+            /** @description Newest order first. */
+            items: components["schemas"]["Donation"][];
+            /** @description Pass as `before` for the next page; `null` on the last page. */
+            nextBefore: string | null;
+            /**
+             * Format: int64
+             * @description Won, over every credited donation of the broadcast.
+             */
+            total: number;
         };
         /** @description The body of every error response. */
         ErrorBody: {
@@ -1501,6 +1606,133 @@ export interface operations {
             };
         };
     };
+    listDonations: {
+        parameters: {
+            query?: {
+                /** @description Only donations older than this id: the previous page's `nextBefore`. */
+                before?: string;
+                /** @description Page size, 1 to 50. Defaults to 20. */
+                size?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Broadcast id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Credited donations only. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DonationPageDto"];
+                };
+            };
+            /** @description `INVALID_QUERY` or `INVALID_PAGE_SIZE` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `BROADCAST_NOT_FOUND` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    createDonation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Broadcast id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DonationInput"];
+            };
+        };
+        responses: {
+            /** @description A pending order. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DonationOrderDto"];
+                };
+            };
+            /** @description `INVALID_AMOUNT` or `INVALID_REQUEST` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `UNAUTHENTICATED` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `SELF_DONATION` or `CSRF_REJECTED` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `BROADCAST_NOT_FOUND` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `DONATIONS_CLOSED`: the broadcast is not on air */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `PAYMENTS_DISABLED` */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     followBroadcastEvents: {
         parameters: {
             query?: {
@@ -1716,6 +1948,84 @@ export interface operations {
             };
             /** @description `BROADCAST_NOT_LIVE`: ready or already ended */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    confirmDonation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmInput"];
+            };
+        };
+        responses: {
+            /** @description Paid; followers of the broadcast receive it as a `donation` event. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmedDto"];
+                };
+            };
+            /** @description `AMOUNT_MISMATCH`, `PAYMENT_REJECTED`, `INVALID_PAYMENT_KEY` or `INVALID_REQUEST` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `UNAUTHENTICATED` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `NOT_DONOR` or `CSRF_REJECTED` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `ORDER_NOT_FOUND` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `ALREADY_PAID`: paid by another payment, or the payment paid another order */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `PAYMENT_GATEWAY_UNAVAILABLE`: retry with the same body, or `PAYMENTS_DISABLED` */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

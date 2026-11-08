@@ -42,6 +42,7 @@ use crate::{
     comment::{CommentPorts, CommentUseCases},
     comment_stream::LiveStreams,
     config::Origin,
+    donation::{DonationPorts, DonationUseCases},
     error::ApiError,
     rate_limit::RateLimits,
     recording::{RecordingPorts, RecordingUseCases},
@@ -62,6 +63,7 @@ pub struct AppState {
     pub auth: Arc<AuthUseCases>,
     pub broadcasts: Arc<BroadcastUseCases>,
     pub comments: Arc<CommentUseCases>,
+    pub donations: Arc<DonationUseCases>,
     pub recordings: Arc<RecordingUseCases>,
     /// Open event streams; `main` closes them at shutdown.
     pub streams: Arc<LiveStreams>,
@@ -82,6 +84,7 @@ impl AppState {
         ports: AuthPorts,
         broadcast_ports: BroadcastPorts,
         comment_ports: CommentPorts,
+        donation_ports: DonationPorts,
         recording_ports: RecordingPorts,
         allowed_origins: Vec<Origin>,
         demo_login_enabled: bool,
@@ -93,6 +96,11 @@ impl AppState {
             broadcast_ports.ingest.clone(),
             ports.ids.clone(),
         );
+        let donations = DonationUseCases::new(
+            donation_ports,
+            ports.ids.clone(),
+            broadcast_ports.query.clone(),
+        );
         let broadcasts =
             BroadcastUseCases::new(broadcast_ports, ports.ids.clone(), ports.users.clone());
         let comments = CommentUseCases::new(comment_ports, ports.ids.clone());
@@ -101,6 +109,7 @@ impl AppState {
             auth: Arc::new(AuthUseCases::new(ports, demo_login_enabled)),
             broadcasts: Arc::new(broadcasts),
             comments: Arc::new(comments),
+            donations: Arc::new(donations),
             recordings: Arc::new(recordings),
             streams: Arc::new(LiveStreams::default()),
             allowed_origins: allowed_origins.into(),
@@ -118,6 +127,7 @@ pub fn app(state: AppState) -> Router {
         .nest("/auth", auth::routes())
         .merge(broadcast::routes())
         .merge(comment::routes())
+        .merge(donation::routes())
         .merge(live::routes())
         .merge(recording::routes())
         .layer(middleware::from_fn_with_state(
@@ -125,7 +135,10 @@ pub fn app(state: AppState) -> Router {
             csrf::guard,
         ));
     let internal = internal::routes(Arc::clone(&state.media_secret));
-    let bounded = Router::new().nest("/api", api).nest("/internal", internal);
+    let bounded = Router::new()
+        .nest("/api", api)
+        .merge(donation::webhook_routes())
+        .nest("/internal", internal);
     // Routes that hold a connection open go in the second router: `bounded`
     // cuts them off at `REQUEST_TIMEOUT`. They are GET only, so the CSRF
     // guard has nothing to check.

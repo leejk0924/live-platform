@@ -72,6 +72,9 @@ services:
       CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN:-}
       CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID:-}
       CLOUDFRONT_PRIVATE_KEY: ${CLOUDFRONT_PRIVATE_KEY:-}
+      # Toss Payments test keys; both empty turns donations off.
+      TOSS_CLIENT_KEY: ${TOSS_CLIENT_KEY:-}
+      TOSS_SECRET_KEY: ${TOSS_SECRET_KEY:-}
     volumes:
       # MediaMTX writes finished segments to the spool; the API copies them to the store.
       - recording_spool:/recordings

@@ -6,16 +6,22 @@
 
 mod support;
 
+use std::sync::Arc;
+
+use api::app;
+use application::ports::payment::GatewayError;
 use axum::{
     Router,
     body::Body,
     http::{Method, Request, StatusCode, header},
 };
 use base64ct::{Base64, Encoding};
+use infrastructure::payment::FakePaymentGateway;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use support::{
-    LogBuffer, MEDIA_SECRET, PASSWORD, Reply, live_state, request, router, send, sign_up,
+    LogBuffer, MEDIA_SECRET, PASSWORD, Reply, donation_state, live_state, request, router, send,
+    sign_up,
 };
 
 const WRONG_PASSWORD: &str = "not the password 7f3a";
@@ -278,5 +284,92 @@ async fn a_refused_publish_token_is_audited_without_the_token(pool: PgPool) {
     assert!(
         !logs.contents().contains(&token),
         "the publish token reached the logs"
+    );
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn payments_are_audited_without_the_payment_key(pool: PgPool) {
+    const KEY: &str = "tgen_audited_payment_key";
+    let (logs, _guard) = LogBuffer::capture();
+    let gateway = Arc::new(FakePaymentGateway::default());
+    let router = app(donation_state(&pool, gateway.clone()).await);
+    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let viewer = sign_up(&router, "viewer", PASSWORD).await.token();
+    let id = create_broadcast(&router, &owner).await;
+    send(
+        &router,
+        request(
+            Method::POST,
+            &format!("/api/broadcasts/{id}/start"),
+            None,
+            Some(&owner),
+        ),
+    )
+    .await;
+    let order = |amount: i64| {
+        request(
+            Method::POST,
+            &format!("/api/broadcasts/{id}/donations"),
+            Some(json!({"amount": amount})),
+            Some(&viewer),
+        )
+    };
+    let confirm = |order: &str, amount: i64| {
+        request(
+            Method::POST,
+            "/api/donations/confirm",
+            Some(json!({"paymentKey": KEY, "orderId": order, "amount": amount})),
+            Some(&viewer),
+        )
+    };
+    let first = send(&router, order(5000)).await.body["orderId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    send(&router, confirm(&first, 1)).await;
+    send(&router, confirm(&first, 5000)).await;
+    let second = send(&router, order(7000)).await.body["orderId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    gateway.answer_confirm(Err(GatewayError::Rejected {
+        code: "REJECT_CARD_PAYMENT".into(),
+    }));
+    send(&router, confirm(&second, 7000)).await;
+
+    let one = |event: &str| {
+        let audits = logs.audits(event);
+        let [line] = audits.as_slice() else {
+            panic!("one {event} audit expected in {}", logs.contents());
+        };
+        line.clone()
+    };
+    let ordered = logs.audits("donation_ordered");
+    assert_eq!(ordered.len(), 2, "{}", logs.contents());
+    assert!(
+        ordered[0].contains(&format!(r#""donation":"{first}""#)),
+        "{}",
+        ordered[0]
+    );
+    assert!(ordered[0].contains(r#""amount":5000"#), "{}", ordered[0]);
+    let mismatch = one("payment_amount_mismatch");
+    for field in [r#""expected":5000"#, r#""got":1"#, r#""at":"request""#] {
+        assert!(mismatch.contains(field), "{mismatch}");
+    }
+    let confirmed = one("payment_confirmed");
+    assert!(confirmed.contains(r#""credited":true"#), "{confirmed}");
+    let rejected = one("payment_rejected");
+    assert!(
+        rejected.contains(r#""gateway_code":"REJECT_CARD_PAYMENT""#),
+        "{rejected}"
+    );
+    assert!(
+        rejected.contains(&format!(r#""donation":"{second}""#)),
+        "{rejected}"
+    );
+    assert!(
+        !logs.contents().contains(KEY),
+        "the payment key reached the logs"
     );
 }

@@ -12,6 +12,12 @@ pub enum AuditEvent {
     PublisherKicked,
     KickFailed,
     MediaAccessDenied,
+    DonationOrdered,
+    PaymentConfirmed,
+    /// The provider refused, approved something else, or did not answer.
+    PaymentRejected,
+    PaymentAmountMismatch,
+    PaymentWebhookChecked,
 }
 
 impl AuditEvent {
@@ -22,6 +28,11 @@ impl AuditEvent {
             Self::PublisherKicked => "publisher_kicked",
             Self::KickFailed => "kick_failed",
             Self::MediaAccessDenied => "media_access_denied",
+            Self::DonationOrdered => "donation_ordered",
+            Self::PaymentConfirmed => "payment_confirmed",
+            Self::PaymentRejected => "payment_rejected",
+            Self::PaymentAmountMismatch => "payment_amount_mismatch",
+            Self::PaymentWebhookChecked => "payment_webhook_checked",
         }
     }
 }

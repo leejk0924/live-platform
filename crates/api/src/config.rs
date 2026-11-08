@@ -38,6 +38,16 @@ pub struct Config {
     /// it can sit in the URL MediaMTX calls without escaping.
     pub media_secret: Secret<String>,
     pub recordings: RecordingConfig,
+    /// `None` turns donations off.
+    pub payments: Option<TossConfig>,
+}
+
+/// Toss Payments test keys. The client key is handed to the browser, but
+/// stays out of the logs all the same.
+#[derive(Debug)]
+pub struct TossConfig {
+    pub client_key: Secret<String>,
+    pub secret_key: Secret<String>,
 }
 
 #[derive(Debug)]
@@ -157,6 +167,13 @@ pub enum ConfigError {
     CloudFrontDomain(String),
     #[error("CLOUDFRONT_PRIVATE_KEY must be an ECDSA P-256 private key in PEM")]
     CloudFrontPrivateKey,
+    #[error(
+        "{0} is required when the other Toss key is set; leave both empty to turn donations off"
+    )]
+    MissingTossKey(&'static str),
+    /// Leaves the value out: it is a key.
+    #[error("{0}: only Toss test keys (test_...) are accepted")]
+    TossKeyNotTest(&'static str),
 }
 
 impl Config {
@@ -221,6 +238,7 @@ impl Config {
             Ok(_) | Err(VarError::NotUnicode(_)) => return Err(ConfigError::InvalidMediaSecret),
         };
         let recordings = recording_config(&lookup)?;
+        let payments = toss_config(&lookup)?;
         Ok(Self {
             listen_addr,
             database_url,
@@ -231,7 +249,30 @@ impl Config {
             mediamtx_api_url,
             media_secret,
             recordings,
+            payments,
         })
+    }
+}
+
+/// Both keys or neither; empty counts as unset, since compose passes them
+/// as `${VAR:-}`.
+fn toss_config(
+    lookup: &impl Fn(&str) -> Result<String, VarError>,
+) -> Result<Option<TossConfig>, ConfigError> {
+    let read = |var: &'static str| match lookup(var) {
+        Ok(raw) if raw.is_empty() => Ok(None),
+        Ok(raw) if raw.starts_with("test_") => Ok(Some(Secret::new(raw))),
+        Err(VarError::NotPresent) => Ok(None),
+        Ok(_) | Err(VarError::NotUnicode(_)) => Err(ConfigError::TossKeyNotTest(var)),
+    };
+    match (read("TOSS_CLIENT_KEY")?, read("TOSS_SECRET_KEY")?) {
+        (None, None) => Ok(None),
+        (Some(_), None) => Err(ConfigError::MissingTossKey("TOSS_SECRET_KEY")),
+        (None, Some(_)) => Err(ConfigError::MissingTossKey("TOSS_CLIENT_KEY")),
+        (Some(client_key), Some(secret_key)) => Ok(Some(TossConfig {
+            client_key,
+            secret_key,
+        })),
     }
 }
 
@@ -537,6 +578,73 @@ mod tests {
         ] {
             let err = s3(&[(var, bad)]).unwrap_err();
             assert!(!err.to_string().contains("hunter2"), "{err}");
+        }
+    }
+
+    const TOSS_CLIENT: &str = "test_ck_example_client_key";
+    const TOSS_SECRET: &str = "test_sk_example_secret_key";
+
+    #[test]
+    fn donations_are_off_unless_both_toss_keys_are_set() {
+        assert!(from(&[]).unwrap().payments.is_none());
+        let empty = from(&[("TOSS_CLIENT_KEY", ""), ("TOSS_SECRET_KEY", "")]).unwrap();
+        assert!(
+            empty.payments.is_none(),
+            "compose passes unset keys as empty"
+        );
+
+        let config = from(&[
+            ("TOSS_CLIENT_KEY", TOSS_CLIENT),
+            ("TOSS_SECRET_KEY", TOSS_SECRET),
+        ])
+        .unwrap();
+        let toss = config.payments.as_ref().unwrap();
+        assert_eq!(toss.client_key.expose(), TOSS_CLIENT);
+        assert_eq!(toss.secret_key.expose(), TOSS_SECRET);
+        let logged = format!("{config:?}");
+        for key in [TOSS_CLIENT, TOSS_SECRET] {
+            assert!(!logged.contains(key), "{key} in {logged}");
+        }
+    }
+
+    #[test]
+    fn toss_keys_are_required_together() {
+        for (set, missing) in [
+            ("TOSS_CLIENT_KEY", "TOSS_SECRET_KEY"),
+            ("TOSS_SECRET_KEY", "TOSS_CLIENT_KEY"),
+        ] {
+            let err = from(&[(set, TOSS_SECRET)]).unwrap_err();
+            assert!(
+                matches!(err, ConfigError::MissingTossKey(var) if var == missing),
+                "{err}"
+            );
+            assert!(!err.to_string().contains(TOSS_SECRET), "{err}");
+        }
+    }
+
+    #[test]
+    fn live_toss_keys_are_refused_without_echoing_them() {
+        for (var, live) in [
+            ("TOSS_CLIENT_KEY", "live_ck_x"),
+            ("TOSS_SECRET_KEY", "live_sk_x"),
+            ("TOSS_SECRET_KEY", "hunter2"),
+            ("TOSS_SECRET_KEY", " test_sk_hunter2"),
+        ] {
+            let mut vars = vec![
+                ("TOSS_CLIENT_KEY", TOSS_CLIENT),
+                ("TOSS_SECRET_KEY", TOSS_SECRET),
+            ];
+            vars.retain(|(v, _)| *v != var);
+            vars.push((var, live));
+            let err = from(&vars).unwrap_err();
+            assert!(
+                matches!(err, ConfigError::TossKeyNotTest(v) if v == var),
+                "{var}={live:?}: {err}"
+            );
+            assert_eq!(
+                err.to_string(),
+                format!("{var}: only Toss test keys (test_...) are accepted")
+            );
         }
     }
 

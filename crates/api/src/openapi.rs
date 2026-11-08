@@ -11,7 +11,7 @@ use utoipa::{
     },
 };
 
-use crate::{auth, broadcast, comment, comment_stream, live, recording};
+use crate::{auth, broadcast, comment, comment_stream, donation, live, recording};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -48,6 +48,9 @@ use crate::{auth, broadcast, comment, comment_stream, live, recording};
         comment::get_policy,
         comment::set_policy,
         comment_stream::follow,
+        donation::list,
+        donation::create,
+        donation::confirm,
         recording::list,
         recording::get_one,
         recording::replay,
@@ -58,6 +61,7 @@ use crate::{auth, broadcast, comment, comment_stream, live, recording};
         (name = "auth", description = "Accounts and sessions"),
         (name = "broadcasts", description = "Broadcast registration, browsing, going live, ending and watching"),
         (name = "comments", description = "Comments on a broadcast, its chat policy and its live event stream"),
+        (name = "donations", description = "Donations to a broadcast on air, paid with Toss Payments (test mode)"),
         (name = "recordings", description = "Recorded segments of broadcasts and their replay"),
     ),
 )]
