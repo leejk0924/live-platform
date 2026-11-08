@@ -41,6 +41,7 @@ use crate::{
     broadcast::broadcast_id,
     comment::rfc3339,
     error::{ApiError, ErrorBody},
+    rate_limit::ClientKey,
 };
 
 /// What the buyer sees as the item in Toss's payment window.
@@ -456,9 +457,11 @@ fn audit_refused_confirm(order_id: &str, err: &Error) {
 /// looked up at Toss.
 pub(crate) async fn webhook(
     State(state): State<AppState>,
+    client: ClientKey,
     body: Result<Json<Value>, JsonRejection>,
 ) -> Result<StatusCode, ApiError> {
     let payments = payments(&state)?;
+    state.limits.payment_webhook(&client)?;
     let Json(body) = body.map_err(|rejection| ApiError::rejected_body(rejection.status()))?;
     let key = match (
         body["eventType"].as_str(),
@@ -630,6 +633,34 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE,
             "a store that cannot be read is retried too"
         );
+    }
+
+    #[tokio::test]
+    async fn the_webhook_is_rate_limited_per_client_before_asking_toss() {
+        let gateway = Arc::new(FakePaymentGateway::default());
+        let state = payments_state(gateway.clone());
+        let from = |client: &str| {
+            let mut request = from_toss(&status_changed("tgen_1"));
+            request
+                .headers_mut()
+                .insert("x-forwarded-for", client.parse().unwrap());
+            request
+        };
+        for _ in 0..60 {
+            let (status, _) = send(state.clone(), from("203.0.113.9")).await;
+            assert_eq!(status, StatusCode::OK);
+        }
+        let (status, body) = send(state.clone(), from("203.0.113.9")).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(body["code"], "RATE_LIMITED");
+        assert_eq!(
+            gateway.lookups().len(),
+            60,
+            "the refused call never reached Toss"
+        );
+
+        let (status, _) = send(state, from("198.51.100.7")).await;
+        assert_eq!(status, StatusCode::OK, "other clients are not held up");
     }
 
     #[tokio::test]

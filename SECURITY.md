@@ -83,6 +83,7 @@ DB 테스트는 `#[ignore]`라 `cargo test --workspace -- --include-ignored`로 
 |---|---|---|---|
 | 로그인 | IP당 분 10, 사용자명당 분 5 | `crates/api/src/rate_limit.rs` | `tests/auth.rs` `repeated_logins_for_one_username_are_rate_limited` |
 | 회원가입 | IP당 10분 5 | `crates/api/src/rate_limit.rs` | `api::rate_limit` `signup_allows_five_per_client_then_says_when_to_retry` |
+| 결제 webhook | 클라이언트당 분 60(넘으면 Toss 조회 전에 429, Toss가 재전송) | `crates/api/src/rate_limit.rs` | `api::donation` `the_webhook_is_rate_limited_per_client_before_asking_toss` |
 | 후원 주문 | 사용자당 3초에 1건(`DONATION_ORDER_INTERVAL`) | `crates/application/src/donation.rs` | `application::donation` `orders_are_spaced_out_per_donor`, `tests/donations.rs` `a_donor_orders_again_only_after_a_pause` |
 | 동시 방송 | 사용자당 활성 방송 1개(부분 UNIQUE 인덱스) | `crates/infrastructure/migrations/` | `infrastructure/tests/broadcast_schema.rs` `an_owner_holds_at_most_one_broadcast_in_the_active_statuses` |
 | 컨테이너 자원 | CPU·메모리·PID·로그 크기 제한 | `compose.yml` | `docker compose config` |

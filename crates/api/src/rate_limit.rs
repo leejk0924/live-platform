@@ -1,5 +1,6 @@
-//! Per-instance request limits for the auth endpoints. They are a guard
-//! against brute force, not shared state, so each instance keeps its own.
+//! Per-instance request limits for the auth endpoints and the payment
+//! webhook. They are a guard against brute force and cost amplification,
+//! not shared state, so each instance keeps its own.
 
 use std::{
     convert::Infallible,
@@ -32,6 +33,9 @@ pub struct RateLimits {
     login_per_client: DefaultKeyedRateLimiter<String>,
     login_per_username: DefaultKeyedRateLimiter<String>,
     demo_login_per_client: DefaultKeyedRateLimiter<String>,
+    /// Anyone can call the webhook, and each call asks Toss with our secret
+    /// key. Toss retries a delivery that failed.
+    payment_webhook_per_client: DefaultKeyedRateLimiter<String>,
 }
 
 impl Default for RateLimits {
@@ -41,6 +45,7 @@ impl Default for RateLimits {
             login_per_client: DefaultKeyedRateLimiter::keyed(per_minute(10)),
             login_per_username: DefaultKeyedRateLimiter::keyed(per_minute(5)),
             demo_login_per_client: DefaultKeyedRateLimiter::keyed(per_minute(10)),
+            payment_webhook_per_client: DefaultKeyedRateLimiter::keyed(per_minute(60)),
         }
     }
 }
@@ -65,6 +70,10 @@ impl RateLimits {
         check(&self.demo_login_per_client, &client.0)
     }
 
+    pub fn payment_webhook(&self, client: &ClientKey) -> Result<(), ApiError> {
+        check(&self.payment_webhook_per_client, &client.0)
+    }
+
     /// Drops keys whose limit has fully recovered, so memory follows the
     /// number of recently active clients.
     pub fn forget_idle(&self) {
@@ -72,6 +81,7 @@ impl RateLimits {
         self.login_per_client.retain_recent();
         self.login_per_username.retain_recent();
         self.demo_login_per_client.retain_recent();
+        self.payment_webhook_per_client.retain_recent();
     }
 }
 
