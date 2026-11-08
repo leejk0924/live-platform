@@ -30,11 +30,13 @@ deny = [
     { crate = "infrastructure", wrappers = ["api"], reason = "only the composition root wires adapters" },
 
     { crate = "axum", wrappers = ["api"], reason = "HTTP framework belongs to the inbound adapter" },
-    { crate = "tower-http", wrappers = ["api"], reason = "HTTP middleware belongs to the inbound adapter" },
+    # reqwest builds its client stack (redirects, timeouts) from tower-http.
+    { crate = "tower-http", wrappers = ["api", "reqwest"], reason = "HTTP middleware belongs to the inbound adapter" },
     # api may use sqlx only as a dev-dependency (#[sqlx::test]); scripts/check-layer-deps.sh rejects it as a normal one.
     { crate = "sqlx", wrappers = ["infrastructure", "api"], reason = "persistence is an outbound adapter" },
     { crate = "reqwest", wrappers = ["infrastructure"], reason = "outbound HTTP clients are adapters" },
     { crate = "jsonwebtoken", wrappers = ["infrastructure"], reason = "token signing is an outbound adapter" },
+    { crate = "ed25519-dalek", wrappers = ["infrastructure"], reason = "token signing is an outbound adapter" },
     { crate = "aws-config", wrappers = ["infrastructure"], reason = "cloud SDKs are outbound adapters" },
     { crate = "aws-sdk-s3", wrappers = ["infrastructure"], reason = "cloud SDKs are outbound adapters" },
 ]
