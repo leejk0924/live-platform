@@ -72,9 +72,21 @@ impl Reaper {
         }
         reaped.expired = pass.expire(INTERRUPT_GRACE).await?;
         let failures = &mut reaped.housekeeping_failures;
-        reaped.forgotten_tickets = settle(pass.forget_spent_tickets().await, failures);
-        reaped.forgotten_sessions = settle(pass.forget_expired_sessions().await, failures);
-        reaped.demo_reset = settle(pass.reset_demo_broadcasts().await, failures);
+        reaped.forgotten_tickets = settle(
+            "forgetting spent tickets",
+            pass.forget_spent_tickets().await,
+            failures,
+        );
+        reaped.forgotten_sessions = settle(
+            "forgetting expired sessions",
+            pass.forget_expired_sessions().await,
+            failures,
+        );
+        reaped.demo_reset = settle(
+            "resetting demo broadcasts",
+            pass.reset_demo_broadcasts().await,
+            failures,
+        );
         pass.finish().await?;
 
         for &id in reaped.expired.iter().chain(&reaped.not_active) {
@@ -86,11 +98,16 @@ impl Reaper {
     }
 }
 
-/// A housekeeping step's result, or nothing done when it failed. A later pass
-/// retries it, so the status changes do not wait for it.
-fn settle<T: Default>(step: Result<T, PortError>, failures: &mut Vec<PortError>) -> T {
-    step.unwrap_or_else(|err| {
-        failures.push(err);
+/// A housekeeping step's result, or nothing done when it failed, with the
+/// failure named after `step`. A later pass retries it, so the status changes
+/// do not wait for it.
+fn settle<T: Default>(
+    step: &str,
+    result: Result<T, PortError>,
+    failures: &mut Vec<PortError>,
+) -> T {
+    result.unwrap_or_else(|err| {
+        failures.push(PortError(format!("{step}: {}", err.0)));
         T::default()
     })
 }
@@ -109,6 +126,7 @@ mod tests {
     };
 
     const EXPIRED: i64 = 7;
+    const DEMO: i64 = 8;
 
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Housekeeping {
@@ -173,15 +191,18 @@ mod tests {
         }
 
         async fn forget_spent_tickets(&mut self) -> Result<u64, PortError> {
-            self.step(Housekeeping::Tickets, 0)
+            self.step(Housekeeping::Tickets, 1)
         }
 
         async fn forget_expired_sessions(&mut self) -> Result<u64, PortError> {
-            self.step(Housekeeping::Sessions, 0)
+            self.step(Housekeeping::Sessions, 2)
         }
 
         async fn reset_demo_broadcasts(&mut self) -> Result<Vec<BroadcastId>, PortError> {
-            self.step(Housekeeping::Demo, vec![])
+            self.step(
+                Housekeeping::Demo,
+                vec![SnowflakeId::try_from(DEMO).unwrap()],
+            )
         }
 
         async fn finish(self: Box<Self>) -> Result<(), PortError> {
@@ -246,10 +267,22 @@ mod tests {
 
             let expired = SnowflakeId::try_from(EXPIRED).unwrap();
             assert_eq!(reaped.expired, vec![expired]);
+            let (step, tickets, sessions, demo) = match failing {
+                Housekeeping::Tickets => ("forgetting spent tickets", 0, 2, vec![DEMO]),
+                Housekeeping::Sessions => ("forgetting expired sessions", 1, 0, vec![DEMO]),
+                Housekeeping::Demo => ("resetting demo broadcasts", 1, 2, vec![]),
+            };
             assert_eq!(
                 reaped.housekeeping_failures,
-                vec![PortError("housekeeping failed".into())]
+                vec![PortError(format!("{step}: housekeeping failed"))]
             );
+            assert_eq!(reaped.forgotten_tickets, tickets, "{step}");
+            assert_eq!(reaped.forgotten_sessions, sessions, "{step}");
+            let demo: Vec<BroadcastId> = demo
+                .into_iter()
+                .map(|id| SnowflakeId::try_from(id).unwrap())
+                .collect();
+            assert_eq!(reaped.demo_reset, demo, "{step}");
             let log = log.lock().unwrap();
             assert!(log.finished, "the pass is stored");
             assert_eq!(log.kicked, vec![LivePath.route(expired).path]);
