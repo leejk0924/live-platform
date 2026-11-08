@@ -1,5 +1,7 @@
 //! PostgreSQL adapters.
 
+mod session;
+mod user;
 mod worker_lease;
 
 use std::str::FromStr;
@@ -11,7 +13,9 @@ use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
 };
 
+pub use session::{ABSOLUTE_TIMEOUT, IDLE_TIMEOUT, PgSessionStore};
 pub use sqlx::Error as DbError;
+pub use user::PgUserRepository;
 pub use worker_lease::PgWorkerIdAllocator;
 
 pub async fn connect(

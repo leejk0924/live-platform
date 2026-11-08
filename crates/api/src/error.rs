@@ -4,7 +4,7 @@
 //! [`ErrorPayload`]. The [`trace_id`] middleware owns the trace id, so it is
 //! the one that writes the JSON body.
 
-use std::{any::Any, fmt::Display};
+use std::{any::Any, fmt::Display, time::Duration};
 
 use axum::{
     Extension,
@@ -12,7 +12,7 @@ use axum::{
     extract::Request,
     http::{
         HeaderValue, StatusCode,
-        header::{CONTENT_LENGTH, CONTENT_TYPE},
+        header::{CONTENT_LENGTH, CONTENT_TYPE, RETRY_AFTER},
     },
     middleware::Next,
     response::{IntoResponse, Response},
@@ -29,6 +29,7 @@ pub struct ApiError {
     status: StatusCode,
     code: &'static str,
     message: String,
+    retry_after: Option<Duration>,
 }
 
 impl ApiError {
@@ -36,26 +37,60 @@ impl ApiError {
     /// (SQL, paths, backtraces) reaches the client.
     pub fn internal(err: impl Display) -> Self {
         tracing::error!(error = %err, "internal error");
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "INTERNAL",
-            message: "internal server error".into(),
-        }
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "INTERNAL",
+            "internal server error",
+        )
     }
 
     pub fn method_not_allowed() -> Self {
-        Self {
-            status: StatusCode::METHOD_NOT_ALLOWED,
-            code: "METHOD_NOT_ALLOWED",
-            message: "method not allowed".into(),
-        }
+        Self::new(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "METHOD_NOT_ALLOWED",
+            "method not allowed",
+        )
     }
 
     pub fn not_found() -> Self {
+        Self::new(StatusCode::NOT_FOUND, "NOT_FOUND", "resource not found")
+    }
+
+    /// The request body was missing, not JSON, or not the expected shape.
+    pub fn invalid_request() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "INVALID_REQUEST",
+            "request body is invalid",
+        )
+    }
+
+    pub fn csrf_rejected() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "CSRF_REJECTED",
+            "request origin is not allowed",
+        )
+    }
+
+    /// Answers 429 with `Retry-After` in whole seconds, rounded up.
+    pub fn rate_limited(retry_after: Duration) -> Self {
         Self {
-            status: StatusCode::NOT_FOUND,
-            code: "NOT_FOUND",
-            message: "resource not found".into(),
+            retry_after: Some(retry_after),
+            ..Self::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "RATE_LIMITED",
+                "too many requests, try again later",
+            )
+        }
+    }
+
+    fn new(status: StatusCode, code: &'static str, message: &str) -> Self {
+        Self {
+            status,
+            code,
+            message: message.into(),
+            retry_after: None,
         }
     }
 }
@@ -73,6 +108,7 @@ impl<E: DomainError> From<E> for ApiError {
             status,
             code: err.code(),
             message: err.to_string(),
+            retry_after: None,
         }
     }
 }
@@ -100,7 +136,14 @@ impl IntoResponse for ApiError {
             code: self.code,
             message: self.message,
         };
-        (self.status, Extension(payload)).into_response()
+        let mut response = (self.status, Extension(payload)).into_response();
+        if let Some(wait) = self.retry_after {
+            let secs = wait.as_secs() + u64::from(wait.subsec_nanos() > 0);
+            response
+                .headers_mut()
+                .insert(RETRY_AFTER, HeaderValue::from(secs.max(1)));
+        }
+        response
     }
 }
 

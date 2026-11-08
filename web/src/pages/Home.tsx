@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useAuth } from '../auth/context.ts'
 
 type ApiStatus = 'checking' | 'ok' | 'unreachable'
 
-export default function App() {
+export default function Home() {
+  const { auth } = useAuth()
   const [status, setStatus] = useState<ApiStatus>('checking')
 
   useEffect(() => {
@@ -16,9 +18,11 @@ export default function App() {
   }, [])
 
   return (
-    <main>
+    <>
       <h1>live-platform</h1>
       <p className={`status status-${status}`}>API: {status}</p>
-    </main>
+      {auth.status === 'signedIn' && <p>{auth.user.username}님으로 로그인했습니다.</p>}
+      {auth.status === 'signedOut' && <p>로그인하지 않았습니다.</p>}
+    </>
   )
 }
