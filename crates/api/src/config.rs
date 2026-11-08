@@ -89,6 +89,9 @@ pub enum ConfigError {
     InvalidPublishKey,
     #[error("MEDIAMTX_API_URL must be an http(s) URL without a trailing slash, got {0:?}")]
     MediaMtxApiUrl(String),
+    /// Leaves the value out: it would carry the credentials.
+    #[error("MEDIAMTX_API_URL must not contain user:password@; the API signs its own token")]
+    MediaMtxApiUrlCredentials,
 }
 
 impl Config {
@@ -131,6 +134,7 @@ impl Config {
         };
         let mediamtx_api_url = match lookup("MEDIAMTX_API_URL") {
             Err(VarError::NotPresent) => DEFAULT_MEDIAMTX_API_URL.to_owned(),
+            Ok(raw) if has_userinfo(&raw) => return Err(ConfigError::MediaMtxApiUrlCredentials),
             Ok(raw)
                 if (raw.starts_with("http://") || raw.starts_with("https://"))
                     && !raw.ends_with('/') =>
@@ -150,6 +154,14 @@ impl Config {
             mediamtx_api_url,
         })
     }
+}
+
+/// Whether the authority part of `url` (after the scheme, up to the path)
+/// has a `user:password@` prefix.
+fn has_userinfo(url: &str) -> bool {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    authority.contains('@')
 }
 
 /// At least one origin; blanks around commas are ignored.
@@ -254,6 +266,25 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    #[test]
+    fn mediamtx_api_url_with_credentials_is_rejected_without_echoing_them() {
+        for bad in [
+            "http://admin:hunter2@mediamtx:9997",
+            "https://hunter2@mediamtx:9997",
+            "http://admin:hunter2@mediamtx:9997/v3",
+        ] {
+            let err = from(&[("MEDIAMTX_API_URL", bad)]).unwrap_err();
+            assert!(!err.to_string().contains("hunter2"), "{err}");
+        }
+        assert_eq!(
+            from(&[("MEDIAMTX_API_URL", "http://mediamtx:9997/a@b")])
+                .unwrap()
+                .mediamtx_api_url,
+            "http://mediamtx:9997/a@b",
+            "an @ after the host is not userinfo"
+        );
     }
 
     #[test]
