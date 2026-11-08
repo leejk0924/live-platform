@@ -234,7 +234,8 @@ impl BroadcastRepository for PgBroadcastRepository {
     ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
         let sql = concat!(
             "UPDATE broadcasts AS b \
-             SET status = $4, ended_at = now(), interrupted_at = NULL,                  version = version + 1, updated_at = now() \
+             SET status = $4, ended_at = now(), interrupted_at = NULL, \
+                 version = version + 1, updated_at = now() \
              WHERE id = $1 AND owner_id = $2 AND status = ANY($3) AND deleted_at IS NULL \
              RETURNING ",
             columns!()
@@ -250,7 +251,11 @@ impl PgBroadcastRepository {
     async fn presence(&self, id: BroadcastId, event: BroadcastEvent) -> Result<bool, PortError> {
         let transition = event.transition();
         let result = sqlx::query(
-            "UPDATE broadcasts              SET status = $3,                  interrupted_at = CASE WHEN $3 = 'INTERRUPTED' THEN now() END,                  version = version + 1, updated_at = now()              WHERE id = $1 AND status = ANY($2) AND deleted_at IS NULL",
+            "UPDATE broadcasts \
+             SET status = $3, \
+                 interrupted_at = CASE WHEN $3 = 'INTERRUPTED' THEN now() END, \
+                 version = version + 1, updated_at = now() \
+             WHERE id = $1 AND status = ANY($2) AND deleted_at IS NULL",
         )
         .bind(id.as_i64())
         .bind(status_names(transition.from))
