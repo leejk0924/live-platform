@@ -8,6 +8,7 @@ pub mod comment;
 pub mod comment_stream;
 pub mod config;
 pub mod csrf;
+pub mod donation;
 pub mod error;
 pub mod if_match;
 pub mod internal;
@@ -41,6 +42,7 @@ use crate::{
     comment::{CommentPorts, CommentUseCases},
     comment_stream::LiveStreams,
     config::Origin,
+    donation::{DonationPorts, DonationUseCases},
     error::ApiError,
     rate_limit::RateLimits,
     recording::{RecordingPorts, RecordingUseCases},
@@ -61,6 +63,7 @@ pub struct AppState {
     pub auth: Arc<AuthUseCases>,
     pub broadcasts: Arc<BroadcastUseCases>,
     pub comments: Arc<CommentUseCases>,
+    pub donations: Arc<DonationUseCases>,
     pub recordings: Arc<RecordingUseCases>,
     /// Open event streams; `main` closes them at shutdown.
     pub streams: Arc<LiveStreams>,
@@ -81,6 +84,7 @@ impl AppState {
         ports: AuthPorts,
         broadcast_ports: BroadcastPorts,
         comment_ports: CommentPorts,
+        donation_ports: DonationPorts,
         recording_ports: RecordingPorts,
         allowed_origins: Vec<Origin>,
         demo_login_enabled: bool,
@@ -92,6 +96,11 @@ impl AppState {
             broadcast_ports.ingest.clone(),
             ports.ids.clone(),
         );
+        let donations = DonationUseCases::new(
+            donation_ports,
+            ports.ids.clone(),
+            broadcast_ports.query.clone(),
+        );
         let broadcasts =
             BroadcastUseCases::new(broadcast_ports, ports.ids.clone(), ports.users.clone());
         let comments = CommentUseCases::new(comment_ports, ports.ids.clone());
@@ -100,6 +109,7 @@ impl AppState {
             auth: Arc::new(AuthUseCases::new(ports, demo_login_enabled)),
             broadcasts: Arc::new(broadcasts),
             comments: Arc::new(comments),
+            donations: Arc::new(donations),
             recordings: Arc::new(recordings),
             streams: Arc::new(LiveStreams::default()),
             allowed_origins: allowed_origins.into(),
@@ -117,6 +127,7 @@ pub fn app(state: AppState) -> Router {
         .nest("/auth", auth::routes())
         .merge(broadcast::routes())
         .merge(comment::routes())
+        .merge(donation::routes())
         .merge(live::routes())
         .merge(recording::routes())
         .layer(middleware::from_fn_with_state(
@@ -124,7 +135,10 @@ pub fn app(state: AppState) -> Router {
             csrf::guard,
         ));
     let internal = internal::routes(Arc::clone(&state.media_secret));
-    let bounded = Router::new().nest("/api", api).nest("/internal", internal);
+    let bounded = Router::new()
+        .nest("/api", api)
+        .merge(donation::webhook_routes())
+        .nest("/internal", internal);
     // Routes that hold a connection open go in the second router: `bounded`
     // cuts them off at `REQUEST_TIMEOUT`. They are GET only, so the CSRF
     // guard has nothing to check.
@@ -172,18 +186,23 @@ async fn healthz() -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use application::ports::payment::{
+        GatewayError, GatewayPayment, PaymentConfirmation, PaymentGateway,
+    };
     use axum::{
         body::{Body, to_bytes},
         http::{Request, StatusCode, header},
     };
     use base64ct::{Base64, Encoding};
+    use domain::donation::PaymentKey;
+    use infrastructure::payment::FakePaymentGateway;
     use serde_json::{Value, json};
     use tower::ServiceExt;
 
     use super::*;
     use crate::{
         csrf::{REQUESTED_WITH_HEADER, REQUESTED_WITH_VALUE},
-        test_support::{TEST_MEDIA_SECRET, TEST_ORIGIN, test_state},
+        test_support::{TEST_MEDIA_SECRET, TEST_ORIGIN, payments_state, test_state},
     };
 
     #[tokio::test]
@@ -310,14 +329,30 @@ mod tests {
             .unwrap()
     }
 
+    /// As Toss's servers send it: no `Origin`, no session.
+    fn payment_webhook_with_body_of(len: usize) -> Request<Body> {
+        let mut body =
+            br#"{"eventType":"PAYMENT_STATUS_CHANGED","data":{"paymentKey":"tgen_1"}}"#.to_vec();
+        body.resize(len.max(body.len()), b' ');
+        Request::post("/api/payments/toss/webhook")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .unwrap()
+    }
+
+    fn payments_on() -> AppState {
+        payments_state(Arc::new(FakePaymentGateway::default()))
+    }
+
     #[tokio::test]
     async fn body_over_the_limit_is_a_payload_too_large_envelope() {
         for request in [
             login_with_body_of(BODY_LIMIT + 1),
             media_auth_with_body_of(BODY_LIMIT + 1),
+            payment_webhook_with_body_of(BODY_LIMIT + 1),
         ] {
             let path = request.uri().path().to_owned();
-            let response = app(test_state()).oneshot(request).await.unwrap();
+            let response = app(payments_on()).oneshot(request).await.unwrap();
 
             assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE, "{path}");
             let trace = response.headers()[error::TRACE_ID_HEADER]
@@ -367,6 +402,30 @@ mod tests {
         .with_state(test_state());
         let request = Request::get("/api/slow").body(Body::empty()).unwrap();
         let (status, body) = envelope_of(router, request).await;
+
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["code"], "REQUEST_TIMEOUT");
+    }
+
+    /// Never answers before the request time limit.
+    struct SilentToss;
+
+    #[async_trait::async_trait]
+    impl PaymentGateway for SilentToss {
+        async fn confirm(&self, _: &PaymentConfirmation) -> Result<GatewayPayment, GatewayError> {
+            unreachable!("the webhook never confirms")
+        }
+
+        async fn lookup(&self, _: &PaymentKey) -> Result<Option<GatewayPayment>, GatewayError> {
+            outlives_the_time_limit().await;
+            Ok(None)
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_payment_webhook_is_under_the_time_limit() {
+        let request = payment_webhook_with_body_of(0);
+        let (status, body) = envelope_of(app(payments_state(Arc::new(SilentToss))), request).await;
 
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["code"], "REQUEST_TIMEOUT");

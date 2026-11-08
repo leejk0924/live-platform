@@ -22,7 +22,7 @@ base64ct.workspace = true
 subtle.workspace = true
 futures-util = { version = "0.3", default-features = false }
 governor = "0.10"
-time = { version = "0.3", features = ["formatting"] }
+time = { workspace = true, features = ["formatting"] }
 utoipa = "6"
 
 [dev-dependencies]

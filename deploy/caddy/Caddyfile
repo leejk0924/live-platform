@@ -32,6 +32,17 @@
 		-Server
 	}
 
+	# Toss Payments' widget needs its script, API, log and sandbox hosts, iframes and inline style
+	# attributes. CSP applies per document, and checkout is a full page load under /pay, so only
+	# these documents get the wider policy while the rest of the SPA keeps the strict one above.
+	# Sandbox hosts suffice: the server refuses live Toss keys.
+	# It must replace the header above, not add a second one: browsers enforce every CSP header, so
+	# the strict one would still block Toss. The block above is deferred (it deletes Server) and
+	# Caddy runs this matched directive before it; deferred sets apply innermost last, so the `>`
+	# here makes this set win. deploy/check-hardening.sh checks the result.
+	@pay path /pay /pay/*
+	header @pay >Content-Security-Policy "default-src 'self'; script-src 'self' https://js.tosspayments.com; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: {$RECORDING_MEDIA_ORIGIN}; worker-src 'self' blob:; connect-src 'self' https://api.tosspayments.com https://log.tosspayments.com https://event.tosspayments.com https://apigw-sandbox.tosspayments.com; frame-src https://payment-widget.tosspayments.com https://payment-gateway-sandbox.tosspayments.com https://toss.im; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+
 	handle /api/* {
 		reverse_proxy api:8080
 	}

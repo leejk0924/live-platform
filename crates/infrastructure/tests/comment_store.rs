@@ -321,7 +321,7 @@ async fn comment_revision(subscription: &mut Box<dyn EventSubscription>) -> Revi
     match delivery {
         Delivery::Event(event) => match &event.kind {
             EventKind::Comment(view) => view.revision,
-            EventKind::ChatPolicy(_) => panic!("expected a comment event"),
+            _ => panic!("expected a comment event"),
         },
         Delivery::Missed => panic!("expected an event, got Missed"),
     }

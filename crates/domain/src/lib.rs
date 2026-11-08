@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod broadcast;
 pub mod comment;
+pub mod donation;
 pub mod error;
 pub mod id;
 pub mod recording;

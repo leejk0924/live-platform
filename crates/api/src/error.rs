@@ -144,6 +144,36 @@ impl ApiError {
         )
     }
 
+    /// Donations need Toss keys, and none are configured.
+    pub fn payments_disabled() -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "PAYMENTS_DISABLED",
+            "donations are not available on this server",
+        )
+    }
+
+    /// The payment provider gave no answer to rely on; the same request may
+    /// succeed later.
+    pub fn payment_gateway_unavailable() -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "PAYMENT_GATEWAY_UNAVAILABLE",
+            "the payment service is not responding, try again later",
+        )
+    }
+
+    /// Like [`ApiError::internal`], but 503 for a caller that retries on it,
+    /// such as a webhook sender.
+    pub fn internal_retry_later(err: impl Display) -> Self {
+        tracing::error!(error = %err, "internal error");
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "INTERNAL",
+            "internal server error, try again later",
+        )
+    }
+
     /// Answers 429 with `Retry-After` in whole seconds, rounded up.
     pub fn rate_limited(retry_after: Duration) -> Self {
         Self {

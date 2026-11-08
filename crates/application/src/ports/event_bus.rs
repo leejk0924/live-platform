@@ -1,7 +1,8 @@
 //! Live events of one broadcast, delivered to every API instance that has a
-//! follower of it. Comment changes are announced by
-//! [`super::comment::CommentRepository`] with the write itself, so they
-//! arrive in revision order; other events go through [`EventBus::publish`].
+//! follower of it. Comment changes and donation credits are announced by
+//! [`super::comment::CommentRepository`] and
+//! [`super::donation::DonationRepository`] with the write itself, so they
+//! arrive in commit order; other events go through [`EventBus::publish`].
 //! Delivery is still best effort: a follower learns that it may have missed
 //! events and catches up from the store, which holds the truth.
 
@@ -10,7 +11,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use domain::{broadcast::BroadcastId, comment::ChatPolicy};
 
-use super::comment::CommentView;
+use super::{comment::CommentView, donation::DonationCredit};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RealtimeEvent {
@@ -26,6 +27,8 @@ pub enum EventKind {
     /// A comment was posted, edited or deleted.
     Comment(CommentView),
     ChatPolicy(ChatPolicy),
+    /// A donation was credited.
+    Donation(DonationCredit),
 }
 
 #[derive(Debug, Clone)]

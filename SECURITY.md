@@ -20,8 +20,8 @@ DB 테스트는 `#[ignore]`라 `cargo test --workspace -- --include-ignored`로 
 | 위협 | 대응 | 코드 | 검증 |
 |---|---|---|---|
 | 내부 정보 노출 | 모든 에러는 `{code, message, traceId}`만, 500은 원인을 로그에만 | `crates/api/src/error.rs` | `api::error` 단위 테스트 `internal_error_hides_the_detail_and_logs_it`, `api::lib` `handler_panic_is_an_internal_envelope_without_the_payload` |
-| 부인(Repudiation) | 감사 로그: target `audit`, 이벤트 `login_failed` `forbidden` `publisher_kicked` `kick_failed` `media_access_denied`. 요청 span에 `trace_id` `client` `user` | `crates/api/src/audit.rs`, `crates/api/src/error.rs` | `tests/request_logging.rs` `a_forbidden_response_is_one_audit_line_with_the_request_context`, `tests/audit_log.rs` 6개, `api::reaper` `report_pass_audits_each_kicked_broadcast_except_failed_ones` |
-| 느린 연결·큰 요청(DoS) | API 요청 10초, 본문 64KB. Caddy가 헤더 10초·본문 30초 안에 오지 않는 연결과 32KB 넘는 헤더를 끊는다 | `crates/api/src/lib.rs`, `deploy/caddy/Caddyfile` | `api::lib` `bounded_request_past_the_time_limit_is_a_timeout_envelope`, `body_over_the_limit_is_a_payload_too_large_envelope`, `deploy/check-hardening.sh` |
+| 부인(Repudiation) | 감사 로그: target `audit`, 이벤트 `login_failed` `forbidden` `publisher_kicked` `kick_failed` `media_access_denied`, 결제 이벤트(S6). 요청 span에 `trace_id` `client` `user` | `crates/api/src/audit.rs`, `crates/api/src/error.rs` | `tests/request_logging.rs` `a_forbidden_response_is_one_audit_line_with_the_request_context`, `tests/audit_log.rs` `refused_logins_are_audited_without_the_password`, `a_forbidden_answer_is_audited_with_the_signed_in_user`, `an_owner_ending_a_broadcast_audits_the_kick`, `a_username_that_cannot_be_one_stays_out_of_the_audit`, `a_stream_of_an_ended_broadcast_audits_the_hook_kick`, `a_refused_publish_token_is_audited_without_the_token`(결제 이벤트는 S6), `api::reaper` `report_pass_audits_each_kicked_broadcast_except_failed_ones` |
+| 느린 연결·큰 요청(DoS) | API 요청 10초, 본문 64KB. Caddy가 헤더 10초·본문 30초 안에 오지 않는 연결과 32KB 넘는 헤더를 끊는다 | `crates/api/src/lib.rs`, `deploy/caddy/Caddyfile` | `api::lib` `bounded_request_past_the_time_limit_is_a_timeout_envelope`, `body_over_the_limit_is_a_payload_too_large_envelope`(결제 webhook 포함), `the_payment_webhook_is_under_the_time_limit`, `deploy/check-hardening.sh` |
 
 ### S2. 로그인·세션
 
@@ -65,7 +65,17 @@ DB 테스트는 `#[ignore]`라 `cargo test --workspace -- --include-ignored`로 
 
 ### S6. 결제
 
-결제 기능이 아직 없다(#13). 구현할 때 webhook 불신과 조회 API 재확인, 금액 서버 검증, `payment_key` UNIQUE, 감사 로그 이벤트(`AuditEvent`에 추가)를 같이 넣는다.
+| 위협 | 대응 | 코드 | 검증 |
+|---|---|---|---|
+| 금액 위·변조 | 확인 요청의 금액이 저장된 주문 금액과 다르면 Toss를 부르지 않고 거부. Toss 승인 결과의 `totalAmount`, `orderId`, `paymentKey`, `status`도 주문과 대조한 뒤에만 적립 | `crates/application/src/donation.rs` | `application::donation` `an_amount_other_than_the_orders_never_reaches_the_gateway`, `an_approval_that_differs_from_the_order_credits_nothing`, `tests/donations.rs` `a_confirmation_must_match_the_order_its_donor_and_tosss_answer` |
+| 중복 적립·이중 결제 | `UPDATE ... WHERE status = 'PENDING'` 한 문장과 합계 upsert, 알림을 한 트랜잭션에서. 같은 주문의 Toss 확인은 늘 같은 `Idempotency-Key` | `crates/infrastructure/src/persistence/donation.rs`, `crates/infrastructure/src/payment/toss.rs` | `infrastructure/tests/donation_store.rs` `ten_concurrent_confirmations_credit_the_order_once`, `payment::toss` `confirm_posts_the_order_with_basic_auth_and_the_idempotency_key` |
+| 한 결제로 여러 주문 채우기 | `payment_key` UNIQUE, 위반은 `ALREADY_PAID` | `crates/infrastructure/migrations/0009_donations.sql` | `infrastructure/tests/donation_store.rs` `a_payment_pays_for_one_order_only` |
+| 위조 webhook | 본문은 `data.paymentKey`만 읽고 Toss 조회 API(`GET /v1/payments/{paymentKey}`)로 다시 확인한다. 키는 `[A-Za-z0-9_-]` 1~200자만 받아 URL 경로를 벗어날 수 없다 | `crates/api/src/donation.rs`, `crates/domain/src/donation.rs` | `application::donation` `a_recheck_credits_only_what_the_gateway_reports_paid_in_full`, `domain::donation` `payment_key_is_1_to_200_url_safe_ascii_characters`, `tests/donations.rs` `the_webhook_credits_what_toss_reports_paid` |
+| 남의 주문 결제·자기 후원 | 주문의 후원자만 확인 가능(`NOT_DONOR`), 방송 소유자는 주문 불가(`SELF_DONATION`, INSERT 조건에도) | `crates/application/src/donation.rs`, `crates/infrastructure/src/persistence/donation.rs` | `tests/donations.rs` `orders_are_refused_to_the_owner_off_air_and_out_of_range`, `infrastructure/tests/donation_store.rs` `an_order_is_stored_only_for_a_viewer_of_a_broadcast_on_air` |
+| 키 유출·라이브 결제 | `TOSS_SECRET_KEY`는 `Secret`, Debug와 에러에 없음. `test_` 키만 받고 아니면 시작하지 않는다 | `crates/api/src/config.rs`, `crates/infrastructure/src/payment/toss.rs` | `api::config` `live_toss_keys_are_refused_without_echoing_them`, `payment::toss` `debug_never_shows_the_secret_key`, `an_unreachable_toss_is_unavailable_without_the_key_or_the_secret` |
+| 결제 부인 | 감사 이벤트 `donation_ordered` `payment_confirmed` `payment_rejected`(거절된 확인마다 `reason`) `payment_amount_mismatch` `payment_webhook_checked`. 결제 키·카드 정보·webhook 본문은 남기지 않는다 | `crates/api/src/donation.rs`, `crates/api/src/audit.rs` | `tests/audit_log.rs` `payments_are_audited_without_the_payment_key`, `webhook_rechecks_are_audited_without_the_payment_key`, `an_approved_payment_that_is_not_credited_is_audited_without_the_key` |
+
+미구현: 결제 취소·환불, 승인됐지만 주문과 맞지 않아 적립하지 않은 결제의 자동 취소. 운영 키(라이브)는 받지 않는다.
 
 ### S7. 남용
 
@@ -73,6 +83,8 @@ DB 테스트는 `#[ignore]`라 `cargo test --workspace -- --include-ignored`로 
 |---|---|---|---|
 | 로그인 | IP당 분 10, 사용자명당 분 5 | `crates/api/src/rate_limit.rs` | `tests/auth.rs` `repeated_logins_for_one_username_are_rate_limited` |
 | 회원가입 | IP당 10분 5 | `crates/api/src/rate_limit.rs` | `api::rate_limit` `signup_allows_five_per_client_then_says_when_to_retry` |
+| 결제 webhook | 클라이언트당 분 60(넘으면 Toss 조회 전에 429, Toss가 재전송) | `crates/api/src/rate_limit.rs` | `api::donation` `the_webhook_is_rate_limited_per_client_before_asking_toss` |
+| 후원 주문 | 사용자당 3초에 1건(`DONATION_ORDER_INTERVAL`) | `crates/application/src/donation.rs` | `application::donation` `orders_are_spaced_out_per_donor`, `tests/donations.rs` `a_donor_orders_again_only_after_a_pause` |
 | 동시 방송 | 사용자당 활성 방송 1개(부분 UNIQUE 인덱스) | `crates/infrastructure/migrations/` | `infrastructure/tests/broadcast_schema.rs` `an_owner_holds_at_most_one_broadcast_in_the_active_statuses` |
 | 컨테이너 자원 | CPU·메모리·PID·로그 크기 제한 | `compose.yml` | `docker compose config` |
 

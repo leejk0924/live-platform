@@ -1,17 +1,18 @@
 //! Live event delivery. [`EventHub`] fans events out to the subscriptions
 //! of this process; [`PgEventBus`] carries them between processes over
 //! Postgres `NOTIFY`, so a follower connected to any API instance receives
-//! what was announced on any other. Comment writes announce themselves
-//! with [`notify`] inside their own transaction.
+//! what was announced on any other. Comment writes and donation credits
+//! announce themselves with [`notify`] inside their own transaction.
 
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::{Duration, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use application::ports::{
     comment::CommentView,
+    donation::{DonationCredit, DonationSummary, DonationView},
     event_bus::{Delivery, EventBus, EventKind, EventSubscription, RealtimeEvent},
 };
 use async_trait::async_trait;
@@ -19,6 +20,7 @@ use domain::{
     auth::Username,
     broadcast::{BroadcastId, Version},
     comment::{ChatPolicy, Comment, CommentBody, Revision},
+    donation::DonationAmount,
     id::SnowflakeId,
 };
 use serde::{Deserialize, Serialize};
@@ -339,6 +341,7 @@ struct Wire {
 enum WireKind {
     Comment(WireComment),
     ChatPolicy { slow_mode_secs: u32 },
+    Donation(WireDonation),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -353,6 +356,26 @@ struct WireComment {
     revision: i64,
 }
 
+#[derive(Serialize, Deserialize)]
+struct WireDonation {
+    id: String,
+    donor_name: String,
+    amount: i64,
+    approved_at_us: i64,
+    total: i64,
+    count: i64,
+}
+
+fn micros_since_epoch(at: SystemTime) -> i64 {
+    at.duration_since(UNIX_EPOCH).map_or(0, |since| {
+        i64::try_from(since.as_micros()).unwrap_or(i64::MAX)
+    })
+}
+
+fn from_micros(us: i64) -> SystemTime {
+    UNIX_EPOCH + Duration::from_micros(u64::try_from(us).unwrap_or(0))
+}
+
 fn encode(event: &RealtimeEvent) -> String {
     let kind = match &event.kind {
         EventKind::Comment(view) => {
@@ -363,9 +386,7 @@ fn encode(event: &RealtimeEvent) -> String {
                 author_name: view.author_name.as_str().to_owned(),
                 body: c.body.as_ref().map(|body| body.as_str().to_owned()),
                 version: c.version.get(),
-                created_at_us: c.created_at.duration_since(UNIX_EPOCH).map_or(0, |since| {
-                    i64::try_from(since.as_micros()).unwrap_or(i64::MAX)
-                }),
+                created_at_us: micros_since_epoch(c.created_at),
                 edited: c.edited,
                 revision: view.revision.get(),
             })
@@ -373,6 +394,17 @@ fn encode(event: &RealtimeEvent) -> String {
         EventKind::ChatPolicy(policy) => WireKind::ChatPolicy {
             slow_mode_secs: policy.slow_mode_secs(),
         },
+        EventKind::Donation(credit) => {
+            let d = &credit.donation;
+            WireKind::Donation(WireDonation {
+                id: d.id.to_string(),
+                donor_name: d.donor_name.as_str().to_owned(),
+                amount: d.amount.get(),
+                approved_at_us: micros_since_epoch(d.approved_at),
+                total: credit.summary.total,
+                count: credit.summary.count,
+            })
+        }
     };
     let wire = Wire {
         broadcast: event.broadcast.to_string(),
@@ -400,8 +432,7 @@ fn decode(payload: &str) -> Result<RealtimeEvent, String> {
                     .map(|body| CommentBody::parse(&body).map_err(|err| err.to_string()))
                     .transpose()?,
                 version: Version::new(c.version).ok_or("bad version")?,
-                created_at: UNIX_EPOCH
-                    + Duration::from_micros(u64::try_from(c.created_at_us).unwrap_or(0)),
+                created_at: from_micros(c.created_at_us),
                 edited: c.edited,
             },
             author_name: Username::parse(&c.author_name).map_err(|err| err.to_string())?,
@@ -410,6 +441,19 @@ fn decode(payload: &str) -> Result<RealtimeEvent, String> {
         WireKind::ChatPolicy { slow_mode_secs } => EventKind::ChatPolicy(
             ChatPolicy::from_secs(slow_mode_secs).map_err(|err| err.to_string())?,
         ),
+        WireKind::Donation(d) => EventKind::Donation(DonationCredit {
+            donation: DonationView {
+                id: id(&d.id)?,
+                broadcast_id: broadcast,
+                donor_name: Username::parse(&d.donor_name).map_err(|err| err.to_string())?,
+                amount: DonationAmount::parse(d.amount).map_err(|err| err.to_string())?,
+                approved_at: from_micros(d.approved_at_us),
+            },
+            summary: DonationSummary {
+                total: d.total,
+                count: d.count,
+            },
+        }),
     };
     Ok(RealtimeEvent {
         broadcast,
@@ -446,6 +490,23 @@ mod tests {
         }
     }
 
+    fn donation_event(broadcast: i64, name: &str, amount: i64, total: i64) -> RealtimeEvent {
+        RealtimeEvent {
+            broadcast: id(broadcast),
+            priority: true,
+            kind: EventKind::Donation(DonationCredit {
+                donation: DonationView {
+                    id: id(9_007_199_254_740_993),
+                    broadcast_id: id(broadcast),
+                    donor_name: Username::parse(name).unwrap(),
+                    amount: DonationAmount::parse(amount).unwrap(),
+                    approved_at: UNIX_EPOCH + Duration::from_micros(1_700_000_000_123_456),
+                },
+                summary: DonationSummary { total, count: 7 },
+            }),
+        }
+    }
+
     #[test]
     fn events_survive_the_wire() {
         for event in [
@@ -456,6 +517,7 @@ mod tests {
                 priority: true,
                 kind: EventKind::ChatPolicy(ChatPolicy::from_secs(30).unwrap()),
             },
+            donation_event(5, "donor", 10_000, 123_000),
         ] {
             assert_eq!(decode(&encode(&event)).unwrap(), event);
         }
@@ -484,6 +546,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_donation_event_with_an_amount_out_of_range_is_refused() {
+        let payload = encode(&donation_event(5, "donor", 1_000, 1_000))
+            .replace("\"amount\":1000", "\"amount\":999");
+        assert!(decode(&payload).is_err());
+    }
+
+    #[test]
+    fn the_largest_donation_payload_is_under_the_notify_limit() {
+        let event = donation_event(
+            i64::MAX,
+            &"w".repeat(20),
+            domain::donation::DONATION_MAX,
+            i64::MAX,
+        );
+        let bytes = encode(&event).len();
+        assert!(bytes < 8000, "{bytes}");
+    }
+
     async fn next(subscription: &mut Box<dyn EventSubscription>) -> Delivery {
         tokio::time::timeout(Duration::from_secs(1), subscription.next())
             .await
@@ -495,7 +576,7 @@ mod tests {
         match delivery {
             Delivery::Event(event) => match &event.kind {
                 EventKind::Comment(view) => view.revision.get(),
-                EventKind::ChatPolicy(_) => panic!("expected a comment"),
+                _ => panic!("expected a comment"),
             },
             Delivery::Missed => panic!("expected an event"),
         }

@@ -17,6 +17,7 @@ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio",
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+time = "0.3"
 
 argon2 = "0.6"
 sha2 = "0.11"
@@ -27,7 +28,7 @@ ed25519-dalek = "3"
 p256 = { version = "0.14", default-features = false, features = ["ecdsa", "pem", "std"] }
 rusty-s3 = { version = "0.11", default-features = false, features = ["rustcrypto"] }
 zeroize = "1"
-reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "native-tls"] }
 subtle = "2"
 
 axum = "0.8"

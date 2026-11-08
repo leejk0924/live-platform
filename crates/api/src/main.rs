@@ -15,6 +15,7 @@ use api::{
     broadcast::BroadcastPorts,
     comment::CommentPorts,
     config::{Config, RecordingStorageConfig, listen_addr},
+    donation::{DonationPorts, PaymentPorts},
     reaper,
     recording::{LocalRecordings, RecordingPorts},
     recording_store,
@@ -30,10 +31,12 @@ use infrastructure::{
     media::{
         JwtPublishAuthorizer, MediaMtxControlApi, MediaMtxIngestRouter, MediaMtxPlaybackResolver,
     },
+    payment::{TOSS_API_URL, TossPayments},
     persistence::{
         self, PgBroadcastQuery, PgBroadcastRepository, PgChatPolicyStore, PgCommentQuery,
-        PgCommentRepository, PgPublishTicketLedger, PgReaperStore, PgRecordingQuery,
-        PgRecordingRepository, PgSessionStore, PgUserRepository, PgWorkerIdAllocator,
+        PgCommentRepository, PgDonationQuery, PgDonationRepository, PgPublishTicketLedger,
+        PgReaperStore, PgRecordingQuery, PgRecordingRepository, PgSessionStore, PgUserRepository,
+        PgWorkerIdAllocator,
     },
     rate_limit::InMemoryRateLimiter,
     realtime::PgEventBus,
@@ -110,6 +113,15 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
             }
         };
 
+    // Built before the id lease and the event listener start: an early
+    // return past them would skip their shutdown.
+    let payments = match config.payments {
+        Some(toss) => Some(PaymentPorts {
+            gateway: Arc::new(TossPayments::new(TOSS_API_URL.into(), toss.secret_key)?),
+            client_key: toss.client_key,
+        }),
+        None => None,
+    };
     let listener = TcpListener::bind(config.listen_addr).await?;
     let pool = persistence::connect(&config.database_url, DB_MAX_CONNECTIONS)
         .await
@@ -163,12 +175,20 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
             return Err(format!("event listener start failed: {err}").into());
         }
     };
-    let comment_limiter = Arc::new(InMemoryRateLimiter::default());
+    let limiter = Arc::new(InMemoryRateLimiter::default());
+    let donation_query = Arc::new(PgDonationQuery::new(pool.clone()));
+    let donation_ports = DonationPorts {
+        repository: Arc::new(PgDonationRepository::new(pool.clone())),
+        query: donation_query.clone(),
+        limiter: limiter.clone(),
+        payments,
+    };
     let comment_ports = CommentPorts {
         repository: Arc::new(PgCommentRepository::new(pool.clone())),
         query: Arc::new(PgCommentQuery::new(pool.clone())),
         policies: Arc::new(PgChatPolicyStore::new(pool.clone())),
-        limiter: comment_limiter.clone(),
+        limiter: limiter.clone(),
+        donations: donation_query,
         events,
     };
     let recording_repository = Arc::new(PgRecordingRepository::new(pool.clone()));
@@ -183,6 +203,7 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         ports,
         broadcast_ports,
         comment_ports,
+        donation_ports,
         recording_ports,
         config.allowed_origins,
         config.demo_login_enabled,
@@ -216,7 +237,7 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         loop {
             ticks.tick().await;
             limits.forget_idle();
-            comment_limiter.forget_idle();
+            limiter.forget_idle();
         }
     });
 

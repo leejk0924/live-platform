@@ -28,6 +28,17 @@ expect_header X-Content-Type-Options nosniff
 expect_header Referrer-Policy strict-origin-when-cross-origin
 expect_header Permissions-Policy "camera=(self), microphone=(self), display-capture=(self)"
 grep -qi '^server:' <<<"$headers" && fail "Server header is exposed"
+grep -i '^content-security-policy:' <<<"$headers" | grep -qF tosspayments && fail "/ CSP allows Toss Payments"
+
+# The payment pages get a wider CSP that must replace the strict one, not be added beside it.
+pay_csp="$(curl -fsS "${curl_tls[@]}" -D - -o /dev/null "https://$host/pay/checkout" | tr -d '\r' | grep -i '^content-security-policy:' || true)"
+if [ -z "$pay_csp" ]; then
+    fail "/pay/checkout has no CSP header"
+elif [ "$(wc -l <<<"$pay_csp")" != 1 ]; then
+    fail "/pay/checkout has more than one CSP header"
+fi
+grep -qF "https://js.tosspayments.com" <<<"$pay_csp" || fail "/pay/checkout CSP lacks https://js.tosspayments.com"
+grep -qF "frame-ancestors 'none'" <<<"$pay_csp" || fail "/pay/checkout CSP lacks frame-ancestors 'none'"
 
 # Slowloris: headers that never finish must be cut off by Caddy's 10s read_header timeout.
 # Plain HTTP on :80 is enough, since the timeouts are global options that every listener shares.
@@ -46,5 +57,5 @@ for service in caddy api mediamtx postgres; do
     [ "$readonly" = true ] || fail "$service rootfs is writable"
 done
 
-[ "$failed" = 0 ] && echo "ok: headers, slowloris cutoff (${elapsed}s), non-root and read-only rootfs on https://$host"
+[ "$failed" = 0 ] && echo "ok: headers, /pay CSP, slowloris cutoff (${elapsed}s), non-root and read-only rootfs on https://$host"
 exit "$failed"

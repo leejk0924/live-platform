@@ -491,6 +491,11 @@ async fn an_open_stream_receives_new_comments_and_policy_changes(pool: PgPool) {
         (opening.event.as_str(), opening.json()),
         ("policy", json!({"slowModeSeconds": 0}))
     );
+    let totals = events.next().await.unwrap();
+    assert_eq!(
+        (totals.event.as_str(), totals.json()),
+        ("donations", json!({"total": 0, "count": 0}))
+    );
 
     let posted = chat.post(&chat.viewer, "실시간").await;
     let live = events.next().await.unwrap();

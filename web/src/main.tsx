@@ -9,6 +9,9 @@ import BroadcastEdit from './pages/BroadcastEdit.tsx'
 import BroadcastNew from './pages/BroadcastNew.tsx'
 import Home from './pages/Home.tsx'
 import Login from './pages/Login.tsx'
+import PayCheckout from './pages/PayCheckout.tsx'
+import PayFail from './pages/PayFail.tsx'
+import PaySuccess from './pages/PaySuccess.tsx'
 import RecordingDetail from './pages/RecordingDetail.tsx'
 import RecordingList from './pages/RecordingList.tsx'
 import Signup from './pages/Signup.tsx'
@@ -24,6 +27,9 @@ const router = createBrowserRouter([
       { path: 'broadcasts/:id/edit', element: <BroadcastEdit /> },
       { path: 'recordings', element: <RecordingList /> },
       { path: 'recordings/:id', element: <RecordingDetail /> },
+      { path: 'pay/checkout', element: <PayCheckout /> },
+      { path: 'pay/success', element: <PaySuccess /> },
+      { path: 'pay/fail', element: <PayFail /> },
       { path: 'login', element: <Login /> },
       { path: 'signup', element: <Signup /> },
       { path: '*', element: <NotFound /> },

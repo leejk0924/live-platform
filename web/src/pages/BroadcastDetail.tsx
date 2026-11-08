@@ -6,6 +6,8 @@ import type { Broadcast } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
 import LoadFailed from '../broadcasts/LoadFailed.tsx'
 import CommentPanel from '../comments/CommentPanel.tsx'
+import DonationPanel from '../donations/DonationPanel.tsx'
+import { useDonations } from '../donations/useDonations.ts'
 import BroadcastRecordings from '../recordings/BroadcastRecordings.tsx'
 import Publisher from '../broadcasts/publish/Publisher.tsx'
 import { statusLabel } from '../broadcasts/status.ts'
@@ -37,7 +39,7 @@ export default function BroadcastDetail() {
           상태를 새로 고치지 못했습니다. 잠시 후 다시 시도합니다.
         </p>
       )}
-      <BroadcastView broadcast={state.broadcast} onChanged={reload} />
+      <BroadcastView key={state.broadcast.id} broadcast={state.broadcast} onChanged={reload} />
     </>
   )
 }
@@ -48,6 +50,7 @@ function BroadcastView({ broadcast, onChanged }: { broadcast: Broadcast; onChang
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const isOwner = auth.status === 'signedIn' && auth.user.id === broadcast.ownerId
+  const donations = useDonations(broadcast.id)
 
   async function onDelete() {
     if (!window.confirm('이 방송을 삭제할까요?')) return
@@ -72,6 +75,12 @@ function BroadcastView({ broadcast, onChanged }: { broadcast: Broadcast; onChang
       </p>
       {broadcast.description && <p className="description">{broadcast.description}</p>}
       <Screen broadcast={broadcast} onLost={onChanged} />
+      <DonationPanel
+        broadcast={broadcast}
+        state={donations.state}
+        loadError={donations.loadError}
+        onRetry={donations.retry}
+      />
       {broadcast.status === 'ENDED' && <BroadcastRecordings key={broadcast.id} broadcastId={broadcast.id} />}
       {isOwner && <Publisher broadcast={broadcast} onChanged={onChanged} />}
       {isOwner && (
@@ -89,7 +98,7 @@ function BroadcastView({ broadcast, onChanged }: { broadcast: Broadcast; onChang
           {error}
         </p>
       )}
-      <CommentPanel key={broadcast.id} broadcast={broadcast} />
+      <CommentPanel key={broadcast.id} broadcast={broadcast} onDonations={donations.dispatch} />
     </article>
   )
 }

@@ -11,6 +11,7 @@ use application::{
     },
     ports::{
         comment::{ChatPolicyStore, CommentQuery, CommentRepository, CommentView},
+        donation::DonationQuery,
         event_bus::EventBus,
         id::IdGenerator,
         rate_limit::RateLimiter,
@@ -55,6 +56,8 @@ pub struct CommentPorts {
     pub query: Arc<dyn CommentQuery>,
     pub policies: Arc<dyn ChatPolicyStore>,
     pub limiter: Arc<dyn RateLimiter>,
+    /// The donation totals the event stream sends with the policy.
+    pub donations: Arc<dyn DonationQuery>,
     pub events: Arc<dyn EventBus>,
 }
 
@@ -65,6 +68,7 @@ impl CommentUseCases {
             query,
             policies,
             limiter,
+            donations,
             events,
         } = ports;
         Self {
@@ -94,6 +98,7 @@ impl CommentUseCases {
             follow: FollowComments {
                 query,
                 policies,
+                donations,
                 events,
             },
         }
@@ -126,7 +131,7 @@ fn comment_id(raw: &str) -> Result<CommentId, ApiError> {
     raw.parse().map_err(|_| CommentError::NotFound.into())
 }
 
-fn rfc3339(at: SystemTime) -> String {
+pub(crate) fn rfc3339(at: SystemTime) -> String {
     OffsetDateTime::from(at)
         .format(&Rfc3339)
         .expect("a SystemTime from the database fits RFC 3339")

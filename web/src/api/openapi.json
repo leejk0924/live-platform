@@ -1279,13 +1279,202 @@
         ]
       }
     },
+    "/api/broadcasts/{id}/donations": {
+      "get": {
+        "tags": [
+          "donations"
+        ],
+        "summary": "List a broadcast's donations, newest first, with their total",
+        "operationId": "listDonations",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Only donations older than this id: the previous page's `nextBefore`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "description": "Page size, 1 to 50. Defaults to 20.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 50,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Credited donations only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DonationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_QUERY` or `INVALID_PAGE_SIZE`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`BROADCAST_NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "donations"
+        ],
+        "summary": "Order a donation to a broadcast on air, to pay with Toss",
+        "description": "Open Toss's payment window with the returned `clientKey`, `orderId`, `orderName` and `amount`, then send what Toss hands the success URL to `POST /api/donations/confirm`. Nothing is credited before that.",
+        "operationId": "createDonation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DonationInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "A pending order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DonationOrder"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_AMOUNT` or `INVALID_REQUEST`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`SELF_DONATION` or `CSRF_REJECTED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`BROADCAST_NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`DONATIONS_CLOSED`: the broadcast is not on air",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: ordered too soon after the last order; see `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`PAYMENTS_DISABLED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/broadcasts/{id}/events": {
       "get": {
         "tags": [
           "comments"
         ],
-        "summary": "Follow a broadcast's comments live (Server-Sent Events)",
-        "description": "A `text/event-stream` with these events:\n\n- `comments`: `data` is a JSON array of `Comment`, every change (post, edit, delete) within about 200 ms, oldest first; `id` is the newest `revision` in it. Upsert by `id`, keeping the higher `revision`; a deleted comment arrives with `body: null`.\n- `policy`: `data` is a `ChatPolicy`; sent when the stream opens, after catching up what it missed, and on every change.\n- `reset`: too much was missed to replay; reload the list. `data` is `{\"revision\": string}`, also the event's `id`.\n\nNot subject to the 10 second request limit. A reconnecting `EventSource` sends `Last-Event-ID` and receives what it missed.",
+        "summary": "Follow a broadcast's comments and donations live (Server-Sent Events)",
+        "description": "A `text/event-stream` with these events:\n\n- `comments`: `data` is a JSON array of `Comment`, every change (post, edit, delete) within about 200 ms, oldest first; `id` is the newest `revision` in it. Upsert by `id`, keeping the higher `revision`; a deleted comment arrives with `body: null`.\n- `policy`: `data` is a `ChatPolicy`; sent when the stream opens, after catching up what it missed, and on every change.\n- `reset`: too much was missed to replay; reload the list. `data` is `{\"revision\": string}`, also the event's `id`.\n- `donation`: a donation was just paid. `data` is `{\"donation\": Donation, \"total\": number, \"count\": number}`, the broadcast's totals including it. No `id`.\n- `donations`: `data` is `{\"total\": number, \"count\": number}`, the broadcast's donation totals; sent right after `policy` when the stream opens and after catching up. No `id`. Totals only grow: keep the highest seen, since this one may be older than a `donation` still on its way.\n\nNot subject to the 10 second request limit. A reconnecting `EventSource` sends `Last-Event-ID` and receives what it missed.",
         "operationId": "followBroadcastEvents",
         "parameters": [
           {
@@ -1580,6 +1769,103 @@
           },
           "409": {
             "description": "`BROADCAST_NOT_LIVE`: ready or already ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/donations/confirm": {
+      "post": {
+        "tags": [
+          "donations"
+        ],
+        "summary": "Pay for one's own donation order with the payment Toss authorized",
+        "description": "Safe to repeat: the same payment again answers `credited: false` and is neither charged nor credited twice.",
+        "operationId": "confirmDonation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DonationConfirmInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Paid; followers of the broadcast receive it as a `donation` event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DonationConfirmed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`AMOUNT_MISMATCH`, `PAYMENT_REJECTED`, `INVALID_PAYMENT_KEY` or `INVALID_REQUEST`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`NOT_DONOR` or `CSRF_REJECTED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ORDER_NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ALREADY_PAID`: paid by another payment, or the payment paid another order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`PAYMENT_GATEWAY_UNAVAILABLE`: retry with the same body, or `PAYMENTS_DISABLED`",
             "content": {
               "application/json": {
                 "schema": {
@@ -2119,6 +2405,155 @@
           }
         }
       },
+      "Donation": {
+        "type": "object",
+        "required": [
+          "id",
+          "broadcastId",
+          "donorName",
+          "amount",
+          "approvedAt"
+        ],
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Won.",
+            "maximum": 1000000,
+            "minimum": 1000
+          },
+          "approvedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "broadcastId": {
+            "type": "string",
+            "example": "112007302751453184"
+          },
+          "donorName": {
+            "type": "string",
+            "description": "Plain text: escape it when rendering."
+          },
+          "id": {
+            "type": "string",
+            "example": "112007303372210176"
+          }
+        }
+      },
+      "DonationConfirmInput": {
+        "type": "object",
+        "required": [
+          "paymentKey",
+          "orderId",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "As Toss handed it to the success URL; must equal the order's."
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "paymentKey": {
+            "type": "string",
+            "description": "As Toss handed it to the success URL."
+          }
+        }
+      },
+      "DonationConfirmed": {
+        "type": "object",
+        "required": [
+          "donation",
+          "credited"
+        ],
+        "properties": {
+          "credited": {
+            "type": "boolean",
+            "description": "`false` when an earlier request had already credited this payment."
+          },
+          "donation": {
+            "$ref": "#/components/schemas/Donation"
+          }
+        }
+      },
+      "DonationInput": {
+        "type": "object",
+        "required": [
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Won, 1000 to 1000000."
+          }
+        }
+      },
+      "DonationOrder": {
+        "type": "object",
+        "description": "What the browser passes to Toss's payment window.",
+        "required": [
+          "orderId",
+          "amount",
+          "orderName",
+          "clientKey"
+        ],
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "clientKey": {
+            "type": "string",
+            "description": "The Toss client key to open the payment window with."
+          },
+          "orderId": {
+            "type": "string",
+            "description": "Toss's `orderId`.",
+            "example": "112007303372210176"
+          },
+          "orderName": {
+            "type": "string",
+            "description": "Toss's `orderName`."
+          }
+        }
+      },
+      "DonationPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "count",
+          "nextBefore"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Donation"
+            },
+            "description": "Newest order first."
+          },
+          "nextBefore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `before` for the next page; `null` on the last page."
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Won, over every credited donation of the broadcast."
+          }
+        }
+      },
       "ErrorBody": {
         "type": "object",
         "description": "The body of every error response.",
@@ -2383,6 +2818,10 @@
     {
       "name": "comments",
       "description": "Comments on a broadcast, its chat policy and its live event stream"
+    },
+    {
+      "name": "donations",
+      "description": "Donations to a broadcast on air, paid with Toss Payments (test mode)"
     },
     {
       "name": "recordings",
