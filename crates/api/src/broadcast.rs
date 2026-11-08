@@ -13,7 +13,9 @@ use application::{
     media::{AdmitMediaAccess, TrackPublisher},
     ports::{
         auth::UserRepository,
-        broadcast::{BroadcastQuery, BroadcastRepository, BroadcastView, PublisherPresence},
+        broadcast::{
+            BroadcastQuery, BroadcastRepository, BroadcastView, ListFilter, PublisherPresence,
+        },
         id::IdGenerator,
         media::{
             IngestRouter, MediaCredentialVerifier, PublishAuthorizer, PublishTicketLedger,
@@ -272,6 +274,9 @@ pub struct ListParams {
     /// Page size, 1 to 50. Defaults to 20.
     #[param(minimum = 1, maximum = 50)]
     limit: Option<u32>,
+    /// `true`: only `LIVE` and `INTERRUPTED`. `false`: only `READY` and
+    /// `ENDED`. Absent: all.
+    live: Option<bool>,
 }
 
 /// `body` plus its version as the `ETag`.
@@ -303,10 +308,15 @@ pub(crate) async fn list(
         .map(|raw| raw.parse::<BroadcastId>())
         .transpose()
         .map_err(|_| ApiError::invalid_query())?;
+    let filter = match params.live {
+        None => ListFilter::All,
+        Some(true) => ListFilter::OnAir,
+        Some(false) => ListFilter::OffAir,
+    };
     let page = state
         .broadcasts
         .list
-        .run(before, params.limit)
+        .run(filter, before, params.limit)
         .await
         .map_err(api_error)?;
     Ok((

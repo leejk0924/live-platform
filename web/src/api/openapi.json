@@ -416,6 +416,15 @@
               "maximum": 50,
               "minimum": 1
             }
+          },
+          {
+            "name": "live",
+            "in": "query",
+            "description": "`true`: only `LIVE` and `INTERRUPTED`. `false`: only `READY` and\n`ENDED`. Absent: all.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

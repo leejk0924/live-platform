@@ -105,6 +105,20 @@ async fn delete(router: &Router, token: Option<&str>, id: &str) -> Reply {
     .await
 }
 
+async fn force_status(pool: &PgPool, id: &str, status: &str) {
+    sqlx::query(
+        "UPDATE broadcasts SET status = $2, \
+         interrupted_at = CASE WHEN $2 = 'INTERRUPTED' THEN now() END, \
+         live_since = CASE WHEN $2 = 'LIVE' THEN now() END \
+         WHERE id = $1",
+    )
+    .bind(id.parse::<i64>().unwrap())
+    .bind(status)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 /// What a rejected write must leave untouched.
 #[derive(Debug, PartialEq)]
 struct Stored {
@@ -400,17 +414,7 @@ async fn only_ready_and_ended_broadcasts_can_be_deleted(pool: PgPool) {
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query(
-            "UPDATE broadcasts SET status = $2, \
-             interrupted_at = CASE WHEN $2 = 'INTERRUPTED' THEN now() END, \
-             live_since = CASE WHEN $2 = 'LIVE' THEN now() END \
-             WHERE id = $1",
-        )
-        .bind(id.parse::<i64>().unwrap())
-        .bind(status)
-        .execute(&pool)
-        .await
-        .unwrap();
+        force_status(&pool, &id, status).await;
 
         let reply = delete(&router, Some(&actors.owner), &id).await;
         assert_eq!(reply.status, expected, "{status}: {}", reply.body);
@@ -591,5 +595,62 @@ async fn a_concurrent_update_and_delete_leave_a_deleted_row(pool: PgPool) {
         };
         assert_eq!(stored(&pool, &id).await, expected, "round {round}");
         assert_eq!(get(&router, &id).await.status, StatusCode::NOT_FOUND);
+    }
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn the_live_filter_splits_on_air_broadcasts_from_the_rest(pool: PgPool) {
+    let router = router(&pool, false).await;
+    let actors = actors(&router).await;
+    // An owner may have only one active broadcast, so the two on air belong
+    // to different owners.
+    for (token, status) in [
+        (&actors.owner, "READY"),
+        (&actors.owner, "LIVE"),
+        (&actors.other, "INTERRUPTED"),
+        (&actors.owner, "ENDED"),
+    ] {
+        let id = created_id(&router, token, status).await;
+        force_status(&pool, &id, status).await;
+    }
+    let statuses = |reply: &Reply| -> Vec<String> {
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        reply.body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["status"].as_str().unwrap().to_owned())
+            .collect()
+    };
+
+    for (filter, expected) in [
+        ("live=true&", vec!["INTERRUPTED", "LIVE"]),
+        ("live=false&", vec!["ENDED", "READY"]),
+        ("", vec!["ENDED", "INTERRUPTED", "LIVE", "READY"]),
+    ] {
+        assert_eq!(
+            statuses(&list(&router, &format!("?{filter}")).await),
+            expected,
+            "{filter}"
+        );
+
+        let mut walked = Vec::new();
+        let mut query = format!("?{filter}limit=1");
+        loop {
+            let page = list(&router, &query).await;
+            walked.extend(statuses(&page));
+            let Some(next) = page.body["nextBefore"].as_str() else {
+                break;
+            };
+            query = format!("?{filter}limit=1&before={next}");
+        }
+        assert_eq!(walked, expected, "{filter} one per page");
+    }
+
+    for bad in ["?live=yes", "?live=1", "?live="] {
+        let reply = list(&router, bad).await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{bad}");
+        assert_eq!(reply.code(), "INVALID_QUERY", "{bad}");
     }
 }

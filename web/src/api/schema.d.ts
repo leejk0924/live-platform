@@ -609,6 +609,11 @@ export interface operations {
                 before?: string;
                 /** @description Page size, 1 to 50. Defaults to 20. */
                 limit?: number;
+                /**
+                 * @description `true`: only `LIVE` and `INTERRUPTED`. `false`: only `READY` and
+                 *     `ENDED`. Absent: all.
+                 */
+                live?: boolean;
             };
             header?: never;
             path?: never;
