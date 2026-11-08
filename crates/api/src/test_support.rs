@@ -6,7 +6,10 @@ use std::{
 use application::ports::{
     PortError,
     auth::{Inserted, PasswordHasher, SessionStore, UserRepository},
-    broadcast::{BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, WriteRejection},
+    broadcast::{
+        BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, TransitionRejection,
+        WriteRejection,
+    },
     id::{IdGenerationError, IdGenerator},
 };
 use async_trait::async_trait;
@@ -97,6 +100,22 @@ impl BroadcastRepository for Unavailable {
         _: BroadcastId,
         _: UserId,
     ) -> Result<Result<(), WriteRejection>, PortError> {
+        unavailable()
+    }
+
+    async fn start(
+        &self,
+        _: BroadcastId,
+        _: UserId,
+    ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
+        unavailable()
+    }
+
+    async fn stop(
+        &self,
+        _: BroadcastId,
+        _: UserId,
+    ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
         unavailable()
     }
 }

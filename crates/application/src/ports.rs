@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod broadcast;
 pub mod id;
+pub mod media;
 
 use thiserror::Error;
 

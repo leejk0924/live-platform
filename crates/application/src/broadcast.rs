@@ -47,7 +47,10 @@ impl From<WriteRejection> for Error {
 
 /// Writes are only ever made by the owner, so the owner's name is the
 /// actor's.
-async fn view_of(users: &dyn UserRepository, broadcast: Broadcast) -> Result<BroadcastView, Error> {
+pub(crate) async fn view_of(
+    users: &dyn UserRepository,
+    broadcast: Broadcast,
+) -> Result<BroadcastView, Error> {
     let owner = users
         .find_by_id(broadcast.owner_id)
         .await?
