@@ -75,8 +75,8 @@ impl BroadcastStatus {
 }
 
 /// Something that changes a broadcast's status. The owner starts and stops
-/// it, the media server's reports interrupt and resume it, and the grace
-/// period running out expires it.
+/// it, the media server's reports interrupt and resume it, and
+/// [`INTERRUPT_GRACE`] running out expires it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BroadcastEvent {
     Start,
@@ -122,8 +122,6 @@ impl BroadcastEvent {
                 from: &BroadcastStatus::ACTIVE,
                 to: Ended,
             },
-            // Only once INTERRUPT_GRACE has passed; that check needs a clock,
-            // so the adapter adds it to the write.
             Self::Expire => Transition {
                 from: &[Interrupted],
                 to: Ended,
