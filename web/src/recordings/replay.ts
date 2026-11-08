@@ -1,8 +1,9 @@
 // Where to pick up after a new URL loads: the position and whether it was playing.
 export type Resume = { time: number; playing: boolean }
 
-// `retried`: the URL in hand replaced one that failed, and nothing has loaded since. Another media
-// error then gives up instead of asking again, so a recording that cannot play does not loop.
+// `retried`: the URL in hand replaced one that failed, and playback has not yet moved past `resume`.
+// Another media error then gives up instead of asking again, so a recording that loads but fails at
+// the same spot does not loop. Playing on past it means the URL worked, so a later expiry asks again.
 // `error` is the API error when asking for a URL failed, `null` when the media itself failed.
 export type ReplayState =
   | { kind: 'loading'; resume: Resume | null; retried: boolean }
@@ -12,9 +13,12 @@ export type ReplayState =
 export type ReplayEvent =
   | { type: 'urlLoaded'; url: string }
   | { type: 'urlFailed'; error: unknown }
-  | { type: 'mediaLoaded' }
+  | { type: 'progressed'; time: number }
   | { type: 'mediaError'; at: Resume }
   | { type: 'retry' }
+
+// More than the jitter between seeking to the restored position and the first time update after it.
+const PROGRESS_SECONDS = 1
 
 export const initialReplay: ReplayState = { kind: 'loading', resume: null, retried: false }
 
@@ -24,8 +28,10 @@ export function replayReducer(state: ReplayState, event: ReplayEvent): ReplaySta
       return state.kind === 'loading' ? { ...state, kind: 'ready', url: event.url } : state
     case 'urlFailed':
       return state.kind === 'loading' ? { kind: 'failed', resume: state.resume, error: event.error } : state
-    case 'mediaLoaded':
-      return state.kind === 'ready' ? { ...state, resume: null, retried: false } : state
+    case 'progressed':
+      return state.kind === 'ready' && state.resume && event.time > state.resume.time + PROGRESS_SECONDS
+        ? { ...state, resume: null, retried: false }
+        : state
     case 'mediaError': {
       if (state.kind !== 'ready') return state
       // A URL that never loaded leaves the earlier position as the one to come back to.

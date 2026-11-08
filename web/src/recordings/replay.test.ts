@@ -10,7 +10,7 @@ test('a fetched URL is played', () => {
 })
 
 test('a media error asks for a new URL and remembers where playback was', () => {
-  const state = run([{ type: 'urlLoaded', url: '/a' }, { type: 'mediaLoaded' }, { type: 'mediaError', at }])
+  const state = run([{ type: 'urlLoaded', url: '/a' }, { type: 'progressed', time: 42 }, { type: 'mediaError', at }])
   assert.deepEqual(state, { kind: 'loading', resume: at, retried: true })
 })
 
@@ -29,16 +29,34 @@ test('a second failure in a row gives up, keeping the first position', () => {
   assert.deepEqual(state, { kind: 'failed', resume: at, error: null })
 })
 
-test('a URL that loads resets the count, so a later expiry refreshes again', () => {
+test('a fresh URL that loads but fails at the same spot gives up', () => {
+  const state = run([
+    { type: 'urlLoaded', url: '/a' },
+    { type: 'progressed', time: 42 },
+    { type: 'mediaError', at },
+    { type: 'urlLoaded', url: '/b' },
+    { type: 'progressed', time: 42.5 },
+    { type: 'mediaError', at },
+  ])
+  assert.deepEqual(state, { kind: 'failed', resume: at, error: null })
+})
+
+test('playing on past the restored position resets the count, so a later expiry refreshes again', () => {
   const later = { time: 300, playing: true }
   const state = run([
     { type: 'urlLoaded', url: '/a' },
     { type: 'mediaError', at },
     { type: 'urlLoaded', url: '/b' },
-    { type: 'mediaLoaded' },
+    { type: 'progressed', time: 44 },
     { type: 'mediaError', at: later },
   ])
   assert.deepEqual(state, { kind: 'loading', resume: later, retried: true })
+})
+
+test('after a manual retry, playing on drops the old position', () => {
+  const failed: ReplayState = { kind: 'failed', resume: at, error: null }
+  const state = run([{ type: 'retry' }, { type: 'urlLoaded', url: '/b' }, { type: 'progressed', time: 60 }], failed)
+  assert.deepEqual(state, { kind: 'ready', url: '/b', resume: null, retried: false })
 })
 
 test('failing to get a URL shows the API error', () => {
