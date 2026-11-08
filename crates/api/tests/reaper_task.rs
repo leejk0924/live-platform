@@ -29,6 +29,7 @@ enum Pass {
     /// Another instance holds the lock.
     Skipped,
     Fails,
+    Panics,
     Takes(Duration),
 }
 
@@ -55,6 +56,7 @@ impl ReaperStore for Store {
         let result = match self.pass {
             Pass::Skipped => Ok(None),
             Pass::Fails => Err(PortError("database unreachable".into())),
+            Pass::Panics => panic!("a bug in the pass"),
             Pass::Takes(duration) => {
                 tokio::time::sleep(duration).await;
                 Ok(None)
@@ -104,6 +106,17 @@ async fn a_pass_runs_at_once_and_then_every_interval() {
 #[tokio::test(start_paused = true)]
 async fn a_failed_pass_does_not_stop_the_next() {
     let store = Store::new(Pass::Fails);
+    let handle = spawn(store.clone());
+
+    tokio::time::sleep(REAP_INTERVAL * 3 + Duration::from_millis(1)).await;
+
+    assert_eq!(store.begun.load(Ordering::SeqCst), 4);
+    handle.shutdown().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_panicking_pass_does_not_stop_the_next() {
+    let store = Store::new(Pass::Panics);
     let handle = spawn(store.clone());
 
     tokio::time::sleep(REAP_INTERVAL * 3 + Duration::from_millis(1)).await;

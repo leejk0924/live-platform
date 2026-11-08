@@ -1,6 +1,11 @@
 //! Runs the reaper in the background of the server process.
 
-use application::reaper::{REAP_INTERVAL, Reaper};
+use std::sync::Arc;
+
+use application::{
+    ports::PortError,
+    reaper::{REAP_INTERVAL, Reaped, Reaper},
+};
 use domain::broadcast::BroadcastId;
 use tokio::{sync::oneshot, task::JoinHandle, time::MissedTickBehavior};
 
@@ -19,10 +24,11 @@ impl ReaperHandle {
     }
 }
 
-/// Ticks every [`REAP_INTERVAL`]. A failed pass is logged and the next tick
-/// tries again; every pass derives its work from the stored state, so a
-/// missed or repeated one changes nothing.
+/// Ticks every [`REAP_INTERVAL`]. A failed or panicking pass is logged and
+/// the next tick tries again; every pass derives its work from the stored
+/// state, so a missed or repeated one changes nothing.
 pub fn spawn(reaper: Reaper) -> ReaperHandle {
+    let reaper = Arc::new(reaper);
     let (stop, mut stopped) = oneshot::channel();
     let task = tokio::spawn(async move {
         let mut ticks = tokio::time::interval(REAP_INTERVAL);
@@ -32,38 +38,49 @@ pub fn spawn(reaper: Reaper) -> ReaperHandle {
                 _ = &mut stopped => return,
                 _ = ticks.tick() => {}
             }
-            match reaper.tick().await {
-                Ok(None) => {}
-                Ok(Some(reaped)) => {
-                    if let Some(err) = &reaped.probe_failure {
-                        tracing::warn!(%err, "reaper could not list the streams on air; nothing reconciled");
-                    }
-                    for (broadcast, err) in &reaped.kick_failures {
-                        tracing::warn!(%err, %broadcast, "publisher was not disconnected; the next pass retries");
-                    }
-                    if !reaped.not_active.is_empty() {
-                        tracing::warn!(
-                            broadcasts = %joined(&reaped.not_active),
-                            "disconnecting publishers of broadcasts that are not active"
-                        );
-                    }
-                    let changed = !reaped.expired.is_empty()
-                        || !reaped.reconciled.interrupted.is_empty()
-                        || !reaped.reconciled.resumed.is_empty();
-                    if changed {
-                        tracing::info!(
-                            expired = %joined(&reaped.expired),
-                            interrupted = %joined(&reaped.reconciled.interrupted),
-                            resumed = %joined(&reaped.reconciled.resumed),
-                            "reaper changed broadcast statuses"
-                        );
-                    }
-                }
-                Err(err) => tracing::error!(%err, "reaper pass failed"),
+            // Its own task, so a panic ends this pass and not the loop.
+            let reaper = Arc::clone(&reaper);
+            match tokio::spawn(async move { reaper.tick().await }).await {
+                Ok(result) => report(result),
+                Err(err) => tracing::error!(%err, "reaper pass panicked"),
             }
         }
     });
     ReaperHandle { stop, task }
+}
+
+fn report(result: Result<Option<Reaped>, PortError>) {
+    let reaped = match result {
+        Ok(Some(reaped)) => reaped,
+        Ok(None) => return,
+        Err(err) => {
+            tracing::error!(%err, "reaper pass failed");
+            return;
+        }
+    };
+    if let Some(err) = &reaped.probe_failure {
+        tracing::warn!(%err, "reaper could not list the streams on air; nothing reconciled");
+    }
+    for (broadcast, err) in &reaped.kick_failures {
+        tracing::warn!(%err, %broadcast, "publisher was not disconnected; the next pass retries");
+    }
+    if !reaped.not_active.is_empty() {
+        tracing::warn!(
+            broadcasts = %joined(&reaped.not_active),
+            "disconnecting publishers of broadcasts that are not active"
+        );
+    }
+    let changed = !reaped.expired.is_empty()
+        || !reaped.reconciled.interrupted.is_empty()
+        || !reaped.reconciled.resumed.is_empty();
+    if changed {
+        tracing::info!(
+            expired = %joined(&reaped.expired),
+            interrupted = %joined(&reaped.reconciled.interrupted),
+            resumed = %joined(&reaped.reconciled.resumed),
+            "reaper changed broadcast statuses"
+        );
+    }
 }
 
 fn joined(ids: &[BroadcastId]) -> String {
