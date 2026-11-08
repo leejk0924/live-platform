@@ -25,6 +25,7 @@ use application::ports::{
         PublishAuthorizer, PublishCredential, PublishTicket, PublishTicketLedger, RedeemRejection,
         StreamPath, StreamTerminator,
     },
+    payment::PaymentGateway,
     rate_limit::{RateKey, RateLimiter},
     recording::{
         ClaimedRecording, NewRecording, RecordingFilter, RecordingQuery, RecordingRepository,
@@ -43,7 +44,7 @@ use domain::{
     recording::{RecordingId, RecordingKey, StoreRetry},
     secret::Secret,
 };
-use infrastructure::{auth::BreachedPasswordList, media::PublishKey, payment::FakePaymentGateway};
+use infrastructure::{auth::BreachedPasswordList, media::PublishKey};
 use tracing::Subscriber;
 use tracing_subscriber::fmt::MakeWriter;
 
@@ -431,7 +432,7 @@ pub fn test_state() -> AppState {
 }
 
 /// Payments go to `gateway`; every store is unavailable.
-pub fn payments_state(gateway: Arc<FakePaymentGateway>) -> AppState {
+pub fn payments_state(gateway: Arc<dyn PaymentGateway>) -> AppState {
     let payments = PaymentPorts {
         gateway,
         client_key: Secret::new("test_ck_example".into()),
