@@ -6,9 +6,13 @@ export type Reception = {
   close: () => void
 }
 
+// A media server that accepts the connection but never answers would otherwise keep the player
+// loading instead of falling through to the next source.
+const ANSWER_TIMEOUT_MS = 10_000
+
 // WHEP: POST the complete recvonly offer, get the answer and a session URL back.
 // Watching needs no credentials, so unlike WHIP there is no bearer token.
-export async function receive(whepUrl: string): Promise<Reception> {
+export async function receive(whepUrl: string, signal: AbortSignal): Promise<Reception> {
   const peer = new RTCPeerConnection()
   const stream = new MediaStream()
   peer.addEventListener('track', (event) => stream.addTrack(event.track))
@@ -22,6 +26,7 @@ export async function receive(whepUrl: string): Promise<Reception> {
       method: 'POST',
       headers: { 'Content-Type': 'application/sdp' },
       body: peer.localDescription?.sdp,
+      signal: AbortSignal.any([signal, AbortSignal.timeout(ANSWER_TIMEOUT_MS)]),
     })
     if (response.status !== 201) throw new Error(`WHEP endpoint answered ${response.status}`)
     await peer.setRemoteDescription({ type: 'answer', sdp: await response.text() })

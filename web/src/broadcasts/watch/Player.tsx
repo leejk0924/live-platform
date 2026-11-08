@@ -41,8 +41,8 @@ async function attachHls(video: HTMLVideoElement, url: string): Promise<Attachme
   return { lost, close: () => hls.destroy() }
 }
 
-async function attachWhep(video: HTMLVideoElement, url: string): Promise<Attachment> {
-  const reception = await receive(url)
+async function attachWhep(video: HTMLVideoElement, url: string, signal: AbortSignal): Promise<Attachment> {
+  const reception = await receive(url, signal)
   video.srcObject = reception.stream
   let unwatch = () => {}
   const lost = new Promise<void>((resolve) => {
@@ -58,7 +58,8 @@ async function attachWhep(video: HTMLVideoElement, url: string): Promise<Attachm
   }
 }
 
-const attachers: Record<PlaybackKind, (video: HTMLVideoElement, url: string) => Promise<Attachment>> = {
+// `signal` aborts an attach still in progress when the player moves on.
+const attachers: Record<PlaybackKind, (video: HTMLVideoElement, url: string, signal: AbortSignal) => Promise<Attachment>> = {
   'll-hls': attachHls,
   whep: attachWhep,
 }
@@ -78,6 +79,7 @@ export default function Player({ broadcastId, onLost }: { broadcastId: string; o
     if (!element) return
     // One run per effect: cleanup marks it cancelled and releases whatever source it holds.
     const run: { cancelled: boolean; current: Attachment | null } = { cancelled: false, current: null }
+    const abort = new AbortController()
 
     void (async () => {
       try {
@@ -88,7 +90,7 @@ export default function Player({ broadcastId, onLost }: { broadcastId: string; o
           setPlayback({ kind: 'loading' })
           let attachment: Attachment
           try {
-            attachment = await attachers[source.kind](element, source.url)
+            attachment = await attachers[source.kind](element, source.url, abort.signal)
           } catch {
             continue
           }
@@ -110,6 +112,7 @@ export default function Player({ broadcastId, onLost }: { broadcastId: string; o
 
     return () => {
       run.cancelled = true
+      abort.abort()
       run.current?.close()
     }
   }, [broadcastId, ios, lowLatency, attempt, onLost])
