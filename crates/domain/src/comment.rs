@@ -23,7 +23,8 @@ pub const PAGE_SIZE_MAX: u32 = 100;
 /// Every user may post at most once per interval, across all broadcasts.
 pub const POST_INTERVAL: Duration = Duration::from_secs(1);
 /// The longest slow mode a broadcaster may set.
-pub const SLOW_MODE_MAX: Duration = Duration::from_secs(300);
+pub const SLOW_MODE_MAX_SECS: u64 = 300;
+pub const SLOW_MODE_MAX: Duration = Duration::from_secs(SLOW_MODE_MAX_SECS);
 
 /// Whether a broadcast in `status` takes new comments. An ended broadcast
 /// keeps its comments but takes no more.
@@ -126,7 +127,7 @@ pub struct Comment {
 pub enum CommentError {
     #[error("comment must be 1 to {COMMENT_MAX_CHARS} characters on one line")]
     InvalidBody,
-    #[error("slow mode must be between 0 and 300 seconds")]
+    #[error("slow mode must be between 0 and {SLOW_MODE_MAX_SECS} seconds")]
     InvalidSlowMode,
     #[error("page size must be between 1 and {PAGE_SIZE_MAX}")]
     InvalidPageSize,
@@ -226,6 +227,10 @@ mod tests {
         assert_eq!(
             ChatPolicy::from_secs(301),
             Err(CommentError::InvalidSlowMode)
+        );
+        assert_eq!(
+            CommentError::InvalidSlowMode.to_string(),
+            "slow mode must be between 0 and 300 seconds"
         );
     }
 
