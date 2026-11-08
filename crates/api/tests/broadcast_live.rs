@@ -655,3 +655,65 @@ async fn a_failed_kick_ends_the_broadcast_and_only_reaches_the_logs(pool: PgPool
     assert!(warning.contains(KICK_FAILURE), "{warning}");
     assert!(warning.contains(&id), "{warning}");
 }
+
+async fn playback(router: &Router, id: &str) -> Reply {
+    send(
+        router,
+        request(
+            Method::GET,
+            &format!("/api/broadcasts/{id}/playback"),
+            None,
+            None,
+        ),
+    )
+    .await
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn anyone_can_get_the_playback_sources_of_an_on_air_broadcast(pool: PgPool) {
+    let world = World::new(pool).await;
+    for status in ["LIVE", "INTERRUPTED"] {
+        let id = world.broadcast_in(status).await;
+        let reply = playback(&world.router, &id).await;
+        assert_eq!(reply.status, StatusCode::OK, "{status}: {}", reply.body);
+        assert_eq!(
+            reply.headers[header::CACHE_CONTROL],
+            "public, max-age=5",
+            "{status}"
+        );
+        assert_eq!(
+            reply.body,
+            json!([
+                {"kind": "ll-hls", "url": format!("/media/hls/live/{id}/index.m3u8")},
+                {"kind": "whep", "url": format!("/media/webrtc/live/{id}/whep")},
+            ]),
+            "{status}"
+        );
+    }
+
+    for status in ["READY", "ENDED"] {
+        let id = world.broadcast_in(status).await;
+        let reply = playback(&world.router, &id).await;
+        assert_eq!(reply.status, StatusCode::CONFLICT, "{status}");
+        assert_eq!(reply.code(), "BROADCAST_NOT_LIVE", "{status}");
+    }
+
+    let deleted = world.broadcast_in("READY").await;
+    let reply = send(
+        &world.router,
+        request(
+            Method::DELETE,
+            &format!("/api/broadcasts/{deleted}"),
+            None,
+            Some(&world.owner),
+        ),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::NO_CONTENT);
+    for id in [deleted.as_str(), "123", "abc"] {
+        let reply = playback(&world.router, id).await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{id}");
+        assert_eq!(reply.code(), "BROADCAST_NOT_FOUND", "{id}");
+    }
+}

@@ -20,7 +20,9 @@ use application::reaper::Reaper;
 use infrastructure::{
     auth::{Argon2Hasher, BreachedPasswordList},
     id::SnowflakeIdGenerator,
-    media::{JwtPublishAuthorizer, MediaMtxControlApi, MediaMtxIngestRouter},
+    media::{
+        JwtPublishAuthorizer, MediaMtxControlApi, MediaMtxIngestRouter, MediaMtxPlaybackResolver,
+    },
     persistence::{
         self, PgBroadcastQuery, PgBroadcastRepository, PgPublishTicketLedger, PgReaperStore,
         PgSessionStore, PgUserRepository, PgWorkerIdAllocator,
@@ -110,6 +112,7 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         repository: broadcasts.clone(),
         query: Arc::new(PgBroadcastQuery::new(pool.clone())),
         ingest: Arc::new(MediaMtxIngestRouter),
+        playback: Arc::new(MediaMtxPlaybackResolver),
         authorizer: tokens.clone(),
         terminator: control_api.clone(),
         verifier: tokens,

@@ -12,9 +12,9 @@ use application::ports::{
     },
     id::{IdGenerationError, IdGenerator},
     media::{
-        IngestEndpoint, IngestRouter, MediaCredentialVerifier, PublishAuthorizer,
-        PublishCredential, PublishTicket, PublishTicketLedger, RedeemRejection, StreamPath,
-        StreamTerminator,
+        IngestEndpoint, IngestRouter, MediaCredentialVerifier, PlaybackResolver, PlaybackSource,
+        PublishAuthorizer, PublishCredential, PublishTicket, PublishTicketLedger, RedeemRejection,
+        StreamPath, StreamTerminator,
     },
 };
 use async_trait::async_trait;
@@ -167,6 +167,12 @@ impl IngestRouter for Unavailable {
     }
 }
 
+impl PlaybackResolver for Unavailable {
+    fn resolve(&self, _: &StreamPath) -> Vec<PlaybackSource> {
+        unreachable!("not available in this test")
+    }
+}
+
 impl MediaCredentialVerifier for Unavailable {
     fn publish_ticket(&self, _: &Secret<String>) -> Option<PublishTicket> {
         unreachable!("not available in this test")
@@ -217,6 +223,7 @@ pub fn test_state() -> AppState {
         repository: Arc::new(Unavailable),
         query: Arc::new(Unavailable),
         ingest: Arc::new(Unavailable),
+        playback: Arc::new(Unavailable),
         authorizer: Arc::new(Unavailable),
         terminator: Arc::new(Unavailable),
         verifier: Arc::new(Unavailable),

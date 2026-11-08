@@ -767,6 +767,69 @@
         ]
       }
     },
+    "/api/broadcasts/{id}/playback": {
+      "get": {
+        "tags": [
+          "broadcasts"
+        ],
+        "summary": "Where to watch a live or interrupted broadcast",
+        "operationId": "getPlayback",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sources in order of preference; the first is the default. An `INTERRUPTED` broadcast keeps its sources while its publisher may come back.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`public, max-age=5`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlaybackSource"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`BROADCAST_NOT_FOUND`, also for deleted broadcasts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`BROADCAST_NOT_LIVE`: ready or ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/broadcasts/{id}/start": {
       "post": {
         "tags": [
@@ -1156,6 +1219,30 @@
           }
         }
       },
+      "PlaybackKind": {
+        "type": "string",
+        "enum": [
+          "ll-hls",
+          "whep"
+        ]
+      },
+      "PlaybackSource": {
+        "type": "object",
+        "required": [
+          "kind",
+          "url"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/PlaybackKind"
+          },
+          "url": {
+            "type": "string",
+            "description": "Same-origin URL.",
+            "example": "/media/hls/live/112007303372210176/index.m3u8"
+          }
+        }
+      },
       "PublishGrant": {
         "type": "object",
         "required": [
@@ -1215,7 +1302,7 @@
     },
     {
       "name": "broadcasts",
-      "description": "Broadcast registration, browsing, going live and ending"
+      "description": "Broadcast registration, browsing, going live, ending and watching"
     }
   ]
 }

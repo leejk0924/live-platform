@@ -11,6 +11,7 @@ use application::{
     },
     live::{StartBroadcast, StopBroadcast},
     media::{AdmitMediaAccess, TrackPublisher},
+    playback::ResolvePlayback,
     ports::{
         auth::UserRepository,
         broadcast::{
@@ -18,8 +19,8 @@ use application::{
         },
         id::IdGenerator,
         media::{
-            IngestRouter, MediaCredentialVerifier, PublishAuthorizer, PublishTicketLedger,
-            StreamTerminator,
+            IngestRouter, MediaCredentialVerifier, PlaybackResolver, PublishAuthorizer,
+            PublishTicketLedger, StreamTerminator,
         },
     },
 };
@@ -59,6 +60,7 @@ pub struct BroadcastUseCases {
     pub list: ListBroadcasts,
     pub start: StartBroadcast,
     pub stop: StopBroadcast,
+    pub playback: ResolvePlayback,
     /// Answers MediaMTX's question whether to let a publisher in.
     pub admit: AdmitMediaAccess,
     /// Follows MediaMTX's reports that a publisher arrived or left.
@@ -70,6 +72,7 @@ pub struct BroadcastPorts {
     pub repository: Arc<dyn BroadcastRepository>,
     pub query: Arc<dyn BroadcastQuery>,
     pub ingest: Arc<dyn IngestRouter>,
+    pub playback: Arc<dyn PlaybackResolver>,
     pub authorizer: Arc<dyn PublishAuthorizer>,
     pub terminator: Arc<dyn StreamTerminator>,
     pub verifier: Arc<dyn MediaCredentialVerifier>,
@@ -87,6 +90,7 @@ impl BroadcastUseCases {
             repository,
             query,
             ingest,
+            playback,
             authorizer,
             terminator,
             verifier,
@@ -120,6 +124,11 @@ impl BroadcastUseCases {
                 presence,
                 ingest: ingest.clone(),
                 terminator: terminator.clone(),
+            },
+            playback: ResolvePlayback {
+                query: query.clone(),
+                ingest: ingest.clone(),
+                resolver: playback,
             },
             stop: StopBroadcast {
                 broadcasts: repository,
