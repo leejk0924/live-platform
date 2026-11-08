@@ -12,7 +12,7 @@ use application::{
 use axum::{
     Router,
     body::Bytes,
-    extract::{Request, State},
+    extract::{Request, State, rejection::BytesRejection},
     http::{StatusCode, header::AUTHORIZATION},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -76,7 +76,11 @@ struct AuthRequest {
 
 /// 2xx lets the request in; anything else keeps it out. A refusal tells
 /// MediaMTX nothing more than that.
-async fn auth(State(state): State<AppState>, body: Bytes) -> Result<StatusCode, ApiError> {
+async fn auth(
+    State(state): State<AppState>,
+    body: Result<Bytes, BytesRejection>,
+) -> Result<StatusCode, ApiError> {
+    let body = body.map_err(|rejection| ApiError::rejected_body(rejection.status()))?;
     let request: AuthRequest =
         serde_json::from_slice(&body).map_err(|_| ApiError::invalid_request())?;
     let token = (!request.token.is_empty()).then(|| Secret::new(request.token));
@@ -131,7 +135,11 @@ enum HookEvent {
 
 /// Always 204 once the request is understood: a report that changes nothing
 /// is normal, not an error for MediaMTX to retry or log.
-async fn hook(State(state): State<AppState>, body: Bytes) -> Result<StatusCode, ApiError> {
+async fn hook(
+    State(state): State<AppState>,
+    body: Result<Bytes, BytesRejection>,
+) -> Result<StatusCode, ApiError> {
+    let body = body.map_err(|rejection| ApiError::rejected_body(rejection.status()))?;
     let request: HookRequest =
         serde_json::from_slice(&body).map_err(|_| ApiError::invalid_request())?;
     let signal = match request.event {

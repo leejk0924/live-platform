@@ -51,3 +51,7 @@ related: []
 ## Follow-up (2026-11-08, 코드 대조)
 
 "요청 타임아웃은 #4에서 넣는다"고 했지만 #4(PR #20)에 들어가지 않았고 main에도 없다. #27에서 넣는다.
+
+## Follow-up (2026-11-08, #27)
+
+요청 타임아웃을 넣었다. 10초, 503 `REQUEST_TIMEOUT`이고 오래 열리는 라우트는 `long_lived` 묶음으로 빠진다. 자세한 내용은 [common/27-request-limits-housekeeping](../common/27-request-limits-housekeeping.md).

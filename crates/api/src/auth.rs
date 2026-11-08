@@ -108,8 +108,8 @@ fn api_error(err: Error) -> ApiError {
     }
 }
 
-fn invalid_request(_: JsonRejection) -> ApiError {
-    ApiError::invalid_request()
+fn invalid_request(rejection: JsonRejection) -> ApiError {
+    ApiError::rejected_body(rejection.status())
 }
 
 /// The session token the request came with, if any. Its validity is not

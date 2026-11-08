@@ -21,6 +21,8 @@ use crate::{auth, broadcast, live};
         description = "Errors are always `{code, message, traceId}` (`ErrorBody`). \
             Every POST, PUT, PATCH and DELETE must send an allowed `Origin` and \
             `X-Requested-With: live-platform`, or it is rejected with 403 `CSRF_REJECTED`. \
+            A body over 64 KiB is rejected with 413 `PAYLOAD_TOO_LARGE`, and a request \
+            that takes over 10 seconds with 503 `REQUEST_TIMEOUT`. \
             Ids are decimal strings.",
     ),
     paths(
@@ -89,5 +91,24 @@ mod tests {
             "{} is stale; regenerate it with UPDATE_OPENAPI=1 cargo test -p api openapi",
             path.display()
         );
+    }
+
+    #[test]
+    fn description_states_the_request_limits_in_force() {
+        assert_eq!(
+            crate::BODY_LIMIT % 1024,
+            0,
+            "the limit is stated in whole KiB"
+        );
+        let description = ApiDoc::openapi().info.description.unwrap();
+        for limit in [
+            format!("{} KiB", crate::BODY_LIMIT / 1024),
+            format!("{} seconds", crate::REQUEST_TIMEOUT.as_secs()),
+        ] {
+            assert!(
+                description.contains(&limit),
+                "the description does not say {limit}"
+            );
+        }
     }
 }

@@ -9,9 +9,9 @@ use domain::{
     broadcast::{BroadcastEvent, BroadcastId, BroadcastStatus},
     id::SnowflakeId,
 };
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Acquire, PgPool, Postgres, Transaction};
 
-use super::status_names;
+use super::{IDLE_TIMEOUT, status_names};
 
 /// The advisory lock a pass holds; any 64-bit value no other lock uses.
 pub const REAPER_LOCK_KEY: i64 = 0x6c70_5f72_6561_7072;
@@ -19,6 +19,10 @@ pub const REAPER_LOCK_KEY: i64 = 0x6c70_5f72_6561_7072;
 /// How long a used ticket is remembered after it expires, so an API host
 /// whose clock runs behind the database's still refuses a replay.
 const SPENT_TICKET_RETENTION: Duration = Duration::from_secs(5 * 60);
+
+/// Where the day of the demo reset begins: midnight for the audience the
+/// service runs for.
+const DEMO_RESET_TIME_ZONE: &str = "Asia/Seoul";
 
 fn port_error(err: sqlx::Error) -> PortError {
     PortError(err.to_string())
@@ -150,14 +154,51 @@ impl ReapPass for PgReapPass {
     }
 
     async fn forget_spent_tickets(&mut self) -> Result<u64, PortError> {
+        let mut step = self.tx.begin().await.map_err(port_error)?;
         let deleted = sqlx::query(
             "DELETE FROM publish_token_uses WHERE expires_at < now() - make_interval(secs => $1)",
         )
         .bind(SPENT_TICKET_RETENTION.as_secs_f64())
-        .execute(&mut *self.tx)
+        .execute(&mut *step)
         .await
         .map_err(port_error)?;
+        step.commit().await.map_err(port_error)?;
         Ok(deleted.rows_affected())
+    }
+
+    async fn forget_expired_sessions(&mut self) -> Result<u64, PortError> {
+        let mut step = self.tx.begin().await.map_err(port_error)?;
+        let deleted = sqlx::query(
+            "DELETE FROM sessions \
+             WHERE expires_at <= now() OR last_seen_at <= now() - make_interval(secs => $1)",
+        )
+        .bind(IDLE_TIMEOUT.as_secs_f64())
+        .execute(&mut *step)
+        .await
+        .map_err(port_error)?;
+        step.commit().await.map_err(port_error)?;
+        Ok(deleted.rows_affected())
+    }
+
+    async fn reset_demo_broadcasts(&mut self) -> Result<Vec<BroadcastId>, PortError> {
+        let mut step = self.tx.begin().await.map_err(port_error)?;
+        let reset: Vec<i64> = sqlx::query_scalar(
+            "UPDATE broadcasts b \
+             SET deleted_at = now(), version = b.version + 1, updated_at = now() \
+             FROM users u \
+             WHERE u.id = b.owner_id AND u.is_demo AND b.status = ANY($1) \
+               AND b.deleted_at IS NULL \
+               AND b.created_at < date_trunc('day', now() AT TIME ZONE $2) AT TIME ZONE $2 \
+             RETURNING b.id",
+        )
+        .bind(status_names(&BroadcastStatus::DELETABLE))
+        .bind(DEMO_RESET_TIME_ZONE)
+        .fetch_all(&mut *step)
+        .await
+        .map_err(port_error)?;
+        let reset = to_ids(reset)?;
+        step.commit().await.map_err(port_error)?;
+        Ok(reset)
     }
 
     async fn finish(self: Box<Self>) -> Result<(), PortError> {

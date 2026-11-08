@@ -114,6 +114,11 @@ pub trait ReaperStore: Send + Sync {
 /// One reaper pass. Its writes take effect together at [`ReapPass::finish`];
 /// dropping it unfinished undoes them. Times are the store's clock, and
 /// "now" is when the pass began.
+///
+/// The housekeeping steps ([`ReapPass::forget_spent_tickets`],
+/// [`ReapPass::forget_expired_sessions`], [`ReapPass::reset_demo_broadcasts`])
+/// are independent of the status changes: a failed one undoes only its own
+/// writes, and the pass can still finish.
 #[async_trait]
 pub trait ReapPass: Send {
     /// Applies [`domain::broadcast::BroadcastEvent::Resume`] to the
@@ -138,6 +143,16 @@ pub trait ReapPass: Send {
     /// Deletes the records of publish tickets that can no longer be
     /// presented. Returns how many.
     async fn forget_spent_tickets(&mut self) -> Result<u64, PortError>;
+
+    /// Deletes every session past its idle or absolute timeout. Returns how
+    /// many.
+    async fn forget_expired_sessions(&mut self) -> Result<u64, PortError>;
+
+    /// Soft-deletes the demo accounts' broadcasts that are deletable and were
+    /// created before the current day began, so every demo visitor starts
+    /// the day with an empty account. An active one waits until it ends.
+    /// Returns them.
+    async fn reset_demo_broadcasts(&mut self) -> Result<Vec<BroadcastId>, PortError>;
 
     async fn finish(self: Box<Self>) -> Result<(), PortError>;
 }

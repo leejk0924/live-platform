@@ -16,7 +16,10 @@ use application::{
 };
 use async_trait::async_trait;
 use domain::broadcast::BroadcastId;
-use infrastructure::{media::MediaMtxIngestRouter, persistence::PgReaperStore};
+use infrastructure::{
+    media::MediaMtxIngestRouter,
+    persistence::{IDLE_TIMEOUT, PgReaperStore},
+};
 use sqlx::PgPool;
 
 /// Says these broadcasts are on air, or fails, after `delay`.
@@ -78,15 +81,26 @@ fn reaper(pool: &PgPool, probe: Probe, kicks: Arc<Kicks>) -> Reaper {
     }
 }
 
+/// Password accounts, so the daily demo reset never touches their broadcasts.
 async fn owners(pool: &PgPool, count: i64) {
     for id in 1..=count {
-        sqlx::query("INSERT INTO users (id, username, is_demo) VALUES ($1, $2, true)")
-            .bind(id)
-            .bind(format!("owner{id}"))
-            .execute(pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'not-a-real-hash')",
+        )
+        .bind(id)
+        .bind(format!("owner{id}"))
+        .execute(pool)
+        .await
+        .unwrap();
     }
+}
+
+async fn make_demo(pool: &PgPool, ids: &[i64]) {
+    sqlx::query("UPDATE users SET is_demo = true, password_hash = NULL WHERE id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .unwrap();
 }
 
 /// A broadcast of its own owner in `status`, last changed `changed_secs_ago`
@@ -335,4 +349,186 @@ async fn streams_of_broadcasts_that_are_not_on_air_are_kicked_every_pass(pool: P
         kicks.0.lock().unwrap().clear();
     }
     assert_eq!(stored(&pool, 2).await, ("ENDED".into(), 1, false, false));
+}
+
+/// A session of user 1 whose `last_seen_at` and `expires_at` are these many
+/// seconds from the database's `now()`.
+async fn session(pool: &PgPool, tag: u8, last_seen_secs_ago: f64, expires_in_secs: f64) {
+    sqlx::query(
+        "INSERT INTO sessions (token_hash, user_id, last_seen_at, expires_at) \
+         VALUES ($1, 1, now() - make_interval(secs => $2), now() + make_interval(secs => $3))",
+    )
+    .bind([tag; 32].as_slice())
+    .bind(last_seen_secs_ago)
+    .bind(expires_in_secs)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn session_tags(pool: &PgPool) -> Vec<u8> {
+    let hashes: Vec<Vec<u8>> =
+        sqlx::query_scalar("SELECT token_hash FROM sessions ORDER BY token_hash")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    hashes.into_iter().map(|hash| hash[0]).collect()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn sessions_past_their_idle_or_absolute_timeout_are_forgotten(pool: PgPool) {
+    owners(&pool, 1).await;
+    session(&pool, 1, IDLE_TIMEOUT.as_secs_f64() + 1.0, 3600.0).await;
+    session(&pool, 2, 0.0, -1.0).await;
+    session(&pool, 3, IDLE_TIMEOUT.as_secs_f64() - 60.0, 3600.0).await;
+
+    let reaped = reaper(&pool, Probe::on_air(&[]), Arc::default())
+        .tick()
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(reaped.forgotten_sessions, 2);
+    assert_eq!(session_tags(&pool).await, [3], "the live session is kept");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn two_reapers_forget_expired_sessions_once(pool: PgPool) {
+    owners(&pool, 1).await;
+    session(&pool, 1, IDLE_TIMEOUT.as_secs_f64() + 1.0, 3600.0).await;
+    session(&pool, 2, 0.0, -1.0).await;
+    let slow = reaper(
+        &pool,
+        Probe {
+            on_air: Mutex::new(Some(Vec::new())),
+            delay: Duration::from_millis(500),
+        },
+        Arc::default(),
+    );
+    let other = reaper(&pool, Probe::on_air(&[]), Arc::default());
+
+    let (first, second) = tokio::join!(slow.tick(), async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        other.tick().await
+    });
+
+    assert_eq!(
+        first
+            .unwrap()
+            .expect("the first pass ran")
+            .forgotten_sessions,
+        2
+    );
+    assert_eq!(second.unwrap(), None, "the second found the lock held");
+    assert!(session_tags(&pool).await.is_empty());
+}
+
+/// Sets the broadcast's `created_at` this many seconds after the latest
+/// midnight in Korea.
+async fn created_after_korean_midnight(pool: &PgPool, id: i64, secs: f64) {
+    sqlx::query(
+        "UPDATE broadcasts SET created_at = \
+             ((now() AT TIME ZONE 'Asia/Seoul')::date::timestamp AT TIME ZONE 'Asia/Seoul') \
+             + make_interval(secs => $2) \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(secs)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn demo_broadcasts_from_before_today_are_reset_once_they_are_not_active(pool: PgPool) {
+    owners(&pool, 6).await;
+    make_demo(&pool, &[1, 2, 3, 4, 6]).await;
+    broadcast(&pool, 1, "ENDED", 60.0).await;
+    broadcast(&pool, 2, "READY", 60.0).await;
+    broadcast(&pool, 3, "READY", 0.0).await;
+    broadcast(&pool, 4, "LIVE", 300.0).await;
+    broadcast(&pool, 5, "ENDED", 60.0).await;
+    broadcast(&pool, 6, "ENDED", 60.0).await;
+    for id in [1, 4, 5] {
+        created_after_korean_midnight(&pool, id, -86_400.0).await;
+    }
+    created_after_korean_midnight(&pool, 2, -1.0).await;
+    created_after_korean_midnight(&pool, 6, 0.0).await;
+
+    let mut reaped = reaper(&pool, Probe::on_air(&[4]), Arc::default())
+        .tick()
+        .await
+        .unwrap()
+        .unwrap();
+
+    reaped.demo_reset.sort_by_key(|id| id.as_i64());
+    assert_eq!(reaped.demo_reset, ids(&[1, 2]));
+    let kept: Vec<(i64, i32)> =
+        sqlx::query_as("SELECT id, version FROM broadcasts WHERE deleted_at IS NULL ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        kept,
+        [(3, 1), (4, 1), (5, 1), (6, 1)],
+        "created today, still on air, or not a demo account's"
+    );
+    let reset: Vec<i32> =
+        sqlx::query_scalar("SELECT version FROM broadcasts WHERE deleted_at IS NOT NULL")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(reset, [2, 2], "a reset is a soft delete");
+
+    let again = reaper(&pool, Probe::on_air(&[4]), Arc::default())
+        .tick()
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(again.demo_reset.is_empty(), "a second pass resets nothing");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_failed_housekeeping_step_undoes_only_itself(pool: PgPool) {
+    sqlx::raw_sql(
+        "CREATE FUNCTION refuse() RETURNS trigger LANGUAGE plpgsql AS \
+             $$ BEGIN RAISE EXCEPTION 'sessions are locked'; END $$; \
+         CREATE TRIGGER refuse_delete BEFORE DELETE ON sessions \
+             FOR EACH ROW EXECUTE FUNCTION refuse();",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    owners(&pool, 2).await;
+    make_demo(&pool, &[2]).await;
+    broadcast(&pool, 1, "INTERRUPTED", 31.0).await;
+    broadcast(&pool, 2, "ENDED", 60.0).await;
+    created_after_korean_midnight(&pool, 2, -86_400.0).await;
+    session(&pool, 1, 0.0, -1.0).await;
+    let kicks = Arc::new(Kicks::default());
+
+    let reaped = reaper(&pool, Probe::on_air(&[]), kicks.clone())
+        .tick()
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(reaped.housekeeping_failures.len(), 1);
+    assert_eq!(reaped.expired, ids(&[1]));
+    assert_eq!(stored(&pool, 1).await, ("ENDED".into(), 2, false, true));
+    assert_eq!(*kicks.0.lock().unwrap(), ["live/1"]);
+    assert_eq!(
+        session_tags(&pool).await,
+        [1],
+        "the failed step deleted nothing"
+    );
+    assert_eq!(
+        reaped.demo_reset,
+        ids(&[2]),
+        "the step after the failed one still ran"
+    );
 }

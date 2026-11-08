@@ -52,3 +52,7 @@ related: []
 - 데모 계정 매일 초기화는 아직 없다. auth/5에서 초기화할 데이터가 없다며 미뤘고, 방송이 생긴 지금 #27에서 정한다.
 - 데모 로그인 제한은 "강한 제한"이 아니라 일반 로그인과 같은 클라이언트당 분당 10회다(`crates/api/src/rate_limit.rs`).
 - frontmatter `paths`를 실제 위치로 고쳤다. 처음 적은 `ports/session.rs`, `infrastructure/src/auth/`는 만들어지지 않았다.
+
+## Follow-up (2026-11-08, #27)
+
+데모 계정 매일 초기화는 "데모 계정의 READY/ENDED 방송 중 KST 오늘 0시 이전에 만든 것을 reaper 패스마다 soft delete"로 정했다. 세션은 폐기하지 않는다. 자세한 내용은 [common/27-request-limits-housekeeping](../common/27-request-limits-housekeeping.md).

@@ -68,3 +68,7 @@ ADR 상세판을 쓰며 main과 대조했더니 앱 내부 스로틀링 세 항�
 
 - argon2 동시 실행 수는 2가 아니라 코어 수다(`crates/infrastructure/src/auth.rs`의 `Semaphore::new(parallelism)`). auth/5에서 코어 수로 정했고, t3.medium(2 vCPU)에서는 결과적으로 2다.
 - 요청 타임아웃과 본문 64KB 제한은 아직 없다. 본문은 axum `Json` 추출기 기본값(2MB)만 걸린다. #27에서 넣는다.
+
+## Follow-up (2026-11-08, #27)
+
+요청 타임아웃(10초)과 본문 64KB 제한을 넣었다. 자세한 내용은 [common/27-request-limits-housekeeping](../common/27-request-limits-housekeeping.md).
