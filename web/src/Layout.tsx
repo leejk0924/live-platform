@@ -10,6 +10,9 @@ export default function Layout() {
         <Link to="/" className="app-name">
           live-platform
         </Link>
+        <nav className="site-nav">
+          <Link to="/recordings">다시보기</Link>
+        </nav>
         <AccountMenu />
       </header>
       <main>

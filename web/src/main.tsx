@@ -9,6 +9,8 @@ import BroadcastEdit from './pages/BroadcastEdit.tsx'
 import BroadcastNew from './pages/BroadcastNew.tsx'
 import Home from './pages/Home.tsx'
 import Login from './pages/Login.tsx'
+import RecordingDetail from './pages/RecordingDetail.tsx'
+import RecordingList from './pages/RecordingList.tsx'
 import Signup from './pages/Signup.tsx'
 import NotFound from './pages/NotFound.tsx'
 
@@ -20,6 +22,8 @@ const router = createBrowserRouter([
       { path: 'broadcasts/new', element: <BroadcastNew /> },
       { path: 'broadcasts/:id', element: <BroadcastDetail /> },
       { path: 'broadcasts/:id/edit', element: <BroadcastEdit /> },
+      { path: 'recordings', element: <RecordingList /> },
+      { path: 'recordings/:id', element: <RecordingDetail /> },
       { path: 'login', element: <Login /> },
       { path: 'signup', element: <Signup /> },
       { path: '*', element: <NotFound /> },

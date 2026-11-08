@@ -6,6 +6,7 @@ import type { Broadcast } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
 import LoadFailed from '../broadcasts/LoadFailed.tsx'
 import CommentPanel from '../comments/CommentPanel.tsx'
+import BroadcastRecordings from '../recordings/BroadcastRecordings.tsx'
 import Publisher from '../broadcasts/publish/Publisher.tsx'
 import { statusLabel } from '../broadcasts/status.ts'
 import { useBroadcast } from '../broadcasts/useBroadcast.ts'
@@ -71,6 +72,7 @@ function BroadcastView({ broadcast, onChanged }: { broadcast: Broadcast; onChang
       </p>
       {broadcast.description && <p className="description">{broadcast.description}</p>}
       <Screen broadcast={broadcast} onLost={onChanged} />
+      {broadcast.status === 'ENDED' && <BroadcastRecordings key={broadcast.id} broadcastId={broadcast.id} />}
       {isOwner && <Publisher broadcast={broadcast} onChanged={onChanged} />}
       {isOwner && (
         <div className="actions">
