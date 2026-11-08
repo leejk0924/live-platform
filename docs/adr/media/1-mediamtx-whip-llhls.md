@@ -90,3 +90,7 @@ PC는 Windows의 Chrome 156.0.8078.8, 휴대폰은 iPhone 15 Pro(iOS 26.6.2) Saf
 - adapter는 `MediaMtxAdapter` 하나가 아니라 셋으로 나뉘었다: `MediaMtxIngestRouter`(`IngestRouter`), `MediaMtxControlApi`(`StreamTerminator`, `StreamProbe`), `JwtPublishAuthorizer`(`PublishAuthorizer`, 송출 허가 검증).
 - 공용 `FakeMediaGateway`는 없고, 테스트가 port마다 Fake를 둔다. 교체 가능성은 port 단위 Fake로 증명한다.
 - `PlaybackResolver`는 아직 없다. #8(플레이어)에서 만든다.
+
+## Follow-up (2026-11-09, #8 시청)
+
+`PlaybackResolver`를 `MediaMtxPlaybackResolver`로 만들었다. 프론트 `Player`는 이 ADR의 결정대로 내장 HLS를 쓰지 않고 hls.js로 LL-HLS를 재생하며, iOS는 WHEP로 본다. 결정과 이유는 [media/8-playback-player](8-playback-player.md).
