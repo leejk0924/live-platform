@@ -56,13 +56,15 @@ impl CommentBody {
 /// Where a change to a comment sits in its broadcast's change feed. Every
 /// write to a comment (post, edit, delete) gets a higher one than any write
 /// before it, so "the changes after R" is everything a client holding R has
-/// not seen.
+/// not seen. [`Revision::START`] comes before every change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Revision(i64);
 
 impl Revision {
+    pub const START: Self = Self(0);
+
     pub fn new(raw: i64) -> Option<Self> {
-        (raw >= 1).then_some(Self(raw))
+        (raw >= 0).then_some(Self(raw))
     }
 
     /// Decimal digits only, as the server sent it.
@@ -203,20 +205,13 @@ mod tests {
     }
 
     #[test]
-    fn revision_is_a_positive_decimal() {
+    fn revision_is_a_non_negative_decimal() {
         assert_eq!(Revision::parse("42").map(Revision::get), Some(42));
-        for bad in [
-            "",
-            "0",
-            "-1",
-            "+1",
-            " 1",
-            "1.0",
-            "x",
-            "99999999999999999999",
-        ] {
+        assert_eq!(Revision::parse("0"), Some(Revision::START));
+        for bad in ["", "-1", "+1", " 1", "1.0", "x", "99999999999999999999"] {
             assert_eq!(Revision::parse(bad), None, "{bad:?}");
         }
+        assert!(Some(Revision::START) < Revision::new(1));
         assert!(Revision::new(1) < Revision::new(2));
     }
 

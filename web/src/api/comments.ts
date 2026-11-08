@@ -19,7 +19,7 @@ export const commentApi = {
 }
 
 // Same origin, so the session cookie goes along and CSP `connect-src 'self'` allows it.
-export function eventsUrl(id: string, after: string | null): string {
-  const path = `/api/broadcasts/${encodeURIComponent(id)}/events`
-  return after === null ? path : `${path}?after=${encodeURIComponent(after)}`
+// `after` is the list's `revision`; "0" before the first comment replays from the start.
+export function eventsUrl(id: string, after: string): string {
+  return `/api/broadcasts/${encodeURIComponent(id)}/events?after=${encodeURIComponent(after)}`
 }

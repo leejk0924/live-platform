@@ -75,18 +75,18 @@ pub trait CommentQuery: Send + Sync {
         limit: u32,
     ) -> Result<Vec<CommentView>, PortError>;
 
-    /// The comments changed after `after` (all of them when `None`), deleted
-    /// ones included, by ascending revision, at most `limit`.
+    /// The comments changed after `after`, deleted ones included, by
+    /// ascending revision, at most `limit`.
     async fn changes_since(
         &self,
         broadcast: BroadcastId,
-        after: Option<Revision>,
+        after: Revision,
         limit: u32,
     ) -> Result<Vec<CommentView>, PortError>;
 
-    /// The newest revision of the broadcast's comments; `None` before the
-    /// first comment.
-    async fn latest_revision(&self, broadcast: BroadcastId) -> Result<Option<Revision>, PortError>;
+    /// The newest revision of the broadcast's comments;
+    /// [`Revision::START`] before the first comment.
+    async fn latest_revision(&self, broadcast: BroadcastId) -> Result<Revision, PortError>;
 }
 
 /// What posting to a broadcast depends on.

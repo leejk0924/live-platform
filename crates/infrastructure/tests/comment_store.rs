@@ -95,7 +95,7 @@ async fn every_write_moves_the_comment_forward_in_the_feed(pool: PgPool) {
     assert_eq!(deleted.comment.body, None);
 
     let changes = query
-        .changes_since(id(BROADCAST), Some(posted.revision), 10)
+        .changes_since(id(BROADCAST), posted.revision, 10)
         .await
         .unwrap();
     let seen: Vec<_> = changes
@@ -109,7 +109,7 @@ async fn every_write_moves_the_comment_forward_in_the_feed(pool: PgPool) {
     );
     assert_eq!(
         query.latest_revision(id(BROADCAST)).await.unwrap(),
-        Some(deleted.revision)
+        deleted.revision
     );
     let listed: Vec<_> = query
         .list(id(BROADCAST), None, 10)
@@ -153,10 +153,7 @@ async fn rejected_writes_say_why_and_change_nothing(pool: PgPool) {
         Err(CommentWriteRejection::NotFound),
         "under another broadcast"
     );
-    assert_eq!(
-        query.latest_revision(b).await.unwrap(),
-        Some(posted.revision)
-    );
+    assert_eq!(query.latest_revision(b).await.unwrap(), posted.revision);
 
     repo.soft_delete(b, id(100), id(VIEWER))
         .await

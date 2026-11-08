@@ -1285,7 +1285,7 @@
           "comments"
         ],
         "summary": "Follow a broadcast's comments live (Server-Sent Events)",
-        "description": "A `text/event-stream` with these events:\n\n- `comments`: `data` is a JSON array of `Comment`, every change (post, edit, delete) within about 200 ms, oldest first; `id` is the newest `revision` in it. Upsert by `id`, keeping the higher `revision`; a deleted comment arrives with `body: null`.\n- `policy`: `data` is a `ChatPolicy`.\n- `reset`: too much was missed to replay; reload the list. `data` is `{\"revision\": string|null}`, also the event's `id`.\n\nNot subject to the 10 second request limit. A reconnecting `EventSource` sends `Last-Event-ID` and receives what it missed.",
+        "description": "A `text/event-stream` with these events:\n\n- `comments`: `data` is a JSON array of `Comment`, every change (post, edit, delete) within about 200 ms, oldest first; `id` is the newest `revision` in it. Upsert by `id`, keeping the higher `revision`; a deleted comment arrives with `body: null`.\n- `policy`: `data` is a `ChatPolicy`.\n- `reset`: too much was missed to replay; reload the list. `data` is `{\"revision\": string}`, also the event's `id`.\n\nNot subject to the 10 second request limit. A reconnecting `EventSource` sends `Last-Event-ID` and receives what it missed.",
         "operationId": "followBroadcastEvents",
         "parameters": [
           {
@@ -1300,7 +1300,7 @@
           {
             "name": "Last-Event-ID",
             "in": "header",
-            "description": "The last `id` received; sent by `EventSource` on reconnect",
+            "description": "The last `id` received; sent by `EventSource` on reconnect. `0` replays from the first comment",
             "required": false,
             "schema": {
               "type": [
@@ -1803,11 +1803,8 @@
             "description": "Pass as `before` for the next page; `null` on the last page."
           },
           "revision": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The newest revision when the page was read, `null` before the first\ncomment. Open the event stream with `?after=<revision>` to receive\nevery change since."
+            "type": "string",
+            "description": "The newest revision when the page was read, `\"0\"` before the first\ncomment. Open the event stream with `?after=<revision>` to receive\nevery change since."
           }
         }
       },

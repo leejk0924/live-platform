@@ -298,18 +298,18 @@ impl CommentQuery for PgCommentQuery {
     async fn changes_since(
         &self,
         broadcast: BroadcastId,
-        after: Option<Revision>,
+        after: Revision,
         limit: u32,
     ) -> Result<Vec<CommentView>, PortError> {
         sqlx::query_as::<_, ViewRow>(concat!(
             "SELECT ",
             view_columns!(),
             " FROM comments c JOIN users u ON u.id = c.author_id \
-             WHERE c.broadcast_id = $1 AND ($2::BIGINT IS NULL OR c.revision > $2) \
+             WHERE c.broadcast_id = $1 AND c.revision > $2 \
              ORDER BY c.revision LIMIT $3"
         ))
         .bind(broadcast.as_i64())
-        .bind(after.map(Revision::get))
+        .bind(after.get())
         .bind(i64::from(limit))
         .fetch_all(&self.pool)
         .await
@@ -319,19 +319,15 @@ impl CommentQuery for PgCommentQuery {
         .collect()
     }
 
-    async fn latest_revision(&self, broadcast: BroadcastId) -> Result<Option<Revision>, PortError> {
-        let latest: Option<i64> =
-            sqlx::query_scalar("SELECT max(revision) FROM comments WHERE broadcast_id = $1")
-                .bind(broadcast.as_i64())
-                .fetch_one(&self.pool)
-                .await
-                .map_err(port_error)?;
-        latest
-            .map(|raw| {
-                Revision::new(raw)
-                    .ok_or_else(|| PortError(format!("invalid stored revision {raw}")))
-            })
-            .transpose()
+    async fn latest_revision(&self, broadcast: BroadcastId) -> Result<Revision, PortError> {
+        let latest: i64 = sqlx::query_scalar(
+            "SELECT coalesce(max(revision), 0) FROM comments WHERE broadcast_id = $1",
+        )
+        .bind(broadcast.as_i64())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(port_error)?;
+        Revision::new(latest).ok_or_else(|| PortError(format!("invalid stored revision {latest}")))
     }
 }
 

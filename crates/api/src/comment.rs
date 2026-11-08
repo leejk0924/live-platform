@@ -192,11 +192,10 @@ pub struct CommentPage {
     /// Pass as `before` for the next page; `null` on the last page.
     #[schema(required = true)]
     next_before: Option<String>,
-    /// The newest revision when the page was read, `null` before the first
+    /// The newest revision when the page was read, `"0"` before the first
     /// comment. Open the event stream with `?after=<revision>` to receive
     /// every change since.
-    #[schema(required = true)]
-    revision: Option<String>,
+    revision: String,
 }
 
 impl From<Page> for CommentPage {
@@ -204,7 +203,7 @@ impl From<Page> for CommentPage {
         Self {
             items: page.items.into_iter().map(CommentDto::from).collect(),
             next_before: page.next_before.map(|id| id.to_string()),
-            revision: page.revision.map(|revision| revision.get().to_string()),
+            revision: page.revision.get().to_string(),
         }
     }
 }

@@ -513,3 +513,16 @@ async fn following_an_unknown_broadcast_is_not_found(pool: PgPool) {
     assert_eq!(reply.status, StatusCode::NOT_FOUND);
     assert_eq!(reply.code(), "BROADCAST_NOT_FOUND");
 }
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_comment_posted_after_listing_an_empty_chat_reaches_the_stream(pool: PgPool) {
+    let chat = chat(&pool).await;
+    let listed = chat.list("").await.body["revision"].clone();
+    assert_eq!(listed, json!("0"), "the start of the feed");
+    let posted = chat.post(&chat.viewer, "first").await;
+
+    let mut events = chat.follow(listed.as_str()).await;
+    let replay = events.next().await.expect("the comment posted in between");
+    assert_eq!(replay.json(), json!([posted.body]));
+}

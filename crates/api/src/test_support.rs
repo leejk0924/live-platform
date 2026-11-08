@@ -260,13 +260,13 @@ impl CommentQuery for Unavailable {
     async fn changes_since(
         &self,
         _: BroadcastId,
-        _: Option<Revision>,
+        _: Revision,
         _: u32,
     ) -> Result<Vec<CommentView>, PortError> {
         unavailable()
     }
 
-    async fn latest_revision(&self, _: BroadcastId) -> Result<Option<Revision>, PortError> {
+    async fn latest_revision(&self, _: BroadcastId) -> Result<Revision, PortError> {
         unavailable()
     }
 }
@@ -343,14 +343,14 @@ impl CommentQuery for EmptyChat {
     async fn changes_since(
         &self,
         _: BroadcastId,
-        _: Option<Revision>,
+        _: Revision,
         _: u32,
     ) -> Result<Vec<CommentView>, PortError> {
         Ok(Vec::new())
     }
 
-    async fn latest_revision(&self, _: BroadcastId) -> Result<Option<Revision>, PortError> {
-        Ok(None)
+    async fn latest_revision(&self, _: BroadcastId) -> Result<Revision, PortError> {
+        Ok(Revision::START)
     }
 }
 

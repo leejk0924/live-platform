@@ -175,8 +175,8 @@ pub struct Page {
     /// Pass as `before` to get the next page; `None` on the last page.
     pub next_before: Option<CommentId>,
     /// Read before the items: following the feed after it misses nothing
-    /// the page lacks. `None` before the first comment.
-    pub revision: Option<Revision>,
+    /// the page lacks. [`Revision::START`] before the first comment.
+    pub revision: Revision,
 }
 
 pub struct ListComments {
@@ -263,7 +263,7 @@ pub enum FeedItem {
     /// More changed than one catch-up holds: reload the list. The feed goes
     /// on from `cursor`, the newest revision when the reset was decided.
     Reset {
-        cursor: Option<Revision>,
+        cursor: Revision,
     },
 }
 
@@ -286,7 +286,7 @@ impl FollowComments {
         // falls through the gap.
         let subscription = self.events.subscribe(broadcast);
         let (cursor, behind) = match after {
-            Some(after) => (Some(after), true),
+            Some(after) => (after, true),
             None => (self.query.latest_revision(broadcast).await?, false),
         };
         Ok(CommentFeed {
@@ -306,9 +306,8 @@ pub struct CommentFeed {
     broadcast: BroadcastId,
     query: Arc<dyn CommentQuery>,
     subscription: Box<dyn EventSubscription>,
-    /// The newest revision delivered; `None` while the broadcast had no
-    /// comment.
-    cursor: Option<Revision>,
+    /// The newest revision delivered.
+    cursor: Revision,
     /// Events may be missing after `cursor`; the next call catches up first.
     behind: bool,
     /// Revisions the last catch-up delivered, whose live events are still
@@ -350,7 +349,7 @@ impl CommentFeed {
                 if self.caught_up.remove(&view.revision) {
                     return None;
                 }
-                self.cursor = self.cursor.max(Some(view.revision));
+                self.cursor = self.cursor.max(view.revision);
                 Some(FeedItem::Comments {
                     changes: vec![view.clone()],
                     priority: event.priority,
@@ -373,7 +372,7 @@ impl CommentFeed {
         let Some(last) = changes.last() else {
             return Ok(None);
         };
-        self.cursor = self.cursor.max(Some(last.revision));
+        self.cursor = self.cursor.max(last.revision);
         self.caught_up = changes.iter().map(|view| view.revision).collect();
         Ok(Some(FeedItem::Comments {
             changes,
@@ -466,16 +465,16 @@ mod tests {
         async fn changes_since(
             &self,
             _: BroadcastId,
-            after: Option<Revision>,
+            after: Revision,
             limit: u32,
         ) -> Result<Vec<CommentView>, PortError> {
-            let from = after.map_or(1, |r| r.get() + 1);
+            let from = after.get() + 1;
             let to = *self.stored.lock().unwrap();
             Ok((from..=to).take(limit as usize).map(view).collect())
         }
 
-        async fn latest_revision(&self, _: BroadcastId) -> Result<Option<Revision>, PortError> {
-            Ok(Revision::new(*self.stored.lock().unwrap()))
+        async fn latest_revision(&self, _: BroadcastId) -> Result<Revision, PortError> {
+            Ok(Revision::new(*self.stored.lock().unwrap()).unwrap())
         }
     }
 
@@ -634,7 +633,7 @@ mod tests {
         let (bus, tx) = Bus::new();
         let mut feed = open(&store, &bus, Some(1)).await.unwrap();
 
-        let newest = Revision::new(limit + 10);
+        let newest = Revision::new(limit + 10).unwrap();
         assert_eq!(next(&mut feed).await, FeedItem::Reset { cursor: newest });
 
         *store.stored.lock().unwrap() = limit + 12;
@@ -854,13 +853,13 @@ mod tests {
         let first = page(120, None, None).await.unwrap();
         assert_eq!(first.items.len(), 50);
         assert_eq!(first.next_before, Some(id(71)));
-        assert_eq!(first.revision, Revision::new(120));
+        assert_eq!(Some(first.revision), Revision::new(120));
 
         let last = page(3, Some(2), Some(5)).await.unwrap();
         assert_eq!(last.items.len(), 1);
         assert_eq!(last.next_before, None);
 
-        assert_eq!(page(0, None, None).await.unwrap().revision, None);
+        assert_eq!(page(0, None, None).await.unwrap().revision, Revision::START);
         for bad in [0, 101] {
             assert!(matches!(
                 page(10, None, Some(bad)).await,

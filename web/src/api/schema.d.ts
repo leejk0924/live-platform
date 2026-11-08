@@ -230,7 +230,7 @@ export interface paths {
          *
          *     - `comments`: `data` is a JSON array of `Comment`, every change (post, edit, delete) within about 200 ms, oldest first; `id` is the newest `revision` in it. Upsert by `id`, keeping the higher `revision`; a deleted comment arrives with `body: null`.
          *     - `policy`: `data` is a `ChatPolicy`.
-         *     - `reset`: too much was missed to replay; reload the list. `data` is `{"revision": string|null}`, also the event's `id`.
+         *     - `reset`: too much was missed to replay; reload the list. `data` is `{"revision": string}`, also the event's `id`.
          *
          *     Not subject to the 10 second request limit. A reconnecting `EventSource` sends `Last-Event-ID` and receives what it missed.
          */
@@ -376,11 +376,11 @@ export interface components {
             /** @description Pass as `before` for the next page; `null` on the last page. */
             nextBefore: string | null;
             /**
-             * @description The newest revision when the page was read, `null` before the first
+             * @description The newest revision when the page was read, `"0"` before the first
              *     comment. Open the event stream with `?after=<revision>` to receive
              *     every change since.
              */
-            revision: string | null;
+            revision: string;
         };
         Credentials: {
             /**
@@ -1392,7 +1392,7 @@ export interface operations {
                 after?: string;
             };
             header?: {
-                /** @description The last `id` received; sent by `EventSource` on reconnect */
+                /** @description The last `id` received; sent by `EventSource` on reconnect. `0` replays from the first comment */
                 "Last-Event-ID"?: string | null;
             };
             path: {

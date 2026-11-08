@@ -128,7 +128,7 @@ pub struct EventParams {
 
 #[derive(Serialize)]
 struct ResetData {
-    revision: Option<String>,
+    revision: String,
 }
 
 #[utoipa::path(
@@ -143,12 +143,12 @@ struct ResetData {
           `id`, keeping the higher `revision`; a deleted comment arrives with `body: null`.\n\
         - `policy`: `data` is a `ChatPolicy`.\n\
         - `reset`: too much was missed to replay; reload the list. `data` is \
-          `{\"revision\": string|null}`, also the event's `id`.\n\n\
+          `{\"revision\": string}`, also the event's `id`.\n\n\
         Not subject to the 10 second request limit. A reconnecting `EventSource` sends \
         `Last-Event-ID` and receives what it missed.",
     params(
         ("id" = String, Path, description = "Broadcast id"),
-        ("Last-Event-ID" = Option<String>, Header, description = "The last `id` received; sent by `EventSource` on reconnect"),
+        ("Last-Event-ID" = Option<String>, Header, description = "The last `id` received; sent by `EventSource` on reconnect. `0` replays from the first comment"),
         EventParams,
     ),
     responses(
@@ -302,14 +302,11 @@ fn policy_event(policy: ChatPolicy) -> Event {
         .expect("a policy serializes")
 }
 
-fn reset_event(cursor: Option<Revision>) -> Event {
-    let revision = cursor.map(|revision| revision.get().to_string());
-    let event = Event::default().event("reset");
-    let event = match &revision {
-        Some(id) => event.id(id),
-        None => event,
-    };
-    event
+fn reset_event(cursor: Revision) -> Event {
+    let revision = cursor.get().to_string();
+    Event::default()
+        .event("reset")
+        .id(&revision)
         .json_data(ResetData { revision })
         .expect("a reset serializes")
 }
@@ -554,7 +551,7 @@ mod tests {
         for (query, header) in [
             ("?after=abc", None),
             ("", Some("x")),
-            ("?after=1", Some("0")),
+            ("?after=1", Some("-1")),
         ] {
             let response = client.open(&format!("{path}{query}"), header).await;
             assert_eq!(
