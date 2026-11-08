@@ -45,15 +45,16 @@ infra/2           ✗  infra는 type이 아니다 → build/2 또는 ci/2
 ```
 
 - 브랜치는 항상 최신 `main`에서 만든다. 메인 체크아웃 옆의 별도 worktree에서 작업한다. `<repo>`는 메인 체크아웃의 폴더 이름이다.
+- 한 이슈에서 성격이 다른 PR을 내면 type으로 브랜치를 나눈다 (예: `feat/6`, `test/6`).
+- 같은 이슈·같은 type의 PR을 또 내야 하면 앞 PR을 merge하고 브랜치를 지운 뒤 같은 이름으로 다시 만든다.
+- merge 후 worktree와 원격·로컬 브랜치를 지운다(`git worktree remove`, `git branch -D`, `git push origin --delete`). 메인 체크아웃은 `git pull --ff-only`로 맞춘다.
+
+worktree 만들기:
 
 ```bash
 git fetch origin
 git worktree add ../<repo>-<type>-<N> -b <type>/<N> origin/main
 ```
-
-- 한 이슈에서 성격이 다른 PR을 내면 type으로 브랜치를 나눈다 (예: `feat/6`, `test/6`).
-- 같은 이슈·같은 type의 PR을 또 내야 하면 앞 PR을 merge하고 브랜치를 지운 뒤 같은 이름으로 다시 만든다.
-- merge 후 worktree와 원격·로컬 브랜치를 지운다(`git worktree remove`, `git branch -D`, `git push origin --delete`). 메인 체크아웃은 `git pull --ff-only`로 맞춘다.
 
 ## 4. 커밋
 
