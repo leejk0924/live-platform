@@ -956,6 +956,7 @@ dependencies = [
  "domain",
  "ed25519-dalek",
  "getrandom 0.4.3",
+ "hmac",
  "reqwest",
  "rusty-s3",
  "serde",

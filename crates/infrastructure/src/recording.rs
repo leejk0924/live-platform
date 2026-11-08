@@ -2,7 +2,9 @@
 //! that keep them, and the URL signers that let viewers fetch them.
 
 mod local;
+mod local_url;
 mod s3;
 
 pub use local::{FsRecordingStorage, FsSegmentSpool};
+pub use local_url::LocalUrlSigner;
 pub use s3::{S3RecordingStorage, S3Settings};
