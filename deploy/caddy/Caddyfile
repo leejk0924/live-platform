@@ -2,6 +2,8 @@
 	email {$ACME_EMAIL}
 	# The container cannot write the host trust store; local browsers accept the internal CA by hand.
 	skip_install_trust
+	# Clients send no SNI for an IP address, so a LAN test served on an IP needs a default to pick its certificate.
+	default_sni {$SITE_ADDRESS:localhost}
 }
 
 {$SITE_ADDRESS:localhost} {
