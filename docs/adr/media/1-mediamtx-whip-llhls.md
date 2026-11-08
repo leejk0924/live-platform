@@ -52,15 +52,31 @@ PC 화면 공유(탭/시스템 소리 + 마이크)와 모바일 카메라 방송
 - **Chrome 내장 HLS는 `canPlayType`이 `maybe`인데 이 스트림을 `DEMUXER_ERROR_COULD_NOT_PARSE`로 거부한다.** 원인은 확인하지 않았다(추정: Opus in fMP4). 따라서 프론트 `Player`는 `canPlayType`만으로 내장 HLS를 고르면 안 된다.
 - Caddy가 IP 주소로 서빙할 때는 클라이언트가 SNI를 보내지 않아 TLS가 실패했다. `default_sni`를 사이트 주소로 둬 해결했다.
 
-### 실기기 결과 (사용자가 채운다)
+### 실기기 결과
+
+PC는 Windows의 Chrome 156.0.8078.8, 휴대폰은 iPhone 15 Pro(iOS 26.6.2) Safari. 스택은 PC 한 대에 띄웠다. 두 기기는 같은 Wi-Fi가 아니라 Tailscale로 연결했고, 사이트 주소와 ICE 후보 주소를 Tailscale 주소로 바꿨다. 결과는 사용자가 실기기에서 확인했다.
 
 | # | 항목 | 기기 / 브라우저 | 결과 |
 |---|---|---|---|
-| 1 | PC 화면 + 탭 소리 + 마이크 → WHIP | | |
-| 2 | Android Chrome 카메라 → WHIP | | |
-| 3 | iOS Safari 카메라 → WHIP | | |
-| 4 | iOS Safari 내장 LL-HLS Opus 오디오 | | |
-| 5 | iOS Safari WHEP | | |
-| 6 | 송출 720p30 / 2.5Mbps 상한 | | |
+| 1 | PC 화면 + 탭 소리 + 마이크 → WHIP | PC Chrome → 다른 기기 WHEP | 통과. 화면, 탭 소리, 마이크 모두 들림 |
+| 2 | Android Chrome 카메라 → WHIP | - | 미확인. Android 기기 없음 |
+| 3 | iOS Safari 카메라 → WHIP | iPhone → PC Chrome WHEP | 통과. `sent.video` 29fps, 1690kbps |
+| 4 | iOS Safari 내장 LL-HLS Opus 오디오 | iPhone Safari | **실패**. `error 3 Media failed to decode`(`MEDIA_ERR_DECODE`) |
+| 5 | iOS Safari WHEP | iPhone Safari | 통과. 영상과 소리 |
+| 6 | 송출 720p30 / 2.5Mbps 상한 | PC Chrome 화면 공유 | 상한 안. 높이 680, 약 20fps, 약 357kbps. 비트레이트 상한에는 닿지 않음 |
 
-4번이 실패하면 iOS 시청은 WHEP로 정하고 `playback` 우선순위를 기기별로 내려준다.
+## Follow-up (2026-11-08, #3 실기기 결과에 따른 결정)
+
+- **iOS Safari 시청은 WHEP로 정한다.** 4번이 실패했고 같은 기기에서 같은 송출을 WHEP로는 재생했다. 데이터는 도착했고 디코딩에서 실패한 것이라 네트워크 문제가 아니다. API는 `playback`에 두 방식을 모두 내려주고, #8 `Player`가 기기별 우선순위로 고른다.
+- **브라우저 내장 HLS에 기대지 않는다.** Chrome 내장 HLS(`DEMUXER_ERROR_COULD_NOT_PARSE`)와 iOS Safari 내장 HLS(`MEDIA_ERR_DECODE`) 둘 다 이 스트림을 재생하지 못했다. `canPlayType`은 판단 근거가 되지 못한다. LL-HLS는 hls.js(MSE) 경로로만 쓴다.
+- 4번 실패의 원인은 구분하지 못했다. 후보는 둘이다.
+  - A. LL-HLS part 길이 흔들림. 테스트 중 MediaMTX가 `part duration changed ... this will cause an error in iOS clients` 경고를 남겼다(로그로 확인). (unverified) WebRTC 입력은 프레임 간격이 고르지 않아 생기는 것으로 추정한다.
+  - B. (unverified) iOS 내장 플레이어가 fMP4 안의 Opus를 디코딩하지 못한다.
+  - 구분하려면 MediaMTX HLS를 일반 fMP4 HLS(`hlsVariant: fmp4`)로 바꿔 iPhone에서 다시 본다. 재생되면 A, 계속 실패하면 B다. A라면 iOS도 LL-HLS로 되돌릴 수 있다.
+
+### Cautions when touching this (추가)
+
+- iOS 시청자는 WHEP라서 CDN으로 확장되지 않는다. 시청자 수 계획에서 iOS 몫은 MediaMTX WebRTC 용량으로 계산한다.
+- (unverified) iOS 17.1 이상의 `ManagedMediaSource`로 hls.js를 iOS에서 돌리는 길은 확인하지 않았다. iOS를 LL-HLS로 되돌리려면 위 A/B 실험과 함께 이것부터 본다.
+- 6번은 상한이 걸려 있다는 것만 확인했다. 실제 상한에 닿았을 때의 동작은 움직임이 많은 화면으로 다시 재야 한다.
+- Android 송출(2번)은 확인하지 않았다. #9(모바일 송출) 전에 확인한다.
