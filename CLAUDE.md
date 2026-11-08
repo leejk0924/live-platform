@@ -44,9 +44,11 @@
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
-cargo test --workspace
+DATABASE_URL=postgres://postgres:test@localhost:55432/postgres cargo test --workspace -- --include-ignored
 cargo deny check
 ```
+
+DB 테스트용 Postgres 띄우는 법은 `docs/DEVELOPMENT.md` §6.
 
 ## 문서
 

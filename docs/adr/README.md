@@ -40,7 +40,7 @@ related: [10]                          # 관련 이슈 번호
 | area | ADR | 요약 |
 |---|---|---|
 | common | [1-hexagonal-five-planes](common/1-hexagonal-five-planes.md) | Hexagonal 4-crate workspace와 5개 plane 분리 |
-| common | [25-doc-two-tier-timeline](common/25-doc-two-tier-timeline.md) | ADR은 저장소 요약판과 Obsidian 상세판 두 벌, 읽는 순서는 Obsidian Timeline, 머지 후 Devlog 갱신 |
+| common | [25-doc-two-tier-timeline](common/25-doc-two-tier-timeline.md) | ADR은 저장소 요약판과 Obsidian 상세판 두 벌, 읽는 순서는 Obsidian Timeline, 머지 후 Devlog 갱신. Obsidian은 PR 뒤에, 머지 전 확인 필요 재확인(#29) |
 | common | [27-request-limits-housekeeping](common/27-request-limits-housekeeping.md) | 요청 10초·본문 64KB 상한, reaper에 만료 세션 정리와 데모 방송 초기화, 정리 실패는 SAVEPOINT로 격리 |
 | data | [1-concurrency-snowflake](data/1-concurrency-snowflake.md) | 조건부 UPDATE·version·UNIQUE·advisory lock, Snowflake ID |
 | data | [4-snowflake-worker-lease](data/4-snowflake-worker-lease.md) | Snowflake 상태 머신·PG worker lease·에러 응답 봉투 |
