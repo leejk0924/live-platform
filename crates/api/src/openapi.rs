@@ -11,7 +11,7 @@ use utoipa::{
     },
 };
 
-use crate::{auth, broadcast, live};
+use crate::{auth, broadcast, comment, live};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -41,11 +41,18 @@ use crate::{auth, broadcast, live};
         live::stop,
         live::playback,
         live::jwks,
+        comment::list,
+        comment::post,
+        comment::edit,
+        comment::delete,
+        comment::get_policy,
+        comment::set_policy,
     ),
     modifiers(&SessionCookie),
     tags(
         (name = "auth", description = "Accounts and sessions"),
         (name = "broadcasts", description = "Broadcast registration, browsing, going live, ending and watching"),
+        (name = "comments", description = "Comments on a broadcast, its chat policy and its live event stream"),
     ),
 )]
 pub struct ApiDoc;

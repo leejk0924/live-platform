@@ -12,7 +12,10 @@ use std::{
     time::Duration,
 };
 
-use api::{AppState, app, auth::AuthPorts, broadcast::BroadcastPorts, config::Origin};
+use api::{
+    AppState, app, auth::AuthPorts, broadcast::BroadcastPorts, comment::CommentPorts,
+    config::Origin,
+};
 use application::ports::{
     PortError,
     media::{StreamPath, StreamTerminator},
@@ -29,9 +32,12 @@ use infrastructure::{
     id::SnowflakeIdGenerator,
     media::{JwtPublishAuthorizer, MediaMtxIngestRouter, MediaMtxPlaybackResolver, PublishKey},
     persistence::{
-        PgBroadcastQuery, PgBroadcastRepository, PgPublishTicketLedger, PgSessionStore,
-        PgUserRepository, PgWorkerIdAllocator,
+        PgBroadcastQuery, PgBroadcastRepository, PgChatPolicyStore, PgCommentQuery,
+        PgCommentRepository, PgPublishTicketLedger, PgSessionStore, PgUserRepository,
+        PgWorkerIdAllocator,
     },
+    rate_limit::InMemoryRateLimiter,
+    realtime::PgEventBus,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -125,9 +131,21 @@ pub async fn live_state_with(
         tickets: Arc::new(PgPublishTicketLedger::new(pool.clone())),
         presence: broadcasts,
     };
+    // Dropping the handle would stop the listener; the test pool closing at
+    // the end of the test stops it instead.
+    let (events, listener) = PgEventBus::start(pool.clone()).await.unwrap();
+    std::mem::forget(listener);
+    let comment_ports = CommentPorts {
+        repository: Arc::new(PgCommentRepository::new(pool.clone())),
+        query: Arc::new(PgCommentQuery::new(pool.clone())),
+        policies: Arc::new(PgChatPolicyStore::new(pool.clone())),
+        limiter: Arc::new(InMemoryRateLimiter::default()),
+        events,
+    };
     let state = AppState::new(
         ports,
         broadcast_ports,
+        comment_ports,
         vec![Origin::parse(ORIGIN).unwrap()],
         demo_login_enabled,
         key.public_jwk(),

@@ -146,7 +146,8 @@ pub struct PgEventBus {
     hub: Arc<EventHub>,
 }
 
-/// Stops the listener of a [`PgEventBus`].
+/// Stops the listener of a [`PgEventBus`]. Dropping it stops the listener
+/// too; so does closing the pool.
 pub struct EventListenerHandle {
     stop: oneshot::Sender<()>,
     task: JoinHandle<()>,
@@ -200,6 +201,9 @@ async fn listen(mut listener: PgListener, hub: Arc<EventHub>, mut stopped: onesh
                 tracing::warn!("event listener reconnected; followers catch up");
                 hub.miss_all();
             }
+            // The pool waits for the listener's connection before it can
+            // close, so give it back.
+            Err(sqlx::Error::PoolClosed) => return,
             Err(err) => {
                 tracing::warn!(%err, "event listener lost the database; retrying");
                 hub.miss_all();

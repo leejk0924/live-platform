@@ -160,6 +160,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/broadcasts/{id}/chat-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a broadcast's chat policy */
+        get: operations["getChatPolicy"];
+        /**
+         * Set a broadcast's chat policy; owner only
+         * @description Does not change the broadcast's version, so an open edit of its title is unaffected.
+         */
+        put: operations["setChatPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/broadcasts/{id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a broadcast's comments, newest first */
+        get: operations["listComments"];
+        put?: never;
+        /** Post a comment as the signed-in user */
+        post: operations["postComment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/broadcasts/{id}/comments/{commentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace a comment's body; author only */
+        put: operations["editComment"];
+        post?: never;
+        /** Delete a comment; author only */
+        delete: operations["deleteComment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/broadcasts/{id}/playback": {
         parameters: {
             query?: never;
@@ -248,6 +305,57 @@ export interface components {
         };
         /** @enum {string} */
         BroadcastStatus: "READY" | "LIVE" | "INTERRUPTED" | "ENDED";
+        ChatPolicy: {
+            /**
+             * Format: int32
+             * @description Seconds a viewer waits between comments to this broadcast, 0 to 300;
+             *     0 is off. The broadcaster is never slowed down.
+             */
+            slowModeSeconds: number;
+        };
+        Comment: {
+            /** @example 112007302751453184 */
+            authorId: string;
+            authorName: string;
+            /** @description `null` once deleted. Plain text: escape it when rendering. */
+            body: string | null;
+            /** @example 112007302751453184 */
+            broadcastId: string;
+            /** Format: date-time */
+            createdAt: string;
+            deleted: boolean;
+            edited: boolean;
+            /** @example 112007303372210176 */
+            id: string;
+            /**
+             * @description Position of this comment's latest change in the broadcast's change
+             *     feed, as a decimal string. Of two copies of one comment, keep the one
+             *     with the higher revision.
+             * @example 1042
+             */
+            revision: string;
+            /**
+             * Format: int32
+             * @description Send back as `If-Match: "<version>"` to edit.
+             */
+            version: number;
+        };
+        CommentInput: {
+            /** @description Trimmed, then 1 to 500 characters on one line. */
+            body: string;
+        };
+        CommentPage: {
+            /** @description Newest first. */
+            items: components["schemas"]["Comment"][];
+            /** @description Pass as `before` for the next page; `null` on the last page. */
+            nextBefore: string | null;
+            /**
+             * @description The newest revision when the page was read, `null` before the first
+             *     comment. Open the event stream with `?after=<revision>` to receive
+             *     every change since.
+             */
+            revision: string | null;
+        };
         Credentials: {
             /**
              * Format: password
@@ -884,6 +992,361 @@ export interface operations {
             };
             /** @description `BROADCAST_NOT_DELETABLE`: live or interrupted */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    getChatPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Broadcast id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The policy. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatPolicy"];
+                };
+            };
+            /** @description `BROADCAST_NOT_FOUND` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    setChatPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Broadcast id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatPolicy"];
+            };
+        };
+        responses: {
+            /** @description Set; followers receive it as a `policy` event. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatPolicy"];
+                };
+            };
+            /** @description `INVALID_SLOW_MODE` or `INVALID_REQUEST` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `UNAUTHENTICATED` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `NOT_BROADCAST_OWNER` or `CSRF_REJECTED` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `BROADCAST_NOT_FOUND` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    listComments: {
+        parameters: {
+            query?: {
+                /** @description Only comments older than this id: the previous page's `nextBefore`. */
+                before?: string;
+                /** @description Page size, 1 to 100. Defaults to 50. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Broadcast id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted comments are left out. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentPage"];
+                };
+            };
+            /** @description `INVALID_QUERY` or `INVALID_PAGE_SIZE` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `BROADCAST_NOT_FOUND` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    postComment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Broadcast id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentInput"];
+            };
+        };
+        responses: {
+            /** @description Posted at version 1. */
+            201: {
+                headers: {
+                    /** @description `"1"` */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Comment"];
+                };
+            };
+            /** @description `INVALID_COMMENT` or `INVALID_REQUEST` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `UNAUTHENTICATED` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `CSRF_REJECTED` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `BROADCAST_NOT_FOUND` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `COMMENTS_CLOSED`: the broadcast has ended */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `RATE_LIMITED`: one comment per second per user, and the broadcast's slow mode for viewers */
+            429: {
+                headers: {
+                    /** @description Seconds until posting is allowed */
+                    "Retry-After"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    editComment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The version being edited, as returned in `ETag`: `"3"` */
+                "If-Match": string;
+            };
+            path: {
+                /** @description Broadcast id */
+                id: string;
+                /** @description Comment id */
+                commentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommentInput"];
+            };
+        };
+        responses: {
+            /** @description Edited. */
+            200: {
+                headers: {
+                    /** @description The new version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Comment"];
+                };
+            };
+            /** @description `IF_MATCH_REQUIRED`, `INVALID_IF_MATCH`, `INVALID_COMMENT` or `INVALID_REQUEST` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `UNAUTHENTICATED` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `NOT_COMMENT_AUTHOR` or `CSRF_REJECTED` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `COMMENT_NOT_FOUND`, also for deleted comments */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `VERSION_CONFLICT`: changed since it was loaded */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    deleteComment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Broadcast id */
+                id: string;
+                /** @description Comment id */
+                commentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted; followers receive it with `body: null` */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `UNAUTHENTICATED` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `NOT_COMMENT_AUTHOR` or `CSRF_REJECTED` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `COMMENT_NOT_FOUND` */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
