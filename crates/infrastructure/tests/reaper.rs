@@ -81,15 +81,26 @@ fn reaper(pool: &PgPool, probe: Probe, kicks: Arc<Kicks>) -> Reaper {
     }
 }
 
+/// Password accounts, so the daily demo reset never touches their broadcasts.
 async fn owners(pool: &PgPool, count: i64) {
     for id in 1..=count {
-        sqlx::query("INSERT INTO users (id, username, is_demo) VALUES ($1, $2, true)")
-            .bind(id)
-            .bind(format!("owner{id}"))
-            .execute(pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'not-a-real-hash')",
+        )
+        .bind(id)
+        .bind(format!("owner{id}"))
+        .execute(pool)
+        .await
+        .unwrap();
     }
+}
+
+async fn make_demo(pool: &PgPool, ids: &[i64]) {
+    sqlx::query("UPDATE users SET is_demo = true, password_hash = NULL WHERE id = ANY($1)")
+        .bind(ids)
+        .execute(pool)
+        .await
+        .unwrap();
 }
 
 /// A broadcast of its own owner in `status`, last changed `changed_secs_ago`
@@ -434,10 +445,7 @@ async fn created_after_korean_midnight(pool: &PgPool, id: i64, secs: f64) {
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn demo_broadcasts_from_before_today_are_reset_once_they_are_not_active(pool: PgPool) {
     owners(&pool, 6).await;
-    sqlx::query("UPDATE users SET is_demo = false, password_hash = 'not-a-real-hash' WHERE id = 5")
-        .execute(&pool)
-        .await
-        .unwrap();
+    make_demo(&pool, &[1, 2, 3, 4, 6]).await;
     broadcast(&pool, 1, "ENDED", 60.0).await;
     broadcast(&pool, 2, "READY", 60.0).await;
     broadcast(&pool, 3, "READY", 0.0).await;
@@ -495,11 +503,8 @@ async fn a_failed_housekeeping_step_undoes_only_itself(pool: PgPool) {
     .execute(&pool)
     .await
     .unwrap();
-    owners(&pool, 1).await;
-    sqlx::query("INSERT INTO users (id, username, is_demo) VALUES (2, 'demo2', true)")
-        .execute(&pool)
-        .await
-        .unwrap();
+    owners(&pool, 2).await;
+    make_demo(&pool, &[2]).await;
     broadcast(&pool, 1, "INTERRUPTED", 31.0).await;
     broadcast(&pool, 2, "ENDED", 60.0).await;
     created_after_korean_midnight(&pool, 2, -86_400.0).await;
