@@ -37,7 +37,9 @@ use infrastructure::{
     },
     rate_limit::InMemoryRateLimiter,
     realtime::PgEventBus,
-    recording::{FsRecordingStorage, FsSegmentSpool, LocalUrlSigner},
+    recording::{
+        CloudFrontUrlSigner, FsRecordingStorage, FsSegmentSpool, LocalUrlSigner, S3RecordingStorage,
+    },
 };
 use tokio::{net::TcpListener, sync::oneshot};
 use tracing_subscriber::EnvFilter;
@@ -97,9 +99,14 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
                 };
                 (storage, signer, Some(local))
             }
-            RecordingStorageConfig::S3 { .. } => {
-                return Err("RECORDING_STORAGE=s3 is not available yet:                      its CloudFront URL signer waits on the RUSTSEC-2023-0071 decision"
-                    .into());
+            RecordingStorageConfig::S3 { s3, cloudfront } => {
+                let storage = Arc::new(S3RecordingStorage::new(spool.clone(), s3)?);
+                let signer = Arc::new(CloudFrontUrlSigner::new(
+                    cloudfront.domain,
+                    cloudfront.key_pair_id,
+                    cloudfront.private_key,
+                ));
+                (storage, signer, None)
             }
         };
 

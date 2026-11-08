@@ -19,6 +19,7 @@ hmac.workspace = true
 getrandom.workspace = true
 base64ct.workspace = true
 ed25519-dalek.workspace = true
+p256.workspace = true
 zeroize.workspace = true
 reqwest.workspace = true
 serde.workspace = true

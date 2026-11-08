@@ -28,6 +28,7 @@ utoipa = "6"
 [dev-dependencies]
 async-trait.workspace = true
 ed25519-dalek.workspace = true
+p256.workspace = true
 sha2.workspace = true
 tower.workspace = true
 sqlx.workspace = true

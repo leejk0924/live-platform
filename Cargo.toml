@@ -24,6 +24,7 @@ hmac = "0.13"
 getrandom = "0.4"
 base64ct = { version = "1", features = ["alloc"] }
 ed25519-dalek = "3"
+p256 = { version = "0.14", default-features = false, features = ["ecdsa", "pem", "std"] }
 zeroize = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
 subtle = "2"

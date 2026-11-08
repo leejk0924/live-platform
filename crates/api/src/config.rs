@@ -6,7 +6,10 @@ use std::{
 };
 
 use domain::secret::Secret;
-use infrastructure::{media::PublishKey, recording::S3Settings};
+use infrastructure::{
+    media::PublishKey,
+    recording::{CloudFrontKey, S3Settings},
+};
 use thiserror::Error;
 
 const DEFAULT_ADDR: &str = "0.0.0.0:8080";
@@ -62,8 +65,7 @@ pub struct CloudFrontSettings {
     /// Such as `d111111abcdef8.cloudfront.net`.
     pub domain: String,
     pub key_pair_id: String,
-    /// PEM.
-    pub private_key: Secret<String>,
+    pub private_key: CloudFrontKey,
 }
 
 /// A browser origin, `scheme://host[:port]`, in the form browsers send it in
@@ -151,7 +153,7 @@ pub enum ConfigError {
     S3EndpointCredentials,
     #[error("CLOUDFRONT_DOMAIN must be a host name like d111111abcdef8.cloudfront.net, got {0:?}")]
     CloudFrontDomain(String),
-    #[error("CLOUDFRONT_PRIVATE_KEY must be a PEM private key")]
+    #[error("CLOUDFRONT_PRIVATE_KEY must be an ECDSA P-256 private key in PEM")]
     CloudFrontPrivateKey,
 }
 
@@ -285,10 +287,8 @@ fn s3_config(
     if !host_ok || !domain.contains('.') {
         return Err(ConfigError::CloudFrontDomain(domain));
     }
-    let private_key = required("CLOUDFRONT_PRIVATE_KEY")?;
-    if !private_key.trim_start().starts_with("-----BEGIN ") {
-        return Err(ConfigError::CloudFrontPrivateKey);
-    }
+    let private_key = CloudFrontKey::from_pem(&Secret::new(required("CLOUDFRONT_PRIVATE_KEY")?))
+        .map_err(|_| ConfigError::CloudFrontPrivateKey)?;
     Ok(RecordingStorageConfig::S3 {
         s3: S3Settings {
             endpoint,
@@ -300,7 +300,7 @@ fn s3_config(
         cloudfront: CloudFrontSettings {
             domain,
             key_pair_id: required("CLOUDFRONT_KEY_PAIR_ID")?,
-            private_key: Secret::new(private_key),
+            private_key,
         },
     })
 }
@@ -333,7 +333,13 @@ pub fn listen_addr(var: Result<String, VarError>) -> Result<SocketAddr, String> 
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::LazyLock};
+
+    use p256::{
+        ecdsa::SigningKey,
+        elliptic_curve::Generate,
+        pkcs8::{EncodePrivateKey, LineEnding},
+    };
 
     use super::*;
     use crate::test_support::LogBuffer;
@@ -405,9 +411,18 @@ mod tests {
     }
 
     const S3_SECRET: &str = "s3-secret-access-key-value";
-    const PEM: &str = "-----BEGIN PRIVATE KEY-----
-pem-body-value
------END PRIVATE KEY-----";
+    /// A fresh PKCS#8 key, so no private key sits in the repository.
+    static PEM: LazyLock<String> = LazyLock::new(|| {
+        SigningKey::generate()
+            .to_pkcs8_pem(LineEnding::LF)
+            .unwrap()
+            .to_string()
+    });
+
+    /// The first base64 line of [`PEM`].
+    fn pem_body() -> &'static str {
+        PEM.lines().nth(1).unwrap()
+    }
 
     fn s3(overrides: &[(&'static str, &'static str)]) -> Result<Config, ConfigError> {
         let mut vars = vec![
@@ -419,7 +434,7 @@ pem-body-value
             ("S3_SECRET_ACCESS_KEY", S3_SECRET),
             ("CLOUDFRONT_DOMAIN", "d111111abcdef8.cloudfront.net"),
             ("CLOUDFRONT_KEY_PAIR_ID", "K2JCJMDEHXQW5F"),
-            ("CLOUDFRONT_PRIVATE_KEY", PEM),
+            ("CLOUDFRONT_PRIVATE_KEY", PEM.as_str()),
         ];
         for (var, value) in overrides {
             vars.retain(|(v, _)| v != var);
@@ -438,9 +453,8 @@ pem-body-value
         assert_eq!(s3.bucket, "lp-recordings");
         assert_eq!(s3.secret_access_key.expose(), S3_SECRET);
         assert_eq!(cloudfront.domain, "d111111abcdef8.cloudfront.net");
-        assert_eq!(cloudfront.private_key.expose(), PEM);
         let logged = format!("{config:?}");
-        for secret in [S3_SECRET, "AKIDEXAMPLE", "pem-body-value"] {
+        for secret in [S3_SECRET, "AKIDEXAMPLE", pem_body()] {
             assert!(!logged.contains(secret), "{secret} in {logged}");
         }
     }
@@ -473,6 +487,10 @@ pem-body-value
             ("CLOUDFRONT_DOMAIN", "https://d1.cloudfront.net"),
             ("CLOUDFRONT_DOMAIN", "localhost"),
             ("CLOUDFRONT_PRIVATE_KEY", "hunter2"),
+            (
+                "CLOUDFRONT_PRIVATE_KEY",
+                "-----BEGIN CERTIFICATE-----\nhunter2\n-----END CERTIFICATE-----",
+            ),
         ] {
             let err = s3(&[(var, bad)]).unwrap_err();
             assert!(!err.to_string().contains("hunter2"), "{err}");
