@@ -196,8 +196,9 @@ impl ReapPass for PgReapPass {
         .fetch_all(&mut *step)
         .await
         .map_err(port_error)?;
+        let reset = to_ids(reset)?;
         step.commit().await.map_err(port_error)?;
-        to_ids(reset)
+        Ok(reset)
     }
 
     async fn finish(self: Box<Self>) -> Result<(), PortError> {
