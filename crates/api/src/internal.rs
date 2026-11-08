@@ -173,7 +173,6 @@ async fn hook(
         Observed::Unchanged(id) => {
             tracing::info!(?event, path, broadcast = %id, "hook changed nothing")
         }
-        // `event` names the audit event here, so the hook event is `hook`.
         Observed::NotActive { broadcast, kick } => match kick {
             Ok(()) => audit!(
                 warn,
@@ -182,7 +181,7 @@ async fn hook(
                 path,
                 %broadcast,
                 by = "hook",
-                "stream of a broadcast that is not active; publisher disconnected"
+                "stream of a broadcast that is not active; publisher disconnect sent"
             ),
             Err(err) => audit!(
                 warn,

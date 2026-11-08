@@ -111,7 +111,7 @@ fn report_pass(finished: Result<Result<Option<Reaped>, PortError>, JoinError>) {
             AuditEvent::PublisherKicked,
             %broadcast,
             by = "reaper",
-            "disconnected the publisher of a broadcast that is not active"
+            "publisher disconnect sent for a broadcast that is not active"
         );
     }
     let changed = !reaped.expired.is_empty()

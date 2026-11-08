@@ -137,7 +137,7 @@ pub(crate) async fn stop(
                     AuditEvent::PublisherKicked,
                     %broadcast,
                     by = "owner",
-                    "ended, publisher disconnected"
+                    "ended; publisher disconnect sent"
                 ),
                 Some(err) => audit!(
                     warn,

@@ -1,12 +1,14 @@
 //! Security-relevant events, logged with target `audit` and a fixed `event`
 //! name so they can be filtered out of the rest of the log. Inside a request
 //! they carry the request span: `trace_id`, `client`, `user`, method and
-//! path.
+//! path. The `event` field name is reserved for the audit event, so a
+//! call site logs any other event under another name, such as `hook`.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditEvent {
     LoginFailed,
     Forbidden,
+    /// A disconnect was sent for the broadcast's path; it may have found no publisher.
     PublisherKicked,
     KickFailed,
     MediaAccessDenied,
