@@ -18,7 +18,10 @@ use sqlx::{
 };
 
 pub use broadcast::{PgBroadcastQuery, PgBroadcastRepository};
-pub use comment::{PgChatPolicyStore, PgCommentQuery, PgCommentRepository};
+pub use comment::{
+    COMMENT_WRITE_LOCK_CLASS, PgChatPolicyStore, PgCommentQuery, PgCommentRepository,
+    comment_write_lock,
+};
 pub use publish_ticket::PgPublishTicketLedger;
 pub use reaper::{PgReaperStore, REAPER_LOCK_KEY};
 pub use session::{ABSOLUTE_TIMEOUT, IDLE_TIMEOUT, PgSessionStore};

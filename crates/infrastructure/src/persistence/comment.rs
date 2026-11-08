@@ -81,6 +81,8 @@ fn to_view(
     })
 }
 
+type ViewQuery<'q> = sqlx::query::QueryAs<'q, sqlx::Postgres, ViewRow, sqlx::postgres::PgArguments>;
+
 /// The statuses a broadcast takes comments in, as the `TEXT[]` a
 /// `status = ANY($n)` condition binds.
 fn open_statuses() -> Vec<&'static str> {
@@ -89,6 +91,21 @@ fn open_statuses() -> Vec<&'static str> {
         .filter(|status| accepts_comments(*status))
         .collect();
     status_names(&open)
+}
+
+/// The first key of the advisory lock every write to one broadcast's
+/// comments holds until it commits ("cmnt"). Two-key advisory locks never
+/// collide with one-key ones such as [`super::REAPER_LOCK_KEY`].
+pub const COMMENT_WRITE_LOCK_CLASS: i32 = 0x636d_6e74;
+
+/// The advisory lock, as the `(int4, int4)` pair `pg_advisory_xact_lock`
+/// takes, that serializes writes to `broadcast`'s comments. Broadcasts that
+/// share the low 32 bits of their id share the lock, which only costs
+/// throughput.
+pub fn comment_write_lock(broadcast: BroadcastId) -> (i32, i32) {
+    #[allow(clippy::cast_possible_truncation)]
+    let low_bits = broadcast.as_i64() as i32;
+    (COMMENT_WRITE_LOCK_CLASS, low_bits)
 }
 
 /// The write side of `comments`.
@@ -101,18 +118,41 @@ impl PgCommentRepository {
         Self { pool }
     }
 
-    /// Runs `sql`, a conditional change binding `$1` comment, `$2`
+    /// Runs `query`, one conditional change to `broadcast`'s comments that
+    /// returns the changed row, holding the broadcast's write lock until it
+    /// commits. The change takes its revision under the lock, so a
+    /// broadcast's revisions commit in ascending order and a follower that
+    /// has seen one has seen every lower one.
+    async fn locked(
+        &self,
+        broadcast: BroadcastId,
+        query: ViewQuery<'_>,
+    ) -> Result<Option<ViewRow>, PortError> {
+        let mut tx = self.pool.begin().await.map_err(port_error)?;
+        let (class, key) = comment_write_lock(broadcast);
+        sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+            .bind(class)
+            .bind(key)
+            .execute(&mut *tx)
+            .await
+            .map_err(port_error)?;
+        let row = query.fetch_optional(&mut *tx).await.map_err(port_error)?;
+        tx.commit().await.map_err(port_error)?;
+        Ok(row)
+    }
+
+    /// Runs `query`, a conditional change binding `$1` comment, `$2`
     /// broadcast, `$3` author and optionally more, that returns the view,
     /// and says why when it matched no row. The follow-up read cannot let
     /// anything through: the write already decided.
     async fn write(
         &self,
-        query: sqlx::query::QueryAs<'_, sqlx::Postgres, ViewRow, sqlx::postgres::PgArguments>,
+        query: ViewQuery<'_>,
         broadcast: BroadcastId,
         id: CommentId,
         author: UserId,
     ) -> Result<Result<CommentView, CommentWriteRejection>, PortError> {
-        if let Some(row) = query.fetch_optional(&self.pool).await.map_err(port_error)? {
+        if let Some(row) = self.locked(broadcast, query).await? {
             return Ok(Ok(to_view(row)?));
         }
         let stored_author: Option<i64> = sqlx::query_scalar(
@@ -136,7 +176,7 @@ impl PgCommentRepository {
 #[async_trait]
 impl CommentRepository for PgCommentRepository {
     async fn insert(&self, new: &NewComment) -> Result<Option<CommentView>, PortError> {
-        sqlx::query_as::<_, ViewRow>(concat!(
+        let query = sqlx::query_as::<_, ViewRow>(concat!(
             "WITH c AS ( \
                  INSERT INTO comments (id, broadcast_id, author_id, body) \
                  SELECT $1, b.id, $3, $4 FROM broadcasts b \
@@ -150,12 +190,11 @@ impl CommentRepository for PgCommentRepository {
         .bind(new.broadcast_id.as_i64())
         .bind(new.author_id.as_i64())
         .bind(new.body.as_str())
-        .bind(open_statuses())
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(port_error)?
-        .map(to_view)
-        .transpose()
+        .bind(open_statuses());
+        self.locked(new.broadcast_id, query)
+            .await?
+            .map(to_view)
+            .transpose()
     }
 
     async fn edit(

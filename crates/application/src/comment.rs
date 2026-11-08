@@ -313,8 +313,8 @@ pub struct CommentFeed {
     behind: bool,
     /// Revisions the last catch-up delivered, whose live events are still
     /// to come and must not be delivered twice. A set rather than "at most
-    /// the cursor": revisions are taken when a write starts, not when it
-    /// commits, so a lower one may become visible after a higher one.
+    /// the cursor": each write publishes after its own commit, so a lower
+    /// revision's event may arrive after a higher one's.
     caught_up: HashSet<Revision>,
 }
 

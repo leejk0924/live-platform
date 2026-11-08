@@ -10,8 +10,11 @@ use domain::{
     comment::{ChatPolicy, CommentBody},
     id::SnowflakeId,
 };
-use infrastructure::persistence::{PgChatPolicyStore, PgCommentQuery, PgCommentRepository};
+use infrastructure::persistence::{
+    PgChatPolicyStore, PgCommentQuery, PgCommentRepository, comment_write_lock,
+};
 use sqlx::PgPool;
+use std::{sync::Arc, time::Duration};
 
 const OWNER: i64 = 1;
 const VIEWER: i64 = 2;
@@ -216,4 +219,71 @@ async fn slow_mode_is_set_by_the_owner_without_a_new_version(pool: PgPool) {
         .await
         .unwrap();
     assert_eq!(version, 1);
+}
+
+/// Whether a session of this test's database waits for an advisory lock.
+async fn someone_waits_for_a_lock(pool: &PgPool) -> bool {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted            AND database = (SELECT oid FROM pg_database WHERE datname = current_database()))",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// A writer that has taken its revision but not committed must not let a
+/// later writer commit a higher revision first: a follower that saw the
+/// higher one would never be sent the lower.
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_broadcasts_revisions_become_visible_in_order(pool: PgPool) {
+    seed(&pool, "LIVE").await;
+    let repo = Arc::new(PgCommentRepository::new(pool.clone()));
+    let query = PgCommentQuery::new(pool.clone());
+    post(&repo, 100, "first").await.unwrap();
+
+    let mut slow = pool.begin().await.unwrap();
+    let (class, key) = comment_write_lock(id(BROADCAST));
+    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+        .bind(class)
+        .bind(key)
+        .execute(&mut *slow)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO comments (id, broadcast_id, author_id, body) VALUES (101, $1, $2, 'slow')",
+    )
+    .bind(BROADCAST)
+    .bind(VIEWER)
+    .execute(&mut *slow)
+    .await
+    .unwrap();
+
+    let fast = tokio::spawn({
+        let repo = Arc::clone(&repo);
+        async move { post(&repo, 102, "fast").await }
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !fast.is_finished() && !someone_waits_for_a_lock(&pool).await {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the later writer either commits or waits");
+    let listed = query.latest_revision(id(BROADCAST)).await.unwrap();
+    slow.commit().await.unwrap();
+    fast.await.unwrap().unwrap();
+
+    let replayed: Vec<_> = query
+        .changes_since(id(BROADCAST), listed, 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|view| view.comment.id.as_i64())
+        .collect();
+    assert_eq!(
+        replayed,
+        [101, 102],
+        "everything committed after the list is replayed"
+    );
 }

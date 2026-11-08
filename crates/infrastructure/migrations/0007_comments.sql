@@ -1,6 +1,8 @@
 -- Every write to a comment (post, edit, delete) takes the next value, so a
 -- broadcast's change feed is one index range: "revision > R" returns every
--- change after R, deleted comments included as tombstones.
+-- change after R, deleted comments included as tombstones. Writes to one
+-- broadcast hold an advisory lock until they commit (comment_write_lock in
+-- the adapter), so its revisions become visible in ascending order.
 CREATE SEQUENCE comment_revisions;
 
 -- The body check mirrors domain::comment::CommentBody (1 to 500 characters);
