@@ -4,6 +4,7 @@ import { ApiError, errorMessage } from '../api/client.ts'
 import { commentApi, eventsUrl } from '../api/comments.ts'
 import type { Broadcast, ChatPolicy, Comment } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
+import { startEdit, type EditDraft } from './commentEdit.ts'
 import { commentsReducer, initialComments, visibleComments, type CommentsAction } from './commentsState.ts'
 
 const MAX_CHARS = 500
@@ -179,7 +180,7 @@ function CommentItem({
   mine: boolean
   dispatch: Dispatch
 }) {
-  const [draft, setDraft] = useState<string | null>(null)
+  const [draft, setDraft] = useState<EditDraft | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -199,7 +200,7 @@ function CommentItem({
     e.preventDefault()
     if (draft === null) return
     void run(async () => {
-      const saved = await commentApi.edit(broadcastId, comment.id, comment.version, draft)
+      const saved = await commentApi.edit(broadcastId, comment.id, draft.version, draft.body)
       dispatch({ type: 'changed', items: [saved] })
       setDraft(null)
     })
@@ -225,12 +226,12 @@ function CommentItem({
         <form className="comment-edit" onSubmit={onSave}>
           <input
             aria-label="댓글 수정"
-            value={draft}
+            value={draft.body}
             maxLength={MAX_CHARS}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => setDraft({ ...draft, body: e.target.value })}
             disabled={pending}
           />
-          <button type="submit" disabled={pending || draft.trim() === ''}>
+          <button type="submit" disabled={pending || draft.body.trim() === ''}>
             저장
           </button>
           <button type="button" onClick={() => setDraft(null)} disabled={pending}>
@@ -240,7 +241,7 @@ function CommentItem({
       )}
       {mine && draft === null && (
         <span className="comment-actions">
-          <button type="button" onClick={() => setDraft(comment.body ?? '')} disabled={pending}>
+          <button type="button" onClick={() => setDraft(startEdit(comment))} disabled={pending}>
             수정
           </button>
           <button type="button" onClick={onDelete} disabled={pending}>
