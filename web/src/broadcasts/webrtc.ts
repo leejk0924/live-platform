@@ -36,3 +36,24 @@ export function watchConnection(peer: RTCPeerConnection, onLost: () => void): ()
     peer.removeEventListener('connectionstatechange', check)
   }
 }
+
+// Resolves once the peer is connected. Rejects when it fails or closes, or when `signal` aborts first.
+export function waitConnected(peer: RTCPeerConnection, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const finish = (settle: () => void) => {
+      peer.removeEventListener('connectionstatechange', check)
+      signal.removeEventListener('abort', abort)
+      settle()
+    }
+    const check = () => {
+      const state = peer.connectionState
+      if (state === 'connected') finish(resolve)
+      else if (state === 'failed' || state === 'closed') finish(() => reject(new Error(`peer connection ${state}`)))
+    }
+    const abort = () => finish(() => reject(signal.reason))
+    if (signal.aborted) return reject(signal.reason)
+    peer.addEventListener('connectionstatechange', check)
+    signal.addEventListener('abort', abort)
+    check()
+  })
+}
