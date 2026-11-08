@@ -4,7 +4,10 @@
 
 mod support;
 
-use std::sync::{Arc, atomic::Ordering};
+use std::{
+    io,
+    sync::{Arc, Mutex, atomic::Ordering},
+};
 
 use axum::{
     Router,
@@ -15,8 +18,11 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use infrastructure::media::jwt::PUBLISH_TOKEN_TTL;
 use serde_json::{Value, json};
 use sqlx::PgPool;
-use support::{CountingTerminator, PASSWORD, Reply, live_state, request, send, sign_up};
+use support::{
+    CountingTerminator, KICK_FAILURE, PASSWORD, Reply, live_state_with, request, send, sign_up,
+};
 use tokio::task::JoinSet;
+use tracing_subscriber::fmt::MakeWriter;
 
 struct World {
     pool: PgPool,
@@ -28,8 +34,12 @@ struct World {
 
 impl World {
     async fn new(pool: PgPool) -> Self {
-        let (state, kicks) = live_state(&pool, false).await;
-        let router = api::app(state);
+        Self::with(pool, CountingTerminator::default()).await
+    }
+
+    async fn with(pool: PgPool, terminator: CountingTerminator) -> Self {
+        let kicks = Arc::new(terminator);
+        let router = api::app(live_state_with(&pool, false, kicks.clone()).await);
         let owner = sign_up(&router, "owner", PASSWORD).await.token();
         let other = sign_up(&router, "other", PASSWORD).await.token();
         Self {
@@ -446,4 +456,65 @@ async fn mixed_starts_and_stops_transition_at_most_once_each(pool: PgPool) {
             "round {round}"
         );
     }
+}
+
+#[derive(Clone, Default)]
+struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+impl io::Write for LogBuffer {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.lock().unwrap().write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> MakeWriter<'a> for LogBuffer {
+    type Writer = LogBuffer;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_failed_kick_ends_the_broadcast_and_only_reaches_the_logs(pool: PgPool) {
+    let world = World::with(
+        pool,
+        CountingTerminator {
+            fail: true,
+            ..Default::default()
+        },
+    )
+    .await;
+    let id = world.broadcast_in("LIVE").await;
+    let logs = LogBuffer::default();
+    let subscriber = tracing_subscriber::fmt()
+        .json()
+        .with_writer(logs.clone())
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let reply = call(&world.router, Op::Stop, &id, Some(&world.owner)).await;
+
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.body["status"], "ENDED");
+    assert!(
+        !reply.body.to_string().contains(KICK_FAILURE),
+        "{}",
+        reply.body
+    );
+    assert_eq!(world.stored(&id).await.status, "ENDED");
+    assert_eq!(world.kicks(), 1);
+    let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+    let warning = logged
+        .lines()
+        .find(|line| line.contains("the publisher was not disconnected"))
+        .unwrap_or_else(|| panic!("no warning in {logged}"));
+    assert!(warning.contains(r#""level":"WARN""#), "{warning}");
+    assert!(warning.contains(KICK_FAILURE), "{warning}");
+    assert!(warning.contains(&id), "{warning}");
 }

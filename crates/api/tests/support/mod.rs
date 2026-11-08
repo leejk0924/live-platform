@@ -42,16 +42,26 @@ pub async fn router(pool: &PgPool, demo_login_enabled: bool) -> Router {
     app(state(pool, demo_login_enabled).await)
 }
 
-/// Stands in for MediaMTX's Control API and counts the publishers it kicks.
+/// Stands in for MediaMTX's Control API and counts the kicks that finished.
 #[derive(Default)]
 pub struct CountingTerminator {
     pub kicks: AtomicUsize,
+    /// How long each kick takes.
+    pub delay: Duration,
+    /// Every kick fails, as when MediaMTX is unreachable.
+    pub fail: bool,
 }
+
+pub const KICK_FAILURE: &str = "mediamtx api: connection refused";
 
 #[async_trait]
 impl StreamTerminator for CountingTerminator {
     async fn kick(&self, _: &StreamPath) -> Result<(), PortError> {
+        tokio::time::sleep(self.delay).await;
         self.kicks.fetch_add(1, Ordering::SeqCst);
+        if self.fail {
+            return Err(PortError(KICK_FAILURE.into()));
+        }
         Ok(())
     }
 }
@@ -67,6 +77,16 @@ pub async fn live_state(
     pool: &PgPool,
     demo_login_enabled: bool,
 ) -> (AppState, Arc<CountingTerminator>) {
+    let terminator = Arc::new(CountingTerminator::default());
+    let state = live_state_with(pool, demo_login_enabled, terminator.clone()).await;
+    (state, terminator)
+}
+
+pub async fn live_state_with(
+    pool: &PgPool,
+    demo_login_enabled: bool,
+    terminator: Arc<CountingTerminator>,
+) -> AppState {
     let ttl = Duration::from_secs(30);
     let allocator = Arc::new(PgWorkerIdAllocator::new(pool.clone(), ttl));
     let (ids, heartbeat) = SnowflakeIdGenerator::start(allocator, ttl).await.unwrap();
@@ -80,13 +100,12 @@ pub async fn live_state(
         breached: Arc::new(BreachedPasswordList::load()),
     };
     let key = Arc::new(PublishKey::generate());
-    let terminator = Arc::new(CountingTerminator::default());
     let broadcast_ports = BroadcastPorts {
         repository: Arc::new(PgBroadcastRepository::new(pool.clone())),
         query: Arc::new(PgBroadcastQuery::new(pool.clone())),
         ingest: Arc::new(MediaMtxIngestRouter),
         authorizer: Arc::new(JwtPublishAuthorizer::new(key.clone())),
-        terminator: terminator.clone(),
+        terminator,
     };
     let state = AppState::new(
         ports,
@@ -96,7 +115,7 @@ pub async fn live_state(
         key.public_jwk(),
     );
     state.auth.demo_log_in.seed().await.unwrap();
-    (state, terminator)
+    state
 }
 
 pub struct Reply {
