@@ -44,10 +44,14 @@ async function attachHls(video: HTMLVideoElement, url: string): Promise<Attachme
 async function attachWhep(video: HTMLVideoElement, url: string): Promise<Attachment> {
   const reception = await receive(url)
   video.srcObject = reception.stream
-  const lost = new Promise<void>((resolve) => watchConnection(reception.peer, resolve))
+  let unwatch = () => {}
+  const lost = new Promise<void>((resolve) => {
+    unwatch = watchConnection(reception.peer, resolve)
+  })
   return {
     lost,
     close: () => {
+      unwatch()
       reception.close()
       video.srcObject = null
     },

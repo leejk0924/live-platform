@@ -13,7 +13,12 @@ type Phase =
   | { kind: 'publishing'; stats: SendStats | null }
   | { kind: 'stopping' }
 
-type Session = { capture: Capture; publication: Publication | null; timer: number | undefined }
+type Session = {
+  capture: Capture
+  publication: Publication | null
+  timer: number | undefined
+  unwatch: (() => void) | undefined
+}
 
 function audioNotice(capture: Capture): string | null {
   if (capture.hasTabAudio && capture.hasMic) return null
@@ -47,6 +52,7 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
     session.current = null
     if (!current) return
     window.clearInterval(current.timer)
+    current.unwatch?.()
     void current.publication?.close()
     current.capture.release()
   }
@@ -88,7 +94,7 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
       setPhase({ kind: 'idle' })
       return
     }
-    session.current = { capture, publication: null, timer: undefined }
+    session.current = { capture, publication: null, timer: undefined, unwatch: undefined }
     setNotice(audioNotice(capture))
     if (preview.current) preview.current.srcObject = new MediaStream([capture.video])
     // Ending the share from the browser's own bar ends the broadcast too.
@@ -112,7 +118,7 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
       }, 1000)
       setPhase({ kind: 'publishing', stats: null })
       // The broadcast stays LIVE: a dropped connection is not the owner ending the show.
-      watchConnection(publication.peer, () => {
+      current.unwatch = watchConnection(publication.peer, () => {
         if (session.current?.publication !== publication) return
         release()
         setNotice(null)
