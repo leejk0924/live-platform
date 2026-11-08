@@ -22,6 +22,10 @@ use application::ports::{
         StreamPath, StreamTerminator,
     },
     rate_limit::{RateKey, RateLimiter},
+    recording::{
+        ClaimedRecording, NewRecording, RecordingFilter, RecordingQuery, RecordingRepository,
+        RecordingView, SegmentSpool, SpooledSegment, UrlSigner,
+    },
 };
 use async_trait::async_trait;
 use domain::{
@@ -31,6 +35,7 @@ use domain::{
     },
     comment::{ChatPolicy, CommentBody, CommentId, Revision},
     id::SnowflakeId,
+    recording::{RecordingId, RecordingKey, StoreRetry},
     secret::Secret,
 };
 use infrastructure::{auth::BreachedPasswordList, media::PublishKey};
@@ -39,6 +44,7 @@ use tracing_subscriber::fmt::MakeWriter;
 
 use crate::{
     AppState, auth::AuthPorts, broadcast::BroadcastPorts, comment::CommentPorts, config::Origin,
+    recording::RecordingPorts,
 };
 
 /// Stands in for every port a test does not exercise; each call fails.
@@ -302,6 +308,58 @@ impl EventBus for Unavailable {
     }
 }
 
+#[async_trait]
+impl RecordingRepository for Unavailable {
+    async fn register(&self, _: &NewRecording) -> Result<bool, PortError> {
+        unavailable()
+    }
+
+    async fn claim(&self, _: std::time::Duration) -> Result<Option<ClaimedRecording>, PortError> {
+        unavailable()
+    }
+
+    async fn mark_stored(&self, _: RecordingId, _: u64) -> Result<bool, PortError> {
+        unavailable()
+    }
+
+    async fn release_failed(&self, _: RecordingId, _: StoreRetry) -> Result<bool, PortError> {
+        unavailable()
+    }
+}
+
+#[async_trait]
+impl RecordingQuery for Unavailable {
+    async fn list(
+        &self,
+        _: RecordingFilter,
+        _: Option<RecordingId>,
+        _: u32,
+    ) -> Result<Vec<RecordingView>, PortError> {
+        unavailable()
+    }
+
+    async fn get(&self, _: RecordingId) -> Result<Option<RecordingView>, PortError> {
+        unavailable()
+    }
+}
+
+#[async_trait]
+impl SegmentSpool for Unavailable {
+    fn segment(&self, _: &StreamPath, _: &str) -> Option<SpooledSegment> {
+        unreachable!("not available in this test")
+    }
+
+    async fn discard(&self, _: &SpooledSegment) -> Result<(), PortError> {
+        unavailable()
+    }
+}
+
+impl UrlSigner for Unavailable {
+    fn sign(&self, _: RecordingId, _: &RecordingKey, _: std::time::SystemTime) -> String {
+        unreachable!("not available in this test")
+    }
+}
+
 pub const TEST_ORIGIN: &str = "https://app.test";
 pub const TEST_MEDIA_SECRET: &str = "0123456789abcdef0123456789abcdef";
 
@@ -461,10 +519,18 @@ fn state_with(comment_ports: CommentPorts) -> AppState {
         tickets: Arc::new(Unavailable),
         presence: Arc::new(Unavailable),
     };
+    let recording_ports = RecordingPorts {
+        repository: Arc::new(Unavailable),
+        query: Arc::new(Unavailable),
+        spool: Arc::new(Unavailable),
+        signer: Arc::new(Unavailable),
+        local: None,
+    };
     AppState::new(
         ports,
         broadcast_ports,
         comment_ports,
+        recording_ports,
         vec![Origin::parse(TEST_ORIGIN).unwrap()],
         false,
         PublishKey::generate().public_jwk(),

@@ -5,6 +5,7 @@
 
 use std::{
     io,
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -13,12 +14,19 @@ use std::{
 };
 
 use api::{
-    AppState, app, auth::AuthPorts, broadcast::BroadcastPorts, comment::CommentPorts,
+    AppState, app,
+    auth::AuthPorts,
+    broadcast::BroadcastPorts,
+    comment::CommentPorts,
     config::Origin,
+    recording::{LocalRecordings, RecordingPorts},
 };
-use application::ports::{
-    PortError,
-    media::{StreamPath, StreamTerminator},
+use application::{
+    ports::{
+        PortError,
+        media::{StreamPath, StreamTerminator},
+    },
+    recording::StoreRecordings,
 };
 use async_trait::async_trait;
 use axum::{
@@ -33,11 +41,12 @@ use infrastructure::{
     media::{JwtPublishAuthorizer, MediaMtxIngestRouter, MediaMtxPlaybackResolver, PublishKey},
     persistence::{
         PgBroadcastQuery, PgBroadcastRepository, PgChatPolicyStore, PgCommentQuery,
-        PgCommentRepository, PgPublishTicketLedger, PgSessionStore, PgUserRepository,
-        PgWorkerIdAllocator,
+        PgCommentRepository, PgPublishTicketLedger, PgRecordingQuery, PgRecordingRepository,
+        PgSessionStore, PgUserRepository, PgWorkerIdAllocator,
     },
     rate_limit::InMemoryRateLimiter,
     realtime::PgEventBus,
+    recording::{FsRecordingStorage, FsSegmentSpool, LocalUrlSigner},
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -105,6 +114,88 @@ pub async fn live_state_with(
     demo_login_enabled: bool,
     terminator: Arc<CountingTerminator>,
 ) -> AppState {
+    let (recording_ports, _) = local_recordings(pool);
+    build_state(pool, demo_login_enabled, terminator, recording_ports).await
+}
+
+/// Where a test app's recordings live, and the storer that moves them from
+/// the spool to the store.
+pub struct RecordingHarness {
+    pub spool: PathBuf,
+    pub store: PathBuf,
+    pub storer: StoreRecordings,
+}
+
+impl RecordingHarness {
+    /// The path MediaMTX would report for `name` under `stream`, after
+    /// writing `bytes` there.
+    pub fn spool_segment(&self, stream: &str, name: &str, bytes: &[u8]) -> String {
+        let dir = self.spool.join(stream);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(name), bytes).unwrap();
+        format!("{}/{stream}/{name}", self.spool.display())
+    }
+
+    /// Stores every due recording.
+    pub async fn store_all(&self) {
+        while self.storer.run_once().await.unwrap().is_some() {}
+    }
+}
+
+fn temp_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("lp-{name}-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// Recordings kept in fresh temporary directories and served by the app.
+pub fn local_recordings(pool: &PgPool) -> (RecordingPorts, RecordingHarness) {
+    let (spool_dir, store_dir) = (temp_dir("spool"), temp_dir("store"));
+    let spool = Arc::new(FsSegmentSpool::new(spool_dir.clone()));
+    let storage = Arc::new(FsRecordingStorage::new(spool.clone(), store_dir.clone()));
+    let signer = Arc::new(LocalUrlSigner::generate());
+    let repository = Arc::new(PgRecordingRepository::new(pool.clone()));
+    let ports = RecordingPorts {
+        repository: repository.clone(),
+        query: Arc::new(PgRecordingQuery::new(pool.clone())),
+        spool: spool.clone(),
+        signer: signer.clone(),
+        local: Some(LocalRecordings {
+            signer,
+            storage: storage.clone(),
+        }),
+    };
+    let harness = RecordingHarness {
+        spool: spool_dir,
+        store: store_dir,
+        storer: StoreRecordings {
+            recordings: repository,
+            spool,
+            storage,
+        },
+    };
+    (ports, harness)
+}
+
+/// [`state`] with recordings in temporary directories the test can reach.
+pub async fn recording_state(pool: &PgPool) -> (AppState, RecordingHarness) {
+    let (recording_ports, harness) = local_recordings(pool);
+    let state = build_state(
+        pool,
+        false,
+        Arc::new(CountingTerminator::default()),
+        recording_ports,
+    )
+    .await;
+    (state, harness)
+}
+
+async fn build_state(
+    pool: &PgPool,
+    demo_login_enabled: bool,
+    terminator: Arc<CountingTerminator>,
+    recording_ports: RecordingPorts,
+) -> AppState {
     let ttl = Duration::from_secs(30);
     let allocator = Arc::new(PgWorkerIdAllocator::new(pool.clone(), ttl));
     let (ids, heartbeat) = SnowflakeIdGenerator::start(allocator, ttl).await.unwrap();
@@ -146,6 +237,7 @@ pub async fn live_state_with(
         ports,
         broadcast_ports,
         comment_ports,
+        recording_ports,
         vec![Origin::parse(ORIGIN).unwrap()],
         demo_login_enabled,
         key.public_jwk(),

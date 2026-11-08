@@ -1,11 +1,12 @@
 use std::{
     env::VarError,
     net::{AddrParseError, SocketAddr},
+    path::PathBuf,
     time::Duration,
 };
 
 use domain::secret::Secret;
-use infrastructure::media::PublishKey;
+use infrastructure::{media::PublishKey, recording::S3Settings};
 use thiserror::Error;
 
 const DEFAULT_ADDR: &str = "0.0.0.0:8080";
@@ -15,6 +16,9 @@ const DEFAULT_LEASE_TTL_SECS: u64 = 30;
 const MIN_LEASE_TTL_SECS: u64 = 3;
 /// `openssl rand -hex 32` prints 64.
 const MIN_MEDIA_SECRET_LEN: usize = 32;
+/// Where MediaMTX records, mounted at the same path in the API container.
+const DEFAULT_RECORDING_SPOOL_DIR: &str = "/recordings";
+const DEFAULT_RECORDING_STORE_DIR: &str = "/recording-store";
 
 #[derive(Debug)]
 pub struct Config {
@@ -30,6 +34,36 @@ pub struct Config {
     /// What MediaMTX presents on `/internal/*`. Letters and digits only, so
     /// it can sit in the URL MediaMTX calls without escaping.
     pub media_secret: Secret<String>,
+    pub recordings: RecordingConfig,
+}
+
+#[derive(Debug)]
+pub struct RecordingConfig {
+    /// Where MediaMTX leaves finished segments.
+    pub spool_dir: PathBuf,
+    pub storage: RecordingStorageConfig,
+}
+
+#[derive(Debug)]
+pub enum RecordingStorageConfig {
+    /// Kept in a directory on this host and served by the API.
+    Local { store_dir: PathBuf },
+    /// Kept in an S3 bucket and served by CloudFront.
+    S3 {
+        s3: S3Settings,
+        cloudfront: CloudFrontSettings,
+    },
+}
+
+/// How viewers reach recordings in S3: a CloudFront distribution that only
+/// accepts URLs signed with this key pair.
+#[derive(Debug)]
+pub struct CloudFrontSettings {
+    /// Such as `d111111abcdef8.cloudfront.net`.
+    pub domain: String,
+    pub key_pair_id: String,
+    /// PEM.
+    pub private_key: Secret<String>,
 }
 
 /// A browser origin, `scheme://host[:port]`, in the form browsers send it in
@@ -103,6 +137,22 @@ pub enum ConfigError {
         "MEDIA_HOOK_SECRET must be at least {MIN_MEDIA_SECRET_LEN} letters or digits (openssl rand -hex 32)"
     )]
     InvalidMediaSecret,
+    #[error("{0} must not be empty")]
+    EmptyPath(&'static str),
+    #[error("RECORDING_STORAGE must be local or s3, got {0:?}")]
+    RecordingStorage(String),
+    /// Leaves the value out: it may be a secret.
+    #[error("{0} is required when RECORDING_STORAGE=s3")]
+    MissingS3Setting(&'static str),
+    #[error("S3_ENDPOINT must be an http(s) URL without a trailing slash, got {0:?}")]
+    S3Endpoint(String),
+    /// Leaves the value out: it would carry the credentials.
+    #[error("S3_ENDPOINT must not contain user:password@; set S3_ACCESS_KEY_ID instead")]
+    S3EndpointCredentials,
+    #[error("CLOUDFRONT_DOMAIN must be a host name like d111111abcdef8.cloudfront.net, got {0:?}")]
+    CloudFrontDomain(String),
+    #[error("CLOUDFRONT_PRIVATE_KEY must be a PEM private key")]
+    CloudFrontPrivateKey,
 }
 
 impl Config {
@@ -166,6 +216,7 @@ impl Config {
             Err(VarError::NotPresent) => return Err(ConfigError::MissingMediaSecret),
             Ok(_) | Err(VarError::NotUnicode(_)) => return Err(ConfigError::InvalidMediaSecret),
         };
+        let recordings = recording_config(&lookup)?;
         Ok(Self {
             listen_addr,
             database_url,
@@ -175,8 +226,83 @@ impl Config {
             publish_key,
             mediamtx_api_url,
             media_secret,
+            recordings,
         })
     }
+}
+
+fn dir_or(
+    lookup: &impl Fn(&str) -> Result<String, VarError>,
+    var: &'static str,
+    default: &str,
+) -> Result<PathBuf, ConfigError> {
+    match lookup(var) {
+        Err(VarError::NotPresent) => Ok(PathBuf::from(default)),
+        Ok(raw) if !raw.is_empty() => Ok(PathBuf::from(raw)),
+        Ok(_) | Err(VarError::NotUnicode(_)) => Err(ConfigError::EmptyPath(var)),
+    }
+}
+
+fn recording_config(
+    lookup: &impl Fn(&str) -> Result<String, VarError>,
+) -> Result<RecordingConfig, ConfigError> {
+    let spool_dir = dir_or(lookup, "RECORDING_SPOOL_DIR", DEFAULT_RECORDING_SPOOL_DIR)?;
+    let storage = match lookup("RECORDING_STORAGE") {
+        Err(VarError::NotPresent) => "local".to_owned(),
+        Ok(raw) => raw,
+        Err(err) => return Err(ConfigError::RecordingStorage(err.to_string())),
+    };
+    let storage = match storage.as_str() {
+        "local" => RecordingStorageConfig::Local {
+            store_dir: dir_or(lookup, "RECORDING_STORE_DIR", DEFAULT_RECORDING_STORE_DIR)?,
+        },
+        "s3" => s3_config(lookup)?,
+        _ => return Err(ConfigError::RecordingStorage(storage)),
+    };
+    Ok(RecordingConfig { spool_dir, storage })
+}
+
+fn s3_config(
+    lookup: &impl Fn(&str) -> Result<String, VarError>,
+) -> Result<RecordingStorageConfig, ConfigError> {
+    let required = |var: &'static str| match lookup(var) {
+        Ok(raw) if !raw.is_empty() => Ok(raw),
+        _ => Err(ConfigError::MissingS3Setting(var)),
+    };
+    let endpoint = required("S3_ENDPOINT")?;
+    if has_userinfo(&endpoint) {
+        return Err(ConfigError::S3EndpointCredentials);
+    }
+    if !(endpoint.starts_with("http://") || endpoint.starts_with("https://"))
+        || endpoint.ends_with('/')
+    {
+        return Err(ConfigError::S3Endpoint(endpoint));
+    }
+    let domain = required("CLOUDFRONT_DOMAIN")?;
+    let host_ok = domain
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-');
+    if !host_ok || !domain.contains('.') {
+        return Err(ConfigError::CloudFrontDomain(domain));
+    }
+    let private_key = required("CLOUDFRONT_PRIVATE_KEY")?;
+    if !private_key.trim_start().starts_with("-----BEGIN ") {
+        return Err(ConfigError::CloudFrontPrivateKey);
+    }
+    Ok(RecordingStorageConfig::S3 {
+        s3: S3Settings {
+            endpoint,
+            region: required("S3_REGION")?,
+            bucket: required("S3_BUCKET")?,
+            access_key_id: Secret::new(required("S3_ACCESS_KEY_ID")?),
+            secret_access_key: Secret::new(required("S3_SECRET_ACCESS_KEY")?),
+        },
+        cloudfront: CloudFrontSettings {
+            domain,
+            key_pair_id: required("CLOUDFRONT_KEY_PAIR_ID")?,
+            private_key: Secret::new(private_key),
+        },
+    })
 }
 
 /// Whether the authority part of `url` (after the scheme, up to the path)
@@ -247,6 +373,110 @@ mod tests {
         assert_eq!(config.allowed_origins, [Origin::parse(ORIGIN).unwrap()]);
         assert!(!config.demo_login_enabled);
         assert_eq!(config.mediamtx_api_url, "http://mediamtx:9997");
+    }
+
+    #[test]
+    fn recordings_default_to_local_directories() {
+        let config = from(&[]).unwrap();
+        assert_eq!(config.recordings.spool_dir, PathBuf::from("/recordings"));
+        assert!(matches!(
+            config.recordings.storage,
+            RecordingStorageConfig::Local { ref store_dir } if store_dir == &PathBuf::from("/recording-store")
+        ));
+        let config = from(&[
+            ("RECORDING_SPOOL_DIR", "/spool"),
+            ("RECORDING_STORAGE", "local"),
+            ("RECORDING_STORE_DIR", "/store"),
+        ])
+        .unwrap();
+        assert_eq!(config.recordings.spool_dir, PathBuf::from("/spool"));
+        assert!(matches!(
+            config.recordings.storage,
+            RecordingStorageConfig::Local { ref store_dir } if store_dir == &PathBuf::from("/store")
+        ));
+        for (var, value) in [
+            ("RECORDING_SPOOL_DIR", ""),
+            ("RECORDING_STORE_DIR", ""),
+            ("RECORDING_STORAGE", "S3"),
+            ("RECORDING_STORAGE", ""),
+        ] {
+            assert!(from(&[(var, value)]).is_err(), "{var}={value:?}");
+        }
+    }
+
+    const S3_SECRET: &str = "s3-secret-access-key-value";
+    const PEM: &str = "-----BEGIN PRIVATE KEY-----
+pem-body-value
+-----END PRIVATE KEY-----";
+
+    fn s3(overrides: &[(&'static str, &'static str)]) -> Result<Config, ConfigError> {
+        let mut vars = vec![
+            ("RECORDING_STORAGE", "s3"),
+            ("S3_ENDPOINT", "https://s3.ap-northeast-2.amazonaws.com"),
+            ("S3_REGION", "ap-northeast-2"),
+            ("S3_BUCKET", "lp-recordings"),
+            ("S3_ACCESS_KEY_ID", "AKIDEXAMPLE"),
+            ("S3_SECRET_ACCESS_KEY", S3_SECRET),
+            ("CLOUDFRONT_DOMAIN", "d111111abcdef8.cloudfront.net"),
+            ("CLOUDFRONT_KEY_PAIR_ID", "K2JCJMDEHXQW5F"),
+            ("CLOUDFRONT_PRIVATE_KEY", PEM),
+        ];
+        for (var, value) in overrides {
+            vars.retain(|(v, _)| v != var);
+            vars.push((var, value));
+        }
+        from(&vars)
+    }
+
+    #[test]
+    fn s3_storage_takes_every_setting_and_never_logs_the_secrets() {
+        let config = s3(&[]).unwrap();
+        let RecordingStorageConfig::S3 { s3, cloudfront } = &config.recordings.storage else {
+            panic!("{:?}", config.recordings.storage);
+        };
+        assert_eq!(s3.endpoint, "https://s3.ap-northeast-2.amazonaws.com");
+        assert_eq!(s3.bucket, "lp-recordings");
+        assert_eq!(s3.secret_access_key.expose(), S3_SECRET);
+        assert_eq!(cloudfront.domain, "d111111abcdef8.cloudfront.net");
+        assert_eq!(cloudfront.private_key.expose(), PEM);
+        let logged = format!("{config:?}");
+        for secret in [S3_SECRET, "AKIDEXAMPLE", "pem-body-value"] {
+            assert!(!logged.contains(secret), "{secret} in {logged}");
+        }
+    }
+
+    #[test]
+    fn s3_storage_requires_every_setting() {
+        for var in [
+            "S3_ENDPOINT",
+            "S3_REGION",
+            "S3_BUCKET",
+            "S3_ACCESS_KEY_ID",
+            "S3_SECRET_ACCESS_KEY",
+            "CLOUDFRONT_DOMAIN",
+            "CLOUDFRONT_KEY_PAIR_ID",
+            "CLOUDFRONT_PRIVATE_KEY",
+        ] {
+            assert!(
+                matches!(s3(&[(var, "")]), Err(ConfigError::MissingS3Setting(v)) if v == var),
+                "{var}"
+            );
+        }
+    }
+
+    #[test]
+    fn s3_settings_are_checked_without_echoing_secrets() {
+        for (var, bad) in [
+            ("S3_ENDPOINT", "s3.amazonaws.com"),
+            ("S3_ENDPOINT", "https://s3.amazonaws.com/"),
+            ("S3_ENDPOINT", "https://key:hunter2@s3.amazonaws.com"),
+            ("CLOUDFRONT_DOMAIN", "https://d1.cloudfront.net"),
+            ("CLOUDFRONT_DOMAIN", "localhost"),
+            ("CLOUDFRONT_PRIVATE_KEY", "hunter2"),
+        ] {
+            let err = s3(&[(var, bad)]).unwrap_err();
+            assert!(!err.to_string().contains("hunter2"), "{err}");
+        }
     }
 
     #[test]

@@ -3,11 +3,12 @@
 //! also carry the shared secret as HTTP Basic credentials. MediaMTX cannot
 //! sign a request, so the secret is all it can present.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use application::{
     media::{Admitted, Denied, MediaAccess, Observed, PublisherSignal},
     ports::media::StreamPath,
+    recording::Registration,
 };
 use axum::{
     Router,
@@ -131,15 +132,27 @@ async fn auth(
     }
 }
 
-/// What MediaMTX's `runOnAvailable` / `runOnUnavailable` commands post.
+/// What MediaMTX's `runOnAvailable`, `runOnUnavailable` and
+/// `runOnRecordSegmentComplete` commands post.
 #[derive(Deserialize)]
-struct HookRequest {
-    event: HookEvent,
-    path: String,
+#[serde(tag = "event", rename_all = "snake_case")]
+enum HookRequest {
+    Available {
+        path: String,
+    },
+    Unavailable {
+        path: String,
+    },
+    SegmentComplete {
+        path: String,
+        /// The finished file, as MediaMTX names it.
+        segment: String,
+        /// Seconds, as MediaMTX prints a float.
+        duration: String,
+    },
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy)]
 enum HookEvent {
     Available,
     Unavailable,
@@ -154,17 +167,33 @@ async fn hook(
     let body = body.map_err(|rejection| ApiError::rejected_body(rejection.status()))?;
     let request: HookRequest =
         serde_json::from_slice(&body).map_err(|_| ApiError::invalid_request())?;
-    let signal = match request.event {
+    let (event, path) = match request {
+        HookRequest::Available { path } => (HookEvent::Available, path),
+        HookRequest::Unavailable { path } => (HookEvent::Unavailable, path),
+        HookRequest::SegmentComplete {
+            path,
+            segment,
+            duration,
+        } => {
+            let duration = duration
+                .parse::<f64>()
+                .ok()
+                .and_then(|secs| Duration::try_from_secs_f64(secs).ok())
+                .ok_or_else(ApiError::invalid_request)?;
+            return segment_complete(&state, path, &segment, duration).await;
+        }
+    };
+    let signal = match event {
         HookEvent::Available => PublisherSignal::Arrived,
         HookEvent::Unavailable => PublisherSignal::Left,
     };
     let observed = state
         .broadcasts
         .track
-        .run(&StreamPath::new(request.path.clone()), signal)
+        .run(&StreamPath::new(path.clone()), signal)
         .await
         .map_err(ApiError::internal)?;
-    let (event, path) = (request.event, request.path.as_str());
+    let path = path.as_str();
     match observed {
         Observed::UnknownPath => tracing::warn!(?event, path, "hook for an unknown path"),
         Observed::Changed(id) => {
@@ -194,6 +223,41 @@ async fn hook(
                 "stream of a broadcast that is not active; disconnect failed, the reaper retries"
             ),
         },
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn segment_complete(
+    state: &AppState,
+    path: String,
+    segment: &str,
+    duration: Duration,
+) -> Result<StatusCode, ApiError> {
+    let registered = state
+        .recordings
+        .register
+        .run(&StreamPath::new(path.clone()), segment, duration)
+        .await
+        .map_err(ApiError::internal)?;
+    let path = path.as_str();
+    match registered {
+        Registration::Registered {
+            recording,
+            broadcast,
+        } => {
+            tracing::info!(path, segment, %broadcast, %recording, "segment registered");
+            state.recordings.stored_wake.notify_one();
+        }
+        Registration::UnknownPath => tracing::warn!(path, segment, "segment of an unknown path"),
+        Registration::NotInSpool => {
+            tracing::warn!(path, segment, "segment outside its spool directory ignored")
+        }
+        Registration::Ignored(broadcast) => tracing::info!(
+            path,
+            segment,
+            %broadcast,
+            "segment already registered or its broadcast is gone"
+        ),
     }
     Ok(StatusCode::NO_CONTENT)
 }

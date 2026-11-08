@@ -14,10 +14,16 @@ use api::{
     auth::AuthPorts,
     broadcast::BroadcastPorts,
     comment::CommentPorts,
-    config::{Config, listen_addr},
+    config::{Config, RecordingStorageConfig, listen_addr},
     reaper,
+    recording::{LocalRecordings, RecordingPorts},
+    recording_store,
 };
-use application::reaper::Reaper;
+use application::{
+    ports::recording::{RecordingStorage, UrlSigner},
+    reaper::Reaper,
+    recording::StoreRecordings,
+};
 use infrastructure::{
     auth::{Argon2Hasher, BreachedPasswordList},
     id::SnowflakeIdGenerator,
@@ -26,11 +32,12 @@ use infrastructure::{
     },
     persistence::{
         self, PgBroadcastQuery, PgBroadcastRepository, PgChatPolicyStore, PgCommentQuery,
-        PgCommentRepository, PgPublishTicketLedger, PgReaperStore, PgSessionStore,
-        PgUserRepository, PgWorkerIdAllocator,
+        PgCommentRepository, PgPublishTicketLedger, PgReaperStore, PgRecordingQuery,
+        PgRecordingRepository, PgSessionStore, PgUserRepository, PgWorkerIdAllocator,
     },
     rate_limit::InMemoryRateLimiter,
     realtime::PgEventBus,
+    recording::{FsRecordingStorage, FsSegmentSpool, LocalUrlSigner},
 };
 use tokio::{net::TcpListener, sync::oneshot};
 use tracing_subscriber::EnvFilter;
@@ -78,6 +85,23 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
     tracing::info!(?config, "starting");
+    let spool = Arc::new(FsSegmentSpool::new(config.recordings.spool_dir));
+    let (storage, signer, local_recordings): (Arc<dyn RecordingStorage>, Arc<dyn UrlSigner>, _) =
+        match config.recordings.storage {
+            RecordingStorageConfig::Local { store_dir } => {
+                let storage = Arc::new(FsRecordingStorage::new(spool.clone(), store_dir));
+                let signer = Arc::new(LocalUrlSigner::generate());
+                let local = LocalRecordings {
+                    signer: signer.clone(),
+                    storage: storage.clone(),
+                };
+                (storage, signer, Some(local))
+            }
+            RecordingStorageConfig::S3 { .. } => {
+                return Err("RECORDING_STORAGE=s3 is not available yet:                      its CloudFront URL signer waits on the RUSTSEC-2023-0071 decision"
+                    .into());
+            }
+        };
 
     let listener = TcpListener::bind(config.listen_addr).await?;
     let pool = persistence::connect(&config.database_url, DB_MAX_CONNECTIONS)
@@ -140,10 +164,19 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         limiter: comment_limiter.clone(),
         events,
     };
+    let recording_repository = Arc::new(PgRecordingRepository::new(pool.clone()));
+    let recording_ports = RecordingPorts {
+        repository: recording_repository.clone(),
+        query: Arc::new(PgRecordingQuery::new(pool.clone())),
+        spool: spool.clone(),
+        signer,
+        local: local_recordings,
+    };
     let state = AppState::new(
         ports,
         broadcast_ports,
         comment_ports,
+        recording_ports,
         config.allowed_origins,
         config.demo_login_enabled,
         publish_jwk,
@@ -162,6 +195,14 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         ingest: Arc::new(MediaMtxIngestRouter),
         terminator: control_api,
     });
+    let recording_store = recording_store::spawn(
+        StoreRecordings {
+            recordings: recording_repository,
+            spool,
+            storage,
+        },
+        Arc::clone(&state.recordings.stored_wake),
+    );
     let limits = Arc::clone(&state.limits);
     tokio::spawn(async move {
         let mut ticks = tokio::time::interval(RATE_LIMIT_CLEANUP);
@@ -195,6 +236,7 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
     .await;
 
     reaper.shutdown().await;
+    recording_store.shutdown().await;
     event_listener.shutdown().await;
     match heartbeat.shutdown().await {
         Ok(()) => tracing::info!("worker id lease released"),
