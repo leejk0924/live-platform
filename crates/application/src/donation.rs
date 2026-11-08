@@ -160,7 +160,7 @@ impl ConfirmDonation {
         if order.paid.is_some() {
             return already_paid(&order, &key);
         }
-        let payment = self
+        let confirmation = self
             .gateway
             .confirm(&PaymentConfirmation {
                 payment_key: key.clone(),
@@ -168,7 +168,20 @@ impl ConfirmDonation {
                 amount: order.amount,
                 idempotency_key: idempotency_key(id),
             })
-            .await?;
+            .await;
+        let payment = match confirmation {
+            Ok(payment) => payment,
+            // The provider refuses a repeat of a confirm still in flight;
+            // the request that is not refused may have credited it since.
+            Err(refusal @ GatewayError::Rejected { .. }) => {
+                let order = self.load(id).await?;
+                return match order.paid {
+                    Some(ref paid) if paid.key == key => already_paid(&order, &key),
+                    _ => Err(refusal.into()),
+                };
+            }
+            Err(err) => return Err(err.into()),
+        };
         verify(&payment, &order, &key)?;
         let approved_at = payment.approved_at.unwrap_or_else(SystemTime::now);
         match self.donations.settle(id, &key, approved_at).await? {
@@ -788,6 +801,62 @@ mod tests {
             }
             assert!(store.settled().is_empty());
             assert_eq!(store.paid_key(), None);
+        }
+    }
+
+    /// Refuses the confirm the way the provider answers a repeat of an
+    /// in-flight request, after a concurrent request paid the order with
+    /// `paid_with`.
+    struct LosingRace {
+        store: Arc<Store>,
+        paid_with: &'static str,
+    }
+
+    #[async_trait]
+    impl PaymentGateway for LosingRace {
+        async fn confirm(&self, _: &PaymentConfirmation) -> Result<GatewayPayment, GatewayError> {
+            self.store
+                .settle(id(ORDER), &key(self.paid_with), approved_at())
+                .await
+                .unwrap();
+            Err(GatewayError::Rejected {
+                code: "IDEMPOTENT_REQUEST_PROCESSING".into(),
+            })
+        }
+
+        async fn lookup(&self, _: &PaymentKey) -> Result<Option<GatewayPayment>, GatewayError> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_confirm_refused_because_a_concurrent_one_paid_the_order_returns_the_donation() {
+        for (paid_with, credited_by_us) in [(KEY, true), ("tgen_other", false)] {
+            let store = Store::with_order(None);
+            let result = ConfirmDonation {
+                donations: store.clone(),
+                gateway: Arc::new(LosingRace {
+                    store: store.clone(),
+                    paid_with,
+                }),
+            }
+            .run(id(DONOR), &ORDER.to_string(), KEY, AMOUNT)
+            .await;
+            if credited_by_us {
+                let confirmed = result.unwrap();
+                assert!(!confirmed.credited);
+                assert_eq!(confirmed.donation.amount.get(), AMOUNT);
+            } else {
+                assert!(
+                    matches!(&result, Err(Error::PaymentRejected { code }) if code == "IDEMPOTENT_REQUEST_PROCESSING"),
+                    "{result:?}"
+                );
+            }
+            assert_eq!(
+                store.settled(),
+                [id(ORDER)],
+                "settled once, by the other request"
+            );
         }
     }
 
