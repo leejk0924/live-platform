@@ -23,6 +23,10 @@ const TIMEOUT: Duration = Duration::from_secs(8);
 /// The code Toss answers a lookup of a payment it does not have with.
 const NOT_FOUND_PAYMENT: &str = "NOT_FOUND_PAYMENT";
 
+/// The code Toss answers a confirm with while an earlier one with the same
+/// Idempotency-Key is still being processed.
+const IDEMPOTENT_REQUEST_PROCESSING: &str = "IDEMPOTENT_REQUEST_PROCESSING";
+
 pub struct TossPayments {
     http: reqwest::Client,
     base_url: String,
@@ -117,7 +121,8 @@ async fn answer(response: Response) -> Result<Answer, GatewayError> {
     }
     // Toss refused our secret key, not the buyer's payment: a configuration
     // fault for the operator, which the buyer must not read as a card refusal.
-    if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+    // Card refusals come as 403, so only 401 is the key.
+    if status == StatusCode::UNAUTHORIZED {
         return Err(unavailable("secret key refused"));
     }
     let retryable = matches!(
@@ -125,6 +130,11 @@ async fn answer(response: Response) -> Result<Answer, GatewayError> {
         StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS
     );
     match serde_json::from_slice::<TossError>(&body) {
+        // An earlier confirm with the same Idempotency-Key is still running;
+        // asking again later returns its answer.
+        Ok(error) if error.code == IDEMPOTENT_REQUEST_PROCESSING => {
+            Err(unavailable("an earlier confirm of this order is in flight"))
+        }
         Ok(error) if status.is_client_error() && !retryable => Ok(Answer::Refused {
             status,
             code: error.code,
@@ -388,7 +398,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_key_toss_does_not_accept_is_unavailable_not_a_refusal() {
-        for (status, code) in [(401, "UNAUTHORIZED_KEY"), (403, "FORBIDDEN_REQUEST")] {
+        for (status, code) in [(401, "UNAUTHORIZED_KEY")] {
             let body = json!({"code": code, "message": "x"});
             let (base, _) = fake_toss(status, body.clone()).await;
             let confirmed = toss(base).confirm(&confirmation()).await;
@@ -402,6 +412,34 @@ mod tests {
                 assert!(!reason.contains(SECRET), "{reason}");
             }
         }
+    }
+
+    /// Toss refuses cards with 403, so a 403 is the buyer's refusal, not
+    /// a key fault.
+    #[tokio::test]
+    async fn a_card_refusal_with_403_is_rejected() {
+        let (base, _) =
+            fake_toss(403, json!({"code": "REJECT_CARD_PAYMENT", "message": "x"})).await;
+        assert_eq!(
+            toss(base).confirm(&confirmation()).await,
+            Err(GatewayError::Rejected {
+                code: "REJECT_CARD_PAYMENT".into()
+            })
+        );
+    }
+
+    /// Measured against the Toss sandbox: concurrent confirms with one
+    /// Idempotency-Key get 409 for all but the first, and the same request
+    /// later gets the first one's answer, so it is worth retrying.
+    #[tokio::test]
+    async fn a_confirm_still_in_flight_is_unavailable_not_a_refusal() {
+        let (base, _) = fake_toss(
+            409,
+            json!({"code": "IDEMPOTENT_REQUEST_PROCESSING", "message": "x"}),
+        )
+        .await;
+        let err = toss(base).confirm(&confirmation()).await.unwrap_err();
+        assert!(matches!(err, GatewayError::Unavailable(_)), "{err:?}");
     }
 
     #[tokio::test]
