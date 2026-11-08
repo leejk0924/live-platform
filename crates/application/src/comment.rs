@@ -2,7 +2,7 @@
 //! the authenticated actor, so a request can never write as someone else or
 //! change someone else's comment by naming them.
 
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 use domain::{
     auth::UserId,
@@ -28,6 +28,9 @@ use crate::ports::{
 /// The most changes a follower catches up on at once. A follower further
 /// behind is told to reload instead.
 pub const FEED_CATCH_UP_LIMIT: u32 = 500;
+
+/// How many caught-up revisions a feed remembers to skip their live copies.
+const CAUGHT_UP_KEPT: usize = 2 * FEED_CATCH_UP_LIMIT as usize;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -302,7 +305,7 @@ impl FollowComments {
             cursor,
             behind,
             queued,
-            caught_up: HashSet::new(),
+            caught_up: BTreeSet::new(),
         })
     }
 }
@@ -319,11 +322,13 @@ pub struct CommentFeed {
     behind: bool,
     /// Delivered before anything else.
     queued: Option<FeedItem>,
-    /// Revisions the last catch-up delivered, whose live events are still
-    /// to come and must not be delivered twice. A set rather than "at most
-    /// the cursor": each write publishes after its own commit, so a lower
-    /// revision's event may arrive after a higher one's.
-    caught_up: HashSet<Revision>,
+    /// Revisions catch-ups delivered whose live events are still to come
+    /// and must not be delivered twice, at most [`CAUGHT_UP_KEPT`] of the
+    /// newest. A set rather than "at most the cursor": each write publishes
+    /// after its own commit, so a lower revision's event may arrive after a
+    /// higher one's. A copy forgotten here is delivered twice, which a
+    /// client keeping the highest revision per comment ignores.
+    caught_up: BTreeSet<Revision>,
 }
 
 impl CommentFeed {
@@ -386,7 +391,11 @@ impl CommentFeed {
             return Ok(None);
         };
         self.cursor = self.cursor.max(last.revision);
-        self.caught_up = changes.iter().map(|view| view.revision).collect();
+        self.caught_up
+            .extend(changes.iter().map(|view| view.revision));
+        while self.caught_up.len() > CAUGHT_UP_KEPT {
+            self.caught_up.pop_first();
+        }
         Ok(Some(FeedItem::Comments {
             changes,
             priority: false,
@@ -625,6 +634,23 @@ mod tests {
 
         assert_eq!(revisions(&next(&mut feed).await), [4, 5, 6]);
         assert_eq!(revisions(&next(&mut feed).await), [7]);
+    }
+
+    #[tokio::test]
+    async fn live_copies_of_an_earlier_catch_up_are_not_repeated() {
+        let store = Store::with(3);
+        let (bus, tx) = Bus::new();
+        let mut feed = open(&store, &bus, Some(1)).await.unwrap();
+        assert_eq!(revisions(&next(&mut feed).await), [2, 3]);
+
+        *store.stored.lock().unwrap() = 5;
+        tx.send(Delivery::Missed).unwrap();
+        assert_eq!(revisions(&next(&mut feed).await), [4, 5]);
+
+        for n in [2, 3, 4, 5, 6] {
+            tx.send(live(n)).unwrap();
+        }
+        assert_eq!(revisions(&next(&mut feed).await), [6]);
     }
 
     #[tokio::test]
