@@ -520,3 +520,26 @@ async fn webhook_rechecks_are_audited_without_the_payment_key(pool: PgPool) {
         "a payment key reached the logs"
     );
 }
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_confirm_of_someone_elses_order_is_audited_once_as_forbidden(pool: PgPool) {
+    let (logs, _guard) = LogBuffer::capture();
+    let (router, broadcast) = donation_shop(&pool, Arc::default()).await;
+    let viewer = sign_up(&router, "viewer", PASSWORD).await.token();
+    let other = sign_up(&router, "other", PASSWORD).await.token();
+    let order = ordered(&router, &broadcast, &viewer, 5000).await;
+
+    let reply = confirm(&router, &other, &order, "tgen_someone_elses", 5000).await;
+
+    assert_eq!(
+        (reply.status, reply.code()),
+        (StatusCode::FORBIDDEN, "NOT_DONOR")
+    );
+    assert_eq!(logs.audits("forbidden").len(), 1, "{}", logs.contents());
+    assert!(
+        logs.audits("payment_rejected").is_empty(),
+        "{}",
+        logs.contents()
+    );
+}

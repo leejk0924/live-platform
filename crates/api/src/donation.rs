@@ -26,7 +26,7 @@ use axum::{
 };
 use domain::{
     donation::{DonationError, DonationId},
-    error::DomainError,
+    error::{DomainError, ErrorKind},
     id::SnowflakeId,
     secret::Secret,
 };
@@ -439,6 +439,8 @@ fn audit_refused_confirm(order_id: &str, err: &Error) {
         }
         Error::PaymentRejected { code } => code.clone(),
         Error::GatewayUnavailable(_) => "gateway_unavailable".to_owned(),
+        // The 403 is audited as `forbidden` by the trace middleware already.
+        Error::Rejected(err) if err.kind() == ErrorKind::Forbidden => return,
         Error::Rejected(err) => err.code().to_ascii_lowercase(),
         Error::RateLimited(_) => "rate_limited".to_owned(),
         Error::Internal(_) => "internal".to_owned(),
