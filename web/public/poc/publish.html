@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PoC 송출</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 16px; max-width: 720px; }
+  fieldset { margin-bottom: 12px; }
+  label { display: block; margin: 4px 0; }
+  video { width: 100%; background: #000; }
+  pre { background: #f3f3f3; padding: 8px; white-space: pre-wrap; }
+  button { font-size: 16px; padding: 8px 16px; margin-right: 8px; }
+</style>
+</head>
+<body>
+<h1>PoC 송출 (WHIP)</h1>
+<fieldset>
+  <label>소스
+    <select id="source">
+      <option value="screen">화면 + 탭 소리 + 마이크 (PC Chrome)</option>
+      <option value="camera">카메라 + 마이크 (모바일)</option>
+    </select>
+  </label>
+  <label>경로 <input id="path" value="poc"></label>
+  <label>사용자 <input id="user" value="poc" autocomplete="username"></label>
+  <label>비밀번호 <input id="pass" type="password" autocomplete="current-password"></label>
+</fieldset>
+<button id="start">송출 시작</button><button id="stop" disabled>중지</button>
+<p id="state">대기</p>
+<video id="preview" autoplay muted playsinline></video>
+<h2>송출 통계 (1초 간격)</h2>
+<pre id="stats">-</pre>
+<p><a href="play.html">시청 페이지</a></p>
+<script type="module">
+import { TARGET, mediaUrl, negotiate, preferCodec, rtpSampler } from './webrtc.js'
+
+const $ = (id) => document.getElementById(id)
+let session = null
+
+const videoConstraints = {
+  height: { ideal: TARGET.height },
+  frameRate: { ideal: TARGET.fps, max: TARGET.fps },
+}
+
+// Tab audio and the microphone arrive as two tracks; WHIP carries one audio track, so they are summed in Web Audio.
+function mixAudio(tracks) {
+  if (tracks.length < 2) return { track: tracks[0], close: () => {} }
+  const ctx = new AudioContext()
+  const dest = ctx.createMediaStreamDestination()
+  for (const t of tracks) ctx.createMediaStreamSource(new MediaStream([t])).connect(dest)
+  return { track: dest.stream.getAudioTracks()[0], close: () => ctx.close() }
+}
+
+async function capture(source) {
+  if (source === 'camera') {
+    const cam = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', ...videoConstraints },
+      audio: true,
+    })
+    return { video: cam.getVideoTracks()[0], audio: cam.getAudioTracks(), owned: cam.getTracks() }
+  }
+  const screen = await navigator.mediaDevices.getDisplayMedia({
+    video: videoConstraints,
+    audio: { suppressLocalAudioPlayback: false },
+    systemAudio: 'include',
+  })
+  const mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true } })
+  return {
+    video: screen.getVideoTracks()[0],
+    audio: [...screen.getAudioTracks(), ...mic.getAudioTracks()],
+    owned: [...screen.getTracks(), ...mic.getTracks()],
+  }
+}
+
+// Passthrough has no server-side transcoding, so the sender is the only place the 720p30 / 2.5Mbps budget can hold.
+async function capSender(sender, track) {
+  const { height = TARGET.height } = track.getSettings()
+  const params = sender.getParameters()
+  params.encodings = params.encodings?.length ? params.encodings : [{}]
+  Object.assign(params.encodings[0], {
+    maxBitrate: TARGET.maxBitrate,
+    maxFramerate: TARGET.fps,
+    scaleResolutionDownBy: Math.max(1, height / TARGET.height),
+  })
+  if (track.contentHint === 'detail') params.degradationPreference = 'maintain-resolution'
+  await sender.setParameters(params)
+  return params.encodings[0]
+}
+
+async function start() {
+  const source = $('source').value
+  const path = $('path').value
+  $('state').textContent = '캡처 중'
+  const media = await capture(source)
+  if (source === 'screen') media.video.contentHint = 'detail'
+  const audio = mixAudio(media.audio)
+
+  const pc = new RTCPeerConnection()
+  const vt = pc.addTransceiver(media.video, { direction: 'sendonly' })
+  const h264 = preferCodec(vt, 'video/H264')
+  pc.addTransceiver(audio.track, { direction: 'sendonly' })
+
+  $('preview').srcObject = new MediaStream([media.video])
+  $('state').textContent = '연결 중'
+  const auth = 'Basic ' + btoa(`${$('user').value}:${$('pass').value}`)
+  const location = await negotiate(pc, `${mediaUrl('webrtc', path)}/whip`, { Authorization: auth })
+  const cap = await capSender(vt.sender, media.video)
+
+  const sample = rtpSampler(pc, 'outbound-rtp')
+  const timer = setInterval(async () => {
+    const s = await sample()
+    const settings = media.video.getSettings()
+    $('stats').textContent = JSON.stringify({
+      source,
+      h264Preferred: h264,
+      audioTracksMixed: media.audio.length,
+      capture: { width: settings.width, height: settings.height, fps: settings.frameRate },
+      senderCap: cap,
+      sent: s,
+      ice: pc.iceConnectionState,
+    }, null, 2)
+  }, 1000)
+
+  session = { pc, location, auth, timer, close: audio.close, tracks: media.owned }
+  media.video.addEventListener('ended', stop)
+  $('state').textContent = `송출 중: ${path}`
+  $('start').disabled = true
+  $('stop').disabled = false
+}
+
+async function stop() {
+  if (!session) return
+  const { pc, location, auth, timer, close, tracks } = session
+  session = null
+  clearInterval(timer)
+  if (location) await fetch(location, { method: 'DELETE', headers: { Authorization: auth } }).catch(() => {})
+  pc.close()
+  close()
+  tracks.forEach((t) => t.stop())
+  $('state').textContent = '중지됨'
+  $('start').disabled = false
+  $('stop').disabled = true
+}
+
+$('start').onclick = () => start().catch((e) => { $('state').textContent = `실패: ${e.message}` })
+$('stop').onclick = stop
+</script>
+</body>
+</html>
