@@ -1,0 +1,42 @@
+{
+  "itemCount": 1,
+  "pageCount": 1,
+  "items": [
+    {
+      "name": "live/112845401270296576",
+      "confName": "all_others",
+      "ready": true,
+      "readyTime": "2026-11-08T09:27:22.990172537Z",
+      "available": true,
+      "availableTime": "2026-11-08T09:27:22.990172537Z",
+      "online": true,
+      "onlineTime": "2026-11-08T09:27:22.991136371Z",
+      "source": {
+        "type": "webRTCSession",
+        "id": "00000000-0000-0000-0000-000000000000"
+      },
+      "tracks": [
+        "VP8",
+        "Opus"
+      ],
+      "tracks2": [
+        {
+          "codec": "VP8",
+          "codecProps": null
+        },
+        {
+          "codec": "Opus",
+          "codecProps": {
+            "channelCount": 1
+          }
+        }
+      ],
+      "readers": [],
+      "inboundBytes": 3684,
+      "outboundBytes": 0,
+      "inboundFramesInError": 0,
+      "bytesReceived": 3684,
+      "bytesSent": 0
+    }
+  ]
+}

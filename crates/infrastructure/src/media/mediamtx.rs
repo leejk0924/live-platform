@@ -190,6 +190,22 @@ mod tests {
         assert_eq!(MediaMtxIngestRouter.broadcast_of(&endpoint.path), Some(id));
     }
 
+    /// Captured from the Control API of the MediaMTX image in compose while
+    /// one WHIP publisher was on air.
+    #[test]
+    fn a_paths_list_from_mediamtx_1_21_3_names_the_path_on_air() {
+        let page: PathPage =
+            serde_json::from_str(include_str!("testdata/mediamtx-1.21.3-paths-list.json")).unwrap();
+        assert_eq!(page.page_count, 1);
+        let on_air: Vec<_> = page
+            .items
+            .iter()
+            .filter(|path| path.available)
+            .map(|path| path.name.as_str())
+            .collect();
+        assert_eq!(on_air, ["live/112845401270296576"]);
+    }
+
     #[test]
     fn only_paths_the_router_would_produce_name_a_broadcast() {
         for raw in [
