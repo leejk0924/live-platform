@@ -85,6 +85,23 @@ export async function publish(capture: Capture, whipUrl: string, token: string):
   }
 }
 
+// How long a `disconnected` peer may take to come back before it counts as lost.
+const RECONNECT_GRACE_MS = 5000
+
+// Calls `onLost` once the media server is gone for good: it refused the publisher (someone else
+// is publishing), kicked it, the token expired, or the network did not come back in time.
+// A peer closed locally fires no event, so `close()` never reports itself.
+export function watchConnection(peer: RTCPeerConnection, onLost: () => void) {
+  let grace: number | undefined
+  const check = () => {
+    window.clearTimeout(grace)
+    if (peer.connectionState === 'failed') onLost()
+    else if (peer.connectionState === 'disconnected') grace = window.setTimeout(onLost, RECONNECT_GRACE_MS)
+  }
+  peer.addEventListener('connectionstatechange', check)
+  check()
+}
+
 // Turns the cumulative video byte counter into a per-interval rate.
 export function videoStatsSampler(peer: RTCPeerConnection): () => Promise<SendStats | null> {
   let last: { bytes: number; at: number } | null = null

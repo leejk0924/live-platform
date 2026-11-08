@@ -3,7 +3,7 @@ import { broadcastApi } from '../../api/broadcasts.ts'
 import { errorMessage } from '../../api/client.ts'
 import type { Broadcast } from '../../api/types.ts'
 import { canCaptureScreen, captureScreen, type Capture } from './capture.ts'
-import { publish, videoStatsSampler, WhipError, type Publication, type SendStats } from './whip.ts'
+import { publish, videoStatsSampler, watchConnection, WhipError, type Publication, type SendStats } from './whip.ts'
 
 type Phase =
   | { kind: 'idle' }
@@ -101,6 +101,15 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
         setPhase((p) => (p.kind === 'publishing' ? { kind: 'publishing', stats } : p))
       }, 1000)
       setPhase({ kind: 'publishing', stats: null })
+      // The broadcast stays LIVE: a dropped connection is not the owner ending the show.
+      watchConnection(publication.peer, () => {
+        if (session.current?.publication !== publication) return
+        release()
+        setNotice(null)
+        setError('송출 서버와의 연결이 끊겼습니다. 다른 곳에서 이미 송출 중이거나 네트워크가 끊겼을 수 있습니다.')
+        setPhase({ kind: 'idle' })
+        onChanged()
+      })
     } catch (e) {
       release()
       setError(failureMessage(e))
