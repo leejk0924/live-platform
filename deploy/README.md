@@ -77,7 +77,7 @@ chmod 600 .env
 | `PUBLIC_IP` | 서버 공인 IP (WebRTC ICE 후보로 쓰인다) |
 | `DEMO_LOGIN_ENABLED` | 데모 계정 로그인을 열려면 `true`, 아니면 `false` |
 | `PUBLISH_JWT_PRIVATE_KEY` | `openssl rand -base64 32` 결과. 송출 토큰 서명 키라 API만 가진다. 송출 허가는 MediaMTX가 매번 API에 묻기 때문에 바꿔도 MediaMTX를 재시작할 필요가 없다. 바꾸기 전에 발급한 토큰(유효 60초)만 거부된다 |
-| `MEDIA_HOOK_SECRET` | `openssl rand -hex 32` 결과. MediaMTX가 API의 `/internal/media/*`(송출 허가, 송출 시작·끊김 알림)를 부를 때 내는 공유 비밀값이다. api와 mediamtx 둘 다 쓰므로 바꾼 뒤 `deploy.sh`로 둘을 함께 다시 띄운다 |
+| `MEDIA_HOOK_SECRET` | `openssl rand -hex 32` 결과. MediaMTX가 API의 `/internal/media/*`(송출 허가, 송출 시작·끊김 알림)를 부를 때 내는 공유 비밀값이다. api와 mediamtx 둘 다 쓰므로 바꾼 뒤 `deploy.sh`로 둘을 함께 다시 띄운다. mediamtx 컨테이너의 환경 변수와 hook 명령 인자에 그대로 들어가므로 서버에 접근할 수 있는 사람(`docker inspect`, 프로세스 목록)은 이 값을 볼 수 있다. 서버 접근 권한이 새었다고 의심되면 이 값도 바꾼다 |
 
 ```bash
 bash deploy/deploy.sh prod
