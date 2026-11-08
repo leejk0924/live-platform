@@ -67,6 +67,14 @@ impl EventHub {
         }
     }
 
+    /// Tells the broadcast's subscriptions they may have missed events.
+    pub fn miss(&self, broadcast: BroadcastId) {
+        let topics = self.topics.lock().expect("hub lock");
+        if let Some(topic) = topics.as_ref().and_then(|t| t.get(&broadcast)) {
+            let _ = topic.sender.send(Delivery::Missed);
+        }
+    }
+
     /// Tells every subscription it may have missed events.
     pub fn miss_all(&self) {
         let topics = self.topics.lock().expect("hub lock");
@@ -296,6 +304,9 @@ impl EventBus for PgEventBus {
             .await;
         if let Err(err) = sent {
             tracing::warn!(%err, %broadcast, bytes = payload.len(), "broadcast event not published");
+            // Followers here catch up from the store; those on other
+            // instances only at their next miss.
+            self.hub.miss(broadcast);
         }
     }
 

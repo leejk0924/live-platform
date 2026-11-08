@@ -196,3 +196,26 @@ async fn subscriptions_end_when_the_listener_stops(pool: PgPool) {
         assert!(matches!(ended, Ok(None)), "got {ended:?}");
     }
 }
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn an_event_that_cannot_be_sent_is_a_local_miss(pool: PgPool) {
+    // The listener holds the only connection, so publishing finds none.
+    let single = PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_millis(200))
+        .connect_lazy_with(pool.connect_options().as_ref().clone());
+    let (bus, listener) = PgEventBus::start(single).await.unwrap();
+    let mut subscription = bus.subscribe(id(1));
+    let mut other_broadcast = bus.subscribe(id(2));
+
+    bus.publish(comment(1, 7, "lost")).await;
+    assert!(matches!(next(&mut subscription).await, Delivery::Missed));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), other_broadcast.next())
+            .await
+            .is_err(),
+        "only the broadcast whose event was lost"
+    );
+    listener.shutdown().await;
+}
