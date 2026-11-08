@@ -7,14 +7,14 @@ use application::ports::{
     PortError,
     auth::{Inserted, PasswordHasher, SessionStore, UserRepository},
     broadcast::{
-        BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, PublisherPresence,
-        TransitionRejection, WriteRejection,
+        BroadcastQuery, BroadcastRepository, BroadcastView, ListFilter, NewBroadcast,
+        PublisherPresence, TransitionRejection, WriteRejection,
     },
     id::{IdGenerationError, IdGenerator},
     media::{
-        IngestEndpoint, IngestRouter, MediaCredentialVerifier, PublishAuthorizer,
-        PublishCredential, PublishTicket, PublishTicketLedger, RedeemRejection, StreamPath,
-        StreamTerminator,
+        IngestEndpoint, IngestRouter, MediaCredentialVerifier, PlaybackResolver, PlaybackSource,
+        PublishAuthorizer, PublishCredential, PublishTicket, PublishTicketLedger, RedeemRejection,
+        StreamPath, StreamTerminator,
     },
 };
 use async_trait::async_trait;
@@ -143,7 +143,12 @@ impl PublisherPresence for Unavailable {
 
 #[async_trait]
 impl BroadcastQuery for Unavailable {
-    async fn list(&self, _: Option<BroadcastId>, _: u32) -> Result<Vec<BroadcastView>, PortError> {
+    async fn list(
+        &self,
+        _: ListFilter,
+        _: Option<BroadcastId>,
+        _: u32,
+    ) -> Result<Vec<BroadcastView>, PortError> {
         unavailable()
     }
 
@@ -158,6 +163,12 @@ impl IngestRouter for Unavailable {
     }
 
     fn broadcast_of(&self, _: &StreamPath) -> Option<BroadcastId> {
+        unreachable!("not available in this test")
+    }
+}
+
+impl PlaybackResolver for Unavailable {
+    fn resolve(&self, _: &StreamPath) -> Vec<PlaybackSource> {
         unreachable!("not available in this test")
     }
 }
@@ -212,6 +223,7 @@ pub fn test_state() -> AppState {
         repository: Arc::new(Unavailable),
         query: Arc::new(Unavailable),
         ingest: Arc::new(Unavailable),
+        playback: Arc::new(Unavailable),
         authorizer: Arc::new(Unavailable),
         terminator: Arc::new(Unavailable),
         verifier: Arc::new(Unavailable),

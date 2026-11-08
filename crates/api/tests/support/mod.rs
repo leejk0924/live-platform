@@ -26,7 +26,7 @@ use domain::secret::Secret;
 use infrastructure::{
     auth::{Argon2Hasher, BreachedPasswordList},
     id::SnowflakeIdGenerator,
-    media::{JwtPublishAuthorizer, MediaMtxIngestRouter, PublishKey},
+    media::{JwtPublishAuthorizer, MediaMtxIngestRouter, MediaMtxPlaybackResolver, PublishKey},
     persistence::{
         PgBroadcastQuery, PgBroadcastRepository, PgPublishTicketLedger, PgSessionStore,
         PgUserRepository, PgWorkerIdAllocator,
@@ -116,6 +116,7 @@ pub async fn live_state_with(
         repository: broadcasts.clone(),
         query: Arc::new(PgBroadcastQuery::new(pool.clone())),
         ingest: Arc::new(MediaMtxIngestRouter),
+        playback: Arc::new(MediaMtxPlaybackResolver),
         authorizer: tokens.clone(),
         terminator,
         verifier: tokens,

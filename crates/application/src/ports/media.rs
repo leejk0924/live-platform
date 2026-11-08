@@ -42,6 +42,24 @@ pub trait IngestRouter: Send + Sync {
     fn broadcast_of(&self, path: &StreamPath) -> Option<BroadcastId>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaybackKind {
+    LlHls,
+    Whep,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaybackSource {
+    pub kind: PlaybackKind,
+    pub url: String,
+}
+
+/// Where viewers fetch a stream. Order is preference: the first is the
+/// default.
+pub trait PlaybackResolver: Send + Sync {
+    fn resolve(&self, path: &StreamPath) -> Vec<PlaybackSource>;
+}
+
 /// What a publisher presents to the media server. An enum so a media backend
 /// with its own credential shape can be added without changing callers.
 #[derive(Debug)]

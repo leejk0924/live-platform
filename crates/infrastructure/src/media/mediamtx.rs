@@ -1,11 +1,14 @@
-//! MediaMTX as the media server: stream paths, WHIP URLs, and its Control
+//! MediaMTX as the media server: stream paths, WHIP and playback URLs, and its Control
 //! API for kicking publishers and listing the streams on air.
 
 use std::{sync::Arc, time::Duration};
 
 use application::ports::{
     PortError,
-    media::{IngestEndpoint, IngestRouter, StreamPath, StreamProbe, StreamTerminator},
+    media::{
+        IngestEndpoint, IngestRouter, PlaybackKind, PlaybackResolver, PlaybackSource, StreamPath,
+        StreamProbe, StreamTerminator,
+    },
 };
 use async_trait::async_trait;
 use domain::broadcast::BroadcastId;
@@ -29,6 +32,29 @@ impl IngestRouter for MediaMtxIngestRouter {
     fn broadcast_of(&self, path: &StreamPath) -> Option<BroadcastId> {
         let id: BroadcastId = path.as_str().strip_prefix("live/")?.parse().ok()?;
         (self.route(id).path == *path).then_some(id)
+    }
+}
+
+/// Same-origin URLs through Caddy, which forwards `/media/hls/*` and
+/// `/media/webrtc/*` to MediaMTX. Reading needs no credential.
+pub struct MediaMtxPlaybackResolver;
+
+impl PlaybackResolver for MediaMtxPlaybackResolver {
+    /// LL-HLS first, so it is the default: only LL-HLS scales through a CDN,
+    /// while every WHEP viewer holds a WebRTC session on the media server
+    /// (ADR media/1).
+    fn resolve(&self, path: &StreamPath) -> Vec<PlaybackSource> {
+        let path = path.as_str();
+        vec![
+            PlaybackSource {
+                kind: PlaybackKind::LlHls,
+                url: format!("/media/hls/{path}/index.m3u8"),
+            },
+            PlaybackSource {
+                kind: PlaybackKind::Whep,
+                url: format!("/media/webrtc/{path}/whep"),
+            },
+        ]
     }
 }
 
@@ -188,6 +214,25 @@ mod tests {
             "/media/webrtc/live/112007303372210176/whip"
         );
         assert_eq!(MediaMtxIngestRouter.broadcast_of(&endpoint.path), Some(id));
+    }
+
+    #[test]
+    fn viewers_get_ll_hls_then_whep_through_the_media_prefix() {
+        let id = BroadcastId::try_from(112007303372210176).unwrap();
+        let sources = MediaMtxPlaybackResolver.resolve(&MediaMtxIngestRouter.route(id).path);
+        assert_eq!(
+            sources,
+            [
+                PlaybackSource {
+                    kind: PlaybackKind::LlHls,
+                    url: "/media/hls/live/112007303372210176/index.m3u8".into(),
+                },
+                PlaybackSource {
+                    kind: PlaybackKind::Whep,
+                    url: "/media/webrtc/live/112007303372210176/whep".into(),
+                },
+            ]
+        );
     }
 
     /// Captured from the Control API of the MediaMTX image in compose while

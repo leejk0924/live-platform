@@ -11,13 +11,16 @@ use application::{
     },
     live::{StartBroadcast, StopBroadcast},
     media::{AdmitMediaAccess, TrackPublisher},
+    playback::ResolvePlayback,
     ports::{
         auth::UserRepository,
-        broadcast::{BroadcastQuery, BroadcastRepository, BroadcastView, PublisherPresence},
+        broadcast::{
+            BroadcastQuery, BroadcastRepository, BroadcastView, ListFilter, PublisherPresence,
+        },
         id::IdGenerator,
         media::{
-            IngestRouter, MediaCredentialVerifier, PublishAuthorizer, PublishTicketLedger,
-            StreamTerminator,
+            IngestRouter, MediaCredentialVerifier, PlaybackResolver, PublishAuthorizer,
+            PublishTicketLedger, StreamTerminator,
         },
     },
 };
@@ -57,6 +60,7 @@ pub struct BroadcastUseCases {
     pub list: ListBroadcasts,
     pub start: StartBroadcast,
     pub stop: StopBroadcast,
+    pub playback: ResolvePlayback,
     /// Answers MediaMTX's question whether to let a publisher in.
     pub admit: AdmitMediaAccess,
     /// Follows MediaMTX's reports that a publisher arrived or left.
@@ -68,6 +72,7 @@ pub struct BroadcastPorts {
     pub repository: Arc<dyn BroadcastRepository>,
     pub query: Arc<dyn BroadcastQuery>,
     pub ingest: Arc<dyn IngestRouter>,
+    pub playback: Arc<dyn PlaybackResolver>,
     pub authorizer: Arc<dyn PublishAuthorizer>,
     pub terminator: Arc<dyn StreamTerminator>,
     pub verifier: Arc<dyn MediaCredentialVerifier>,
@@ -85,6 +90,7 @@ impl BroadcastUseCases {
             repository,
             query,
             ingest,
+            playback,
             authorizer,
             terminator,
             verifier,
@@ -118,6 +124,11 @@ impl BroadcastUseCases {
                 presence,
                 ingest: ingest.clone(),
                 terminator: terminator.clone(),
+            },
+            playback: ResolvePlayback {
+                query: query.clone(),
+                ingest: ingest.clone(),
+                resolver: playback,
             },
             stop: StopBroadcast {
                 broadcasts: repository,
@@ -272,6 +283,9 @@ pub struct ListParams {
     /// Page size, 1 to 50. Defaults to 20.
     #[param(minimum = 1, maximum = 50)]
     limit: Option<u32>,
+    /// `true`: only `LIVE` and `INTERRUPTED`. `false`: only `READY` and
+    /// `ENDED`. Absent: all.
+    live: Option<bool>,
 }
 
 /// `body` plus its version as the `ETag`.
@@ -303,10 +317,15 @@ pub(crate) async fn list(
         .map(|raw| raw.parse::<BroadcastId>())
         .transpose()
         .map_err(|_| ApiError::invalid_query())?;
+    let filter = match params.live {
+        None => ListFilter::All,
+        Some(true) => ListFilter::OnAir,
+        Some(false) => ListFilter::OffAir,
+    };
     let page = state
         .broadcasts
         .list
-        .run(before, params.limit)
+        .run(filter, before, params.limit)
         .await
         .map_err(api_error)?;
     Ok((

@@ -3,8 +3,8 @@ use std::time::SystemTime;
 use application::ports::{
     PortError,
     broadcast::{
-        BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, PublisherPresence,
-        TransitionRejection, WriteRejection,
+        BroadcastQuery, BroadcastRepository, BroadcastView, ListFilter, NewBroadcast,
+        PublisherPresence, TransitionRejection, WriteRejection,
     },
 };
 use async_trait::async_trait;
@@ -339,18 +339,27 @@ fn to_view(
 impl BroadcastQuery for PgBroadcastQuery {
     async fn list(
         &self,
+        filter: ListFilter,
         before: Option<BroadcastId>,
         limit: u32,
     ) -> Result<Vec<BroadcastView>, PortError> {
+        let on_air = match filter {
+            ListFilter::All => None,
+            ListFilter::OnAir => Some(true),
+            ListFilter::OffAir => Some(false),
+        };
         sqlx::query_as::<_, ViewRow>(concat!(
             "SELECT ",
             columns!(),
             ", u.username FROM broadcasts b JOIN users u ON u.id = b.owner_id \
              WHERE b.deleted_at IS NULL AND ($1::BIGINT IS NULL OR b.id < $1) \
+             AND ($3::BOOLEAN IS NULL OR (b.status = ANY($4)) = $3) \
              ORDER BY b.id DESC LIMIT $2"
         ))
         .bind(before.map(SnowflakeId::as_i64))
         .bind(i64::from(limit))
+        .bind(on_air)
+        .bind(status_names(&BroadcastStatus::ACTIVE))
         .fetch_all(&self.pool)
         .await
         .map_err(port_error)?

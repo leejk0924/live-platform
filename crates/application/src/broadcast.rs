@@ -16,7 +16,10 @@ use thiserror::Error;
 use crate::ports::{
     PortError,
     auth::UserRepository,
-    broadcast::{BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, WriteRejection},
+    broadcast::{
+        BroadcastQuery, BroadcastRepository, BroadcastView, ListFilter, NewBroadcast,
+        WriteRejection,
+    },
     id::{IdGenerationError, IdGenerator},
 };
 
@@ -145,14 +148,19 @@ pub struct ListBroadcasts {
 
 impl ListBroadcasts {
     /// The same for every viewer, so responses may be shared by caches.
-    pub async fn run(&self, before: Option<BroadcastId>, size: Option<u32>) -> Result<Page, Error> {
+    pub async fn run(
+        &self,
+        filter: ListFilter,
+        before: Option<BroadcastId>,
+        size: Option<u32>,
+    ) -> Result<Page, Error> {
         let size = size.unwrap_or(PAGE_SIZE_DEFAULT);
         if !(1..=PAGE_SIZE_MAX).contains(&size) {
             return Err(BroadcastError::InvalidPageSize.into());
         }
         // One extra row tells whether a next page exists, so the last page
         // never links to an empty one.
-        let mut items = self.query.list(before, size + 1).await?;
+        let mut items = self.query.list(filter, before, size + 1).await?;
         let has_more = items.len() > size as usize;
         items.truncate(size as usize);
         let next_before = if has_more {
@@ -203,6 +211,7 @@ mod tests {
     impl BroadcastQuery for Stored {
         async fn list(
             &self,
+            _: ListFilter,
             before: Option<BroadcastId>,
             limit: u32,
         ) -> Result<Vec<BroadcastView>, PortError> {
@@ -219,7 +228,7 @@ mod tests {
         ListBroadcasts {
             query: Arc::new(Stored(total)),
         }
-        .run(before.map(id), size)
+        .run(ListFilter::All, before.map(id), size)
         .await
     }
 

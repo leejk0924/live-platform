@@ -4,4 +4,4 @@ pub mod jwt;
 pub mod mediamtx;
 
 pub use jwt::{InvalidPublishKey, JwtPublishAuthorizer, PublicJwk, PublishKey};
-pub use mediamtx::{MediaMtxControlApi, MediaMtxIngestRouter};
+pub use mediamtx::{MediaMtxControlApi, MediaMtxIngestRouter, MediaMtxPlaybackResolver};

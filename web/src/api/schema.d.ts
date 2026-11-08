@@ -160,6 +160,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/broadcasts/{id}/playback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Where to watch a live or interrupted broadcast */
+        get: operations["getPlayback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/broadcasts/{id}/start": {
         parameters: {
             query?: never;
@@ -274,6 +291,16 @@ export interface components {
         };
         Jwks: {
             keys: components["schemas"]["Jwk"][];
+        };
+        /** @enum {string} */
+        PlaybackKind: "ll-hls" | "whep";
+        PlaybackSource: {
+            kind: components["schemas"]["PlaybackKind"];
+            /**
+             * @description Same-origin URL.
+             * @example /media/hls/live/112007303372210176/index.m3u8
+             */
+            url: string;
         };
         PublishGrant: {
             /**
@@ -609,6 +636,11 @@ export interface operations {
                 before?: string;
                 /** @description Page size, 1 to 50. Defaults to 20. */
                 limit?: number;
+                /**
+                 * @description `true`: only `LIVE` and `INTERRUPTED`. `false`: only `READY` and
+                 *     `ENDED`. Absent: all.
+                 */
+                live?: boolean;
             };
             header?: never;
             path?: never;
@@ -851,6 +883,49 @@ export interface operations {
                 };
             };
             /** @description `BROADCAST_NOT_DELETABLE`: live or interrupted */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    getPlayback: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Broadcast id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sources in order of preference; the first is the default. An `INTERRUPTED` broadcast keeps its sources while its publisher may come back. */
+            200: {
+                headers: {
+                    /** @description `public, max-age=5` */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaybackSource"][];
+                };
+            };
+            /** @description `BROADCAST_NOT_FOUND`, also for deleted broadcasts */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `BROADCAST_NOT_LIVE`: ready or ended */
             409: {
                 headers: {
                     [name: string]: unknown;

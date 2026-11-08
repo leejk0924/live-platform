@@ -170,12 +170,24 @@ pub struct BroadcastView {
     pub owner_name: Username,
 }
 
+/// Which broadcasts a list holds, by whether they are on air.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListFilter {
+    All,
+    /// In [`BroadcastStatus::ACTIVE`].
+    OnAir,
+    /// Not in [`BroadcastStatus::ACTIVE`].
+    OffAir,
+}
+
 /// The read side. Deleted broadcasts are never returned.
 #[async_trait]
 pub trait BroadcastQuery: Send + Sync {
-    /// Newest first, only ids below `before` when given, at most `limit`.
+    /// Newest first, only those `filter` admits, only ids below `before`
+    /// when given, at most `limit`.
     async fn list(
         &self,
+        filter: ListFilter,
         before: Option<BroadcastId>,
         limit: u32,
     ) -> Result<Vec<BroadcastView>, PortError>;

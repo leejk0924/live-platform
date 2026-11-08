@@ -15,30 +15,6 @@ type Feed = {
 
 export default function Home() {
   const { auth } = useAuth()
-  const [feed, setFeed] = useState<Feed>({ items: [], nextBefore: null, loading: true, error: null })
-
-  useEffect(() => {
-    let active = true
-    broadcastApi.list().then(
-      (page) => active && setFeed({ items: page.items, nextBefore: page.nextBefore, loading: false, error: null }),
-      (e: unknown) => active && setFeed((f) => ({ ...f, loading: false, error: errorMessage(e) })),
-    )
-    return () => {
-      active = false
-    }
-  }, [])
-
-  async function loadMore(before: string) {
-    setFeed((f) => ({ ...f, loading: true, error: null }))
-    try {
-      const page = await broadcastApi.list(before)
-      setFeed((f) => ({ items: [...f.items, ...page.items], nextBefore: page.nextBefore, loading: false, error: null }))
-    } catch (e) {
-      setFeed((f) => ({ ...f, loading: false, error: errorMessage(e) }))
-    }
-  }
-
-  const { nextBefore } = feed
 
   return (
     <>
@@ -50,10 +26,45 @@ export default function Home() {
           </Link>
         )}
       </div>
+      <BroadcastFeed live title="방송 중" empty="지금 방송 중인 방송이 없습니다." />
+      <BroadcastFeed live={false} title="지난·예정 방송" empty="지난 방송이나 예정된 방송이 없습니다." />
+    </>
+  )
+}
+
+function BroadcastFeed({ live, title, empty }: { live: boolean; title: string; empty: string }) {
+  const [feed, setFeed] = useState<Feed>({ items: [], nextBefore: null, loading: true, error: null })
+
+  useEffect(() => {
+    let active = true
+    broadcastApi.list({ live }).then(
+      (page) => active && setFeed({ items: page.items, nextBefore: page.nextBefore, loading: false, error: null }),
+      (e: unknown) => active && setFeed((f) => ({ ...f, loading: false, error: errorMessage(e) })),
+    )
+    return () => {
+      active = false
+    }
+  }, [live])
+
+  async function loadMore(before: string) {
+    setFeed((f) => ({ ...f, loading: true, error: null }))
+    try {
+      const page = await broadcastApi.list({ live, before })
+      setFeed((f) => ({ items: [...f.items, ...page.items], nextBefore: page.nextBefore, loading: false, error: null }))
+    } catch (e) {
+      setFeed((f) => ({ ...f, loading: false, error: errorMessage(e) }))
+    }
+  }
+
+  const { nextBefore } = feed
+
+  return (
+    <section className="feed" aria-label={title}>
+      <h2>{title}</h2>
       {feed.items.length > 0 && (
         <ul className="broadcast-list">
           {feed.items.map((b) => (
-            <li key={b.id}>
+            <li key={b.id} className={`status-${b.status}`}>
               <Link to={`/broadcasts/${b.id}`}>
                 <span className="broadcast-title">{b.title}</span>
                 <span className="broadcast-meta">
@@ -64,7 +75,7 @@ export default function Home() {
           ))}
         </ul>
       )}
-      {!feed.loading && !feed.error && feed.items.length === 0 && <p>아직 방송이 없습니다.</p>}
+      {!feed.loading && !feed.error && feed.items.length === 0 && <p>{empty}</p>}
       {feed.loading && <p>불러오는 중…</p>}
       {feed.error && (
         <p className="error" role="alert">
@@ -76,6 +87,6 @@ export default function Home() {
           더 보기
         </button>
       )}
-    </>
+    </section>
   )
 }

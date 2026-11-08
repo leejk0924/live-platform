@@ -39,12 +39,13 @@ use crate::{auth, broadcast, live};
         broadcast::delete,
         live::start,
         live::stop,
+        live::playback,
         live::jwks,
     ),
     modifiers(&SessionCookie),
     tags(
         (name = "auth", description = "Accounts and sessions"),
-        (name = "broadcasts", description = "Broadcast registration, browsing, going live and ending"),
+        (name = "broadcasts", description = "Broadcast registration, browsing, going live, ending and watching"),
     ),
 )]
 pub struct ApiDoc;

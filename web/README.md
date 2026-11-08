@@ -6,6 +6,7 @@ live-platform SPA (Vite + React + TypeScript). Node 24 (`.nvmrc`).
 npm ci
 npm run dev        # http://localhost:5173, proxies /api to http://localhost:8080
 npm run lint
+npm test           # node --test, no extra dependencies
 npm run typecheck
 npm run build      # outputs dist/
 ```

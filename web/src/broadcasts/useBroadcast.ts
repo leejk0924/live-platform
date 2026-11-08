@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { broadcastApi } from '../api/broadcasts.ts'
-import type { Broadcast } from '../api/types.ts'
-
-export type BroadcastState =
-  | { status: 'loading' }
-  | { status: 'failed'; error: unknown }
-  | { status: 'loaded'; broadcast: Broadcast }
+import { failed, loaded, reloading, type BroadcastState } from './broadcastState.ts'
 
 export function useBroadcast(id: string) {
   const [state, setState] = useState<BroadcastState>({ status: 'loading' })
@@ -14,15 +9,18 @@ export function useBroadcast(id: string) {
   useEffect(() => {
     let active = true
     broadcastApi.get(id).then(
-      (broadcast) => active && setState({ status: 'loaded', broadcast }),
-      (error: unknown) => active && setState({ status: 'failed', error }),
+      (broadcast) => active && setState(loaded(broadcast)),
+      (error: unknown) => active && setState((prev) => failed(prev, id, error)),
     )
     return () => {
       active = false
     }
   }, [id, attempt])
 
-  const reload = useCallback(() => setAttempt((n) => n + 1), [])
+  const reload = useCallback(() => {
+    setState(reloading)
+    setAttempt((n) => n + 1)
+  }, [])
 
   return { state, reload }
 }

@@ -1,7 +1,10 @@
-//! Going live and ending a broadcast, and the public key that verifies
-//! publish tokens.
+//! Going live, ending and watching a broadcast, and the public key that
+//! verifies publish tokens.
 
-use application::{live::PublishGrant, ports::media::PublishCredential};
+use application::{
+    live::PublishGrant,
+    ports::media::{PlaybackKind, PlaybackSource, PublishCredential},
+};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -21,6 +24,10 @@ use crate::{
     error::{ApiError, ErrorBody},
 };
 
+/// The same for every viewer. As with the list, a few seconds of staleness
+/// only delays a viewer noticing that the broadcast went live or ended.
+pub const PLAYBACK_CACHE_CONTROL: &str = "public, max-age=5";
+
 /// The key changes only when the operator rotates it, so a short shared cache
 /// costs nothing.
 pub const JWKS_CACHE_CONTROL: &str = "public, max-age=300";
@@ -29,6 +36,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/broadcasts/{id}/start", post(start))
         .route("/broadcasts/{id}/stop", post(stop))
+        .route("/broadcasts/{id}/playback", get(playback))
         .route("/.well-known/jwks.json", get(jwks))
 }
 
@@ -134,6 +142,79 @@ pub(crate) async fn stop(
         .map_err(ApiError::internal)?
         .map_err(api_error)?;
     Ok(tagged(StatusCode::OK, stopped.broadcast))
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "kebab-case")]
+#[schema(as = PlaybackKind)]
+pub enum PlaybackKindDto {
+    /// Low-latency HLS playlist.
+    LlHls,
+    /// WHEP endpoint to POST a WebRTC SDP offer to.
+    Whep,
+}
+
+impl From<PlaybackKind> for PlaybackKindDto {
+    fn from(kind: PlaybackKind) -> Self {
+        match kind {
+            PlaybackKind::LlHls => Self::LlHls,
+            PlaybackKind::Whep => Self::Whep,
+        }
+    }
+}
+
+#[derive(Serialize, ToSchema)]
+#[schema(as = PlaybackSource)]
+pub struct PlaybackSourceDto {
+    kind: PlaybackKindDto,
+    /// Same-origin URL.
+    #[schema(example = "/media/hls/live/112007303372210176/index.m3u8")]
+    url: String,
+}
+
+impl From<PlaybackSource> for PlaybackSourceDto {
+    fn from(source: PlaybackSource) -> Self {
+        Self {
+            kind: source.kind.into(),
+            url: source.url,
+        }
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/broadcasts/{id}/playback",
+    operation_id = "getPlayback",
+    tag = "broadcasts",
+    summary = "Where to watch a live or interrupted broadcast",
+    params(("id" = String, Path, description = "Broadcast id")),
+    responses(
+        (status = 200, body = Vec<PlaybackSourceDto>,
+            description = "Sources in order of preference; the first is the default. An `INTERRUPTED` broadcast keeps its sources while its publisher may come back.",
+            headers(("Cache-Control" = String, description = "`public, max-age=5`"))),
+        (status = 404, body = ErrorBody, description = "`BROADCAST_NOT_FOUND`, also for deleted broadcasts"),
+        (status = 409, body = ErrorBody, description = "`BROADCAST_NOT_LIVE`: ready or ended"),
+    ),
+)]
+pub(crate) async fn playback(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let sources = state
+        .broadcasts
+        .playback
+        .run(broadcast_id(&id)?)
+        .await
+        .map_err(api_error)?;
+    let body: Vec<PlaybackSourceDto> = sources.into_iter().map(Into::into).collect();
+    Ok((
+        [(
+            CACHE_CONTROL,
+            HeaderValue::from_static(PLAYBACK_CACHE_CONTROL),
+        )],
+        Json(body),
+    )
+        .into_response())
 }
 
 #[derive(Serialize, ToSchema)]
