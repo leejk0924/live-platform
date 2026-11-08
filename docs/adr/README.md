@@ -53,4 +53,5 @@ related: [10]                          # 관련 이슈 번호
 | media | [8-playback-player](media/8-playback-player.md) | playback API는 방송 중일 때만 순서 있는 소스 목록, 내장 HLS 없이 hls.js LL-HLS 기본, iOS·저지연은 WHEP, 실패 시 다음 소스 |
 | media | [10-publish-admission-reaper](media/10-publish-admission-reaper.md) | 송출 허가를 API(http 인증)로, 1회용 jti, hook과 advisory lock reaper로 INTERRUPTED 30초 유예 |
 | comment | [1-realtime-sse-comments](comment/1-realtime-sse-comments.md) | REST 쓰기 + SSE push, 샘플링 없이 쓰기 측 제어 |
+| comment | [11-comment-feed-sse](comment/11-comment-feed-sse.md) | 방송별 advisory lock 아래 revision, 같은 트랜잭션의 pg_notify, revision 커서로 Last-Event-ID 복구와 200ms 배치, 클라이언트당 SSE 20개 |
 | infra | [1-aws-single-ec2-compose](infra/1-aws-single-ec2-compose.md) | EC2 t3.medium 1대 + compose, 컨테이너 스로틀링 |

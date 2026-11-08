@@ -43,3 +43,11 @@ related: [11]
 - 지금 `RateLimiter`는 인스턴스 메모리라서, 인스턴스가 늘면 근사치다. 정확한 제한은 Redis adapter가 필요하다.
 - (unverified) PG NOTIFY payload는 기본 8000바이트 미만으로 제한된다. 본문 대신 ID와 최소 필드만 보내는 편이 안전하다.
 - SSE 연결 수만큼 파일 디스크립터를 쓴다. api 컨테이너 `nofile` 제한과 IP당 연결 20개 제한을 함께 유지한다.
+
+## Follow-up (2026-11-09)
+
+#11에서 구현했다. 결정과 실제 경로는 [comment/11](11-comment-feed-sse.md)에 있다.
+
+- 위의 `paths`는 구현 전 예상 경로다. 실제 코드는 `crates/application/src/ports/event_bus.rs`, `crates/infrastructure/src/realtime.rs`, `crates/api/src/comment.rs`, `crates/api/src/comment_stream.rs`다.
+- NOTIFY payload 한도: 본문 500자와 제어 문자 금지 아래에서는 댓글 전체를 담아도 8000바이트 안이다. `the_largest_comments_fit_a_notification`이 실제 `pg_notify`로 확인했으므로 "(unverified)" 항목은 확인됐다. 그래서 ID만 보내지 않고 본문까지 보낸다.
+- 우선 전달 레인은 "200ms 배치를 기다리지 않고 바로 보내기"로 구현했다. 방송자 댓글이 대상이고, 도네이션(#13)도 같은 경로를 쓴다.
