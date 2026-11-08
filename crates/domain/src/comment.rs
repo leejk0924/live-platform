@@ -63,8 +63,16 @@ pub struct Revision(i64);
 impl Revision {
     pub const START: Self = Self(0);
 
+    /// A position in the feed, [`Revision::START`] included: what a client
+    /// follows from.
     pub fn new(raw: i64) -> Option<Self> {
         (raw >= 0).then_some(Self(raw))
+    }
+
+    /// The revision of a change, which always comes after
+    /// [`Revision::START`].
+    pub fn of_change(raw: i64) -> Option<Self> {
+        (raw >= 1).then_some(Self(raw))
     }
 
     /// Decimal digits only, as the server sent it.
@@ -213,6 +221,14 @@ mod tests {
         }
         assert!(Some(Revision::START) < Revision::new(1));
         assert!(Revision::new(1) < Revision::new(2));
+    }
+
+    #[test]
+    fn a_change_comes_after_the_start() {
+        assert_eq!(Revision::of_change(1), Revision::new(1));
+        for bad in [0, -1] {
+            assert_eq!(Revision::of_change(bad), None, "{bad}");
+        }
     }
 
     #[test]

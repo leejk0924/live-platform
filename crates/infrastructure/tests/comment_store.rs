@@ -449,3 +449,22 @@ async fn a_write_that_cannot_be_announced_is_not_stored(pool: PgPool) {
         "nothing but the announced comment"
     );
 }
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_stored_change_at_the_feed_start_is_invalid(pool: PgPool) {
+    seed(&pool, "LIVE").await;
+    sqlx::query(
+        "INSERT INTO comments (id, broadcast_id, author_id, body, revision) \
+         VALUES (100, $1, $2, 'zero', 0)",
+    )
+    .bind(BROADCAST)
+    .bind(VIEWER)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let listed = PgCommentQuery::new(pool)
+        .list(id(BROADCAST), None, 10)
+        .await;
+    assert!(listed.is_err(), "got {listed:?}");
+}

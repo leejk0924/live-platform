@@ -405,7 +405,7 @@ fn decode(payload: &str) -> Result<RealtimeEvent, String> {
                 edited: c.edited,
             },
             author_name: Username::parse(&c.author_name).map_err(|err| err.to_string())?,
-            revision: Revision::new(c.revision).ok_or("bad revision")?,
+            revision: Revision::of_change(c.revision).ok_or("bad revision")?,
         }),
         WireKind::ChatPolicy { slow_mode_secs } => EventKind::ChatPolicy(
             ChatPolicy::from_secs(slow_mode_secs).map_err(|err| err.to_string())?,
@@ -460,6 +460,12 @@ mod tests {
             assert_eq!(decode(&encode(&event)).unwrap(), event);
         }
         assert!(decode("{}").is_err());
+    }
+
+    #[test]
+    fn a_comment_event_at_the_feed_start_is_refused() {
+        let payload = encode(&comment_event(5, 0, Some("x")));
+        assert!(decode(&payload).is_err());
     }
 
     /// The JSON of a body grows most with characters that take four UTF-8

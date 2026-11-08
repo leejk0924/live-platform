@@ -79,7 +79,7 @@ fn to_view(
             edited,
         },
         author_name: Username::parse(&author_name).map_err(|_| invalid("author name"))?,
-        revision: Revision::new(revision).ok_or_else(|| invalid("revision"))?,
+        revision: Revision::of_change(revision).ok_or_else(|| invalid("revision"))?,
     })
 }
 
