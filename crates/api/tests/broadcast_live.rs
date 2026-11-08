@@ -56,8 +56,16 @@ impl World {
         self.kicks.kicks.load(Ordering::SeqCst)
     }
 
-    /// A fresh broadcast of the owner's, forced into `status`.
+    /// A fresh broadcast of the owner's, forced into `status`. Any other
+    /// active broadcast of the owner's is ended first, since an owner may
+    /// have only one.
     async fn broadcast_in(&self, status: &str) -> String {
+        sqlx::query(
+            "UPDATE broadcasts SET status = 'ENDED', interrupted_at = NULL              WHERE status IN ('LIVE', 'INTERRUPTED')",
+        )
+        .execute(&self.pool)
+        .await
+        .unwrap();
         let reply = send(
             &self.router,
             request(
@@ -70,7 +78,9 @@ impl World {
         .await;
         assert_eq!(reply.status, StatusCode::CREATED, "{}", reply.body);
         let id = reply.body["id"].as_str().unwrap().to_owned();
-        sqlx::query("UPDATE broadcasts SET status = $2 WHERE id = $1")
+        sqlx::query(
+            "UPDATE broadcasts SET status = $2,              interrupted_at = CASE WHEN $2 = 'INTERRUPTED' THEN now() END WHERE id = $1",
+        )
             .bind(id.parse::<i64>().unwrap())
             .bind(status)
             .execute(&self.pool)
@@ -141,7 +151,8 @@ type Row = (
     &'static str,
 );
 
-/// The owner's start on a `LIVE` broadcast reissues a token and changes nothing.
+/// The owner's start on a `LIVE` or `INTERRUPTED` broadcast reissues a token
+/// and changes nothing.
 const MATRIX: [Row; 24] = {
     use Actor::*;
     use Op::*;
@@ -171,14 +182,7 @@ const MATRIX: [Row; 24] = {
         (Start, Other, "ENDED", FORBID, NOT_OWNER, "ENDED"),
         (Start, Owner, "READY", OK, None, "LIVE"),
         (Start, Owner, "LIVE", OK, None, "LIVE"),
-        (
-            Start,
-            Owner,
-            "INTERRUPTED",
-            CONFLICT,
-            NOT_STARTABLE,
-            "INTERRUPTED",
-        ),
+        (Start, Owner, "INTERRUPTED", OK, None, "INTERRUPTED"),
         (Start, Owner, "ENDED", CONFLICT, NOT_STARTABLE, "ENDED"),
         (Stop, Anonymous, "READY", UNAUTH, ANON, "READY"),
         (Stop, Anonymous, "LIVE", UNAUTH, ANON, "LIVE"),
@@ -237,7 +241,7 @@ async fn authorization_and_status_matrix(pool: PgPool) {
                     format!("/media/webrtc/live/{id}/whip"),
                     "{row}"
                 );
-                assert!(stored.started || before == "LIVE", "{row}");
+                assert!(stored.started || before != "READY", "{row}");
             }
             (Op::Stop, StatusCode::OK) => {
                 assert_eq!(reply.body["status"], "ENDED", "{row}");
@@ -378,6 +382,104 @@ async fn fifty_concurrent_starts_go_live_once(pool: PgPool) {
             ("LIVE", 2),
             "round {round}"
         );
+    }
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn an_owner_cannot_start_a_second_broadcast_while_one_is_on_air(pool: PgPool) {
+    let world = World::new(pool).await;
+    for active in ["LIVE", "INTERRUPTED"] {
+        let on_air = world.broadcast_in(active).await;
+        let second = world.broadcast_in("READY").await;
+        sqlx::query("UPDATE broadcasts SET status = $2, interrupted_at = CASE WHEN $2 = 'INTERRUPTED' THEN now() END WHERE id = $1")
+            .bind(on_air.parse::<i64>().unwrap())
+            .bind(active)
+            .execute(&world.pool)
+            .await
+            .unwrap();
+        let before = world.stored(&second).await;
+
+        let reply = call(&world.router, Op::Start, &second, Some(&world.owner)).await;
+
+        assert_eq!(
+            reply.status,
+            StatusCode::CONFLICT,
+            "{active}: {}",
+            reply.body
+        );
+        assert_eq!(reply.code(), "OWNER_ALREADY_LIVE", "{active}");
+        assert_eq!(world.stored(&second).await, before, "{active}");
+        assert_eq!(world.stored(&on_air).await.status, active);
+
+        let reply = call(&world.router, Op::Stop, &on_air, Some(&world.owner)).await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        let reply = call(&world.router, Op::Start, &second, Some(&world.owner)).await;
+        assert_eq!(
+            reply.status,
+            StatusCode::OK,
+            "after the first ended: {}",
+            reply.body
+        );
+    }
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn fifty_concurrent_starts_across_two_broadcasts_put_one_on_air(pool: PgPool) {
+    let world = World::new(pool).await;
+    for round in 0..ROUNDS {
+        let first = world.broadcast_in("READY").await;
+        let second = world.broadcast_in("READY").await;
+        let mut tasks = JoinSet::new();
+        for i in 0..50 {
+            let router = world.router.clone();
+            let id = if i % 2 == 0 {
+                first.clone()
+            } else {
+                second.clone()
+            };
+            let token = world.owner.clone();
+            tasks.spawn(async move {
+                (
+                    id.clone(),
+                    call(&router, Op::Start, &id, Some(&token)).await,
+                )
+            });
+        }
+        let replies = tasks.join_all().await;
+
+        let (a, b) = (world.stored(&first).await, world.stored(&second).await);
+        let live: Vec<_> = [(&first, &a), (&second, &b)]
+            .into_iter()
+            .filter(|(_, stored)| stored.status == "LIVE")
+            .map(|(id, _)| id.clone())
+            .collect();
+        assert_eq!(live.len(), 1, "round {round}: {a:?} {b:?}");
+        let other = if live[0] == first { &b } else { &a };
+        assert_eq!(
+            (other.status.as_str(), other.version),
+            ("READY", 1),
+            "round {round}"
+        );
+        for (id, reply) in &replies {
+            if *id == live[0] {
+                assert_eq!(
+                    reply.status,
+                    StatusCode::OK,
+                    "round {round}: {}",
+                    reply.body
+                );
+            } else {
+                assert_eq!(
+                    reply.status,
+                    StatusCode::CONFLICT,
+                    "round {round}: {}",
+                    reply.body
+                );
+                assert_eq!(reply.code(), "OWNER_ALREADY_LIVE", "round {round}");
+            }
+        }
     }
 }
 

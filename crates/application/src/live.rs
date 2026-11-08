@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use domain::{
     auth::UserId,
-    broadcast::{BroadcastError, BroadcastId, BroadcastStatus},
+    broadcast::{BroadcastError, BroadcastId},
 };
 
 use crate::{
@@ -23,6 +23,7 @@ fn rejected(rejection: TransitionRejection, wrong_status: BroadcastError) -> Err
         TransitionRejection::NotFound => BroadcastError::NotFound,
         TransitionRejection::NotOwner => BroadcastError::NotOwner,
         TransitionRejection::InStatus(_) => wrong_status,
+        TransitionRejection::OwnerAlreadyActive => BroadcastError::OwnerAlreadyLive,
     })
 }
 
@@ -41,11 +42,13 @@ pub struct StartBroadcast {
 
 impl StartBroadcast {
     /// Takes a `READY` broadcast live. The owner of a broadcast that is
-    /// already `LIVE` gets a fresh credential without another transition, so
-    /// a reloaded page can publish again.
+    /// already active gets a fresh credential without another transition, so
+    /// a reloaded page can publish again and a dropped publisher can come
+    /// back within the grace period.
     pub async fn run(&self, actor: UserId, id: BroadcastId) -> Result<PublishGrant, Error> {
         match self.broadcasts.start(id, actor).await? {
-            Ok(_) | Err(TransitionRejection::InStatus(BroadcastStatus::Live)) => {}
+            Ok(_) => {}
+            Err(TransitionRejection::InStatus(status)) if status.is_active() => {}
             Err(rejection) => return Err(rejected(rejection, BroadcastError::NotStartable)),
         }
         let endpoint = self.ingest.route(id);
@@ -120,7 +123,7 @@ mod tests {
     use async_trait::async_trait;
     use domain::{
         auth::{Credential, User, Username},
-        broadcast::{Broadcast, BroadcastDescription, BroadcastTitle, Version},
+        broadcast::{Broadcast, BroadcastDescription, BroadcastStatus, BroadcastTitle, Version},
         id::SnowflakeId,
         secret::Secret,
     };
@@ -345,6 +348,7 @@ mod tests {
         for outcome in [
             Ok(broadcast(BroadcastStatus::Live)),
             Err(TransitionRejection::InStatus(BroadcastStatus::Live)),
+            Err(TransitionRejection::InStatus(BroadcastStatus::Interrupted)),
         ] {
             let (result, authorizer) = start(outcome.clone()).await;
             let grant = result.unwrap();
@@ -367,8 +371,8 @@ mod tests {
                 BroadcastError::NotStartable,
             ),
             (
-                TransitionRejection::InStatus(BroadcastStatus::Interrupted),
-                BroadcastError::NotStartable,
+                TransitionRejection::OwnerAlreadyActive,
+                BroadcastError::OwnerAlreadyLive,
             ),
         ] {
             let (result, authorizer) = start(Err(rejection)).await;

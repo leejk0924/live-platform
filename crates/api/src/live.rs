@@ -63,17 +63,17 @@ impl From<PublishGrant> for PublishGrantDto {
     path = "/api/broadcasts/{id}/start",
     operation_id = "startBroadcast",
     tag = "broadcasts",
-    summary = "Go live, or get a fresh publish token for a live broadcast; owner only",
+    summary = "Go live, or get a fresh publish token for a live or interrupted broadcast; owner only",
     params(("id" = String, Path, description = "Broadcast id")),
     security(("session" = [])),
     responses(
         (status = 200, body = PublishGrantDto,
-            description = "`READY` became `LIVE`, or the broadcast was already `LIVE` and only a new token was issued.",
+            description = "`READY` became `LIVE`, or the broadcast was already `LIVE` or `INTERRUPTED` and only a new token was issued.",
             headers(("Cache-Control" = String, description = "`no-store`"))),
         (status = 401, body = ErrorBody, description = "`UNAUTHENTICATED`"),
         (status = 403, body = ErrorBody, description = "`NOT_BROADCAST_OWNER` or `CSRF_REJECTED`"),
         (status = 404, body = ErrorBody, description = "`BROADCAST_NOT_FOUND`"),
-        (status = 409, body = ErrorBody, description = "`BROADCAST_NOT_STARTABLE`: interrupted or ended"),
+        (status = 409, body = ErrorBody, description = "`BROADCAST_NOT_STARTABLE`: ended; `OWNER_ALREADY_LIVE`: the owner's other broadcast is live or interrupted"),
     ),
 )]
 pub(crate) async fn start(

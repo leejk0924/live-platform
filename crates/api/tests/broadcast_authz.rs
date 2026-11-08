@@ -392,7 +392,16 @@ async fn only_ready_and_ended_broadcasts_can_be_deleted(pool: PgPool) {
         ("ENDED", StatusCode::NO_CONTENT),
     ] {
         let id = created_id(&router, &actors.owner, status).await;
-        sqlx::query("UPDATE broadcasts SET status = $2 WHERE id = $1")
+        // An owner may have only one active broadcast.
+        sqlx::query(
+            "UPDATE broadcasts SET status = 'ENDED', interrupted_at = NULL              WHERE status IN ('LIVE', 'INTERRUPTED')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE broadcasts SET status = $2,              interrupted_at = CASE WHEN $2 = 'INTERRUPTED' THEN now() END WHERE id = $1",
+        )
             .bind(id.parse::<i64>().unwrap())
             .bind(status)
             .execute(&pool)

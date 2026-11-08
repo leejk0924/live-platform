@@ -22,6 +22,9 @@ fn port_error(err: sqlx::Error) -> PortError {
     PortError(err.to_string())
 }
 
+/// The partial unique index that keeps one active broadcast per owner.
+const ONE_ACTIVE_PER_OWNER: &str = "broadcasts_one_active_per_owner";
+
 /// A status set as the `TEXT[]` a `status = ANY($n)` condition binds.
 fn status_names(statuses: &[BroadcastStatus]) -> Vec<&'static str> {
     statuses.iter().map(|status| status.as_str()).collect()
@@ -96,14 +99,24 @@ impl PgBroadcastRepository {
         event: BroadcastEvent,
     ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
         let transition = event.transition();
-        let row: Option<BroadcastRow> = sqlx::query_as(sql)
+        let row = sqlx::query_as::<_, BroadcastRow>(sql)
             .bind(id.as_i64())
             .bind(owner.as_i64())
             .bind(status_names(transition.from))
             .bind(transition.to.as_str())
             .fetch_optional(&self.pool)
-            .await
-            .map_err(port_error)?;
+            .await;
+        let row = match row {
+            Err(err)
+                if err
+                    .as_database_error()
+                    .and_then(|db| db.constraint())
+                    .is_some_and(|name| name == ONE_ACTIVE_PER_OWNER) =>
+            {
+                return Ok(Err(TransitionRejection::OwnerAlreadyActive));
+            }
+            row => row.map_err(port_error)?,
+        };
         if let Some(row) = row {
             return Ok(Ok(to_broadcast(row)?));
         }
@@ -224,7 +237,7 @@ impl BroadcastRepository for PgBroadcastRepository {
     ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
         let sql = concat!(
             "UPDATE broadcasts AS b \
-             SET status = $4, ended_at = now(), version = version + 1, updated_at = now() \
+             SET status = $4, ended_at = now(), interrupted_at = NULL,                  version = version + 1, updated_at = now() \
              WHERE id = $1 AND owner_id = $2 AND status = ANY($3) AND deleted_at IS NULL \
              RETURNING ",
             columns!()

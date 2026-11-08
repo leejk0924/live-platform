@@ -35,6 +35,8 @@ pub enum TransitionRejection {
     /// The broadcast was in this status when the rejection was read, which
     /// may already differ from the status the write saw.
     InStatus(BroadcastStatus),
+    /// Going live would give the owner a second active broadcast.
+    OwnerAlreadyActive,
 }
 
 /// The write side. Each write checks ownership, version and status in the
