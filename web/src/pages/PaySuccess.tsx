@@ -5,8 +5,7 @@ import { donationApi } from '../api/donations.ts'
 import type { DonationConfirmed } from '../api/types.ts'
 import { formatWon } from '../donations/amount.ts'
 import PayPage from '../donations/PayPage.tsx'
-
-type Payment = { paymentKey: string; orderId: string; amount: number }
+import { readPayment, type Payment } from '../donations/payResult.ts'
 
 type Confirmation =
   | { status: 'confirming' }
@@ -30,14 +29,6 @@ export default function PaySuccess() {
       }
     </PayPage>
   )
-}
-
-function readPayment(search: URLSearchParams): Payment | null {
-  const paymentKey = search.get('paymentKey')
-  const orderId = search.get('orderId')
-  const amount = Number(search.get('amount'))
-  if (!paymentKey || !orderId || !Number.isSafeInteger(amount)) return null
-  return { paymentKey, orderId, amount }
 }
 
 function Confirm({ broadcastId, payment }: { broadcastId: string; payment: Payment }) {
