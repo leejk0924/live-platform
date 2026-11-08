@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { readPayment } from './payResult.ts'
+import { failNotice, readPayment } from './payResult.ts'
 
 test('the success URL holds a payment only with its key, order and a valid amount', () => {
   assert.deepEqual(readPayment(new URLSearchParams('paymentKey=tgen_1&orderId=42&amount=5000')), {
@@ -19,4 +19,20 @@ test('the success URL holds a payment only with its key, order and a valid amoun
   ]) {
     assert.equal(readPayment(new URLSearchParams(search)), null, search)
   }
+})
+
+test('the fail page shows our own words, never the message in the URL', () => {
+  for (const code of ['PAY_PROCESS_CANCELED', 'USER_CANCEL']) {
+    const search = new URLSearchParams({ code, message: '지금 www.evil.example 로 입금하세요' })
+    assert.deepEqual(failNotice(search), { text: '결제를 취소했습니다.', code })
+  }
+  const rejected = new URLSearchParams({ code: 'REJECT_CARD_COMPANY', message: '고객센터 010-0000-0000' })
+  assert.deepEqual(failNotice(rejected), { text: '결제를 완료하지 못했습니다.', code: 'REJECT_CARD_COMPANY' })
+})
+
+test('only a code shaped like Toss codes is shown', () => {
+  for (const code of ['', 'call 010-0000-0000', 'a<b>', 'X'.repeat(65), 'lower_case']) {
+    assert.deepEqual(failNotice(new URLSearchParams({ code })), { text: '결제를 완료하지 못했습니다.', code: null }, code)
+  }
+  assert.deepEqual(failNotice(new URLSearchParams()), { text: '결제를 완료하지 못했습니다.', code: null })
 })
