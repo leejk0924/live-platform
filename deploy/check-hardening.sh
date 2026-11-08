@@ -31,8 +31,12 @@ grep -qi '^server:' <<<"$headers" && fail "Server header is exposed"
 grep -i '^content-security-policy:' <<<"$headers" | grep -qF tosspayments && fail "/ CSP allows Toss Payments"
 
 # The payment pages get a wider CSP that must replace the strict one, not be added beside it.
-pay_csp="$(curl -fsS "${curl_tls[@]}" -D - -o /dev/null "https://$host/pay/checkout" | tr -d '\r' | grep -i '^content-security-policy:')"
-[ "$(wc -l <<<"$pay_csp")" = 1 ] || fail "/pay/checkout has more than one CSP header"
+pay_csp="$(curl -fsS "${curl_tls[@]}" -D - -o /dev/null "https://$host/pay/checkout" | tr -d '\r' | grep -i '^content-security-policy:' || true)"
+if [ -z "$pay_csp" ]; then
+    fail "/pay/checkout has no CSP header"
+elif [ "$(wc -l <<<"$pay_csp")" != 1 ]; then
+    fail "/pay/checkout has more than one CSP header"
+fi
 grep -qF "https://js.tosspayments.com" <<<"$pay_csp" || fail "/pay/checkout CSP lacks https://js.tosspayments.com"
 grep -qF "frame-ancestors 'none'" <<<"$pay_csp" || fail "/pay/checkout CSP lacks frame-ancestors 'none'"
 
