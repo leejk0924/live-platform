@@ -301,6 +301,7 @@ async fn a_file_url_must_carry_its_own_valid_signature(pool: PgPool) {
             )
         ),
         format!("{path}?expires={expires}&signature=AAAA"),
+        format!("{path}?expires={}&signature=AAAA", u64::MAX),
         format!("{path}?expires={expires}"),
         path.to_owned(),
         format!("/api/recordings/1/file?{query}"),

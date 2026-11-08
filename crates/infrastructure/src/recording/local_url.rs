@@ -43,7 +43,10 @@ impl LocalUrlSigner {
         signature: &str,
         now: SystemTime,
     ) -> bool {
-        let unexpired = now < SystemTime::UNIX_EPOCH + Duration::from_secs(expires);
+        // An expiry the clock cannot hold was never issued, so it is rejected.
+        let unexpired = SystemTime::UNIX_EPOCH
+            .checked_add(Duration::from_secs(expires))
+            .is_some_and(|expires_at| now < expires_at);
         let Ok(signature) = Base64UrlUnpadded::decode_vec(signature) else {
             return false;
         };
@@ -136,5 +139,11 @@ mod tests {
             !LocalUrlSigner::generate().verify(id(7), expires, &signature, now),
             "another process's key"
         );
+    }
+
+    #[test]
+    fn an_expiry_past_what_the_clock_can_hold_does_not_verify() {
+        let signer = LocalUrlSigner::generate();
+        assert!(!signer.verify(id(7), u64::MAX, "x", at(0)));
     }
 }
