@@ -5,6 +5,7 @@ import { commentApi, eventsUrl } from '../api/comments.ts'
 import type { Broadcast, ChatPolicy, Comment } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
 import { startEdit, type EditDraft } from './commentEdit.ts'
+import { parseComments } from './events.ts'
 import { commentsReducer, initialComments, visibleComments, type CommentsAction } from './commentsState.ts'
 
 const MAX_CHARS = 500
@@ -43,16 +44,20 @@ export default function CommentPanel({ broadcast }: { broadcast: Broadcast }) {
         setFeed({ status: 'live' })
         const stream = new EventSource(eventsUrl(id, page.revision))
         source = stream
+        // Also for an event that cannot be applied: the list is the way past it.
+        const reload = () => {
+          stream.close()
+          setAttempt((n) => n + 1)
+        }
         stream.addEventListener('comments', (e: MessageEvent<string>) => {
-          dispatch({ type: 'changed', items: JSON.parse(e.data) as Comment[] })
+          const items = parseComments(e.data)
+          if (items) dispatch({ type: 'changed', items })
+          else reload()
         })
         stream.addEventListener('policy', (e: MessageEvent<string>) => {
           dispatch({ type: 'policy', slowModeSeconds: (JSON.parse(e.data) as ChatPolicy).slowModeSeconds })
         })
-        stream.addEventListener('reset', () => {
-          stream.close()
-          setAttempt((n) => n + 1)
-        })
+        stream.addEventListener('reset', reload)
         stream.onerror = () => {
           if (stream.readyState === EventSource.CLOSED) setFeed({ status: 'closed' })
         }
