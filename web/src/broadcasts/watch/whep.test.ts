@@ -72,3 +72,75 @@ test('receive works where AbortSignal.any is missing (Safari before 17.4)', asyn
   )
   reception.close()
 })
+
+function signalled() {
+  let resolve = () => {}
+  const promise = new Promise<void>((r) => (resolve = r))
+  return { promise, resolve }
+}
+
+// Answers like a real fetch that never hears back: pending until its signal aborts.
+function hang(posted: () => void) {
+  return (init: RequestInit) =>
+    new Promise<Response>((_, reject) => {
+      posted()
+      init.signal?.addEventListener('abort', () => reject(init.signal?.reason))
+    })
+}
+
+test('a WHEP POST that never answers gives up at the deadline and closes the peer', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { promise: posted, resolve } = signalled()
+  const calls = install(t, hang(resolve))
+  const reception = receive('https://media/whep', new AbortController().signal)
+  await posted
+  t.mock.timers.tick(10_000)
+  await assert.rejects(reception, { name: 'TimeoutError' })
+  assert.equal(calls[0].signal?.aborted, true)
+  assert.equal(FakePeer.last.closed, true)
+  assert.deepEqual(
+    calls.map((c) => c.method),
+    ['POST'],
+  )
+})
+
+test('aborting the caller signal cancels the WHEP POST', async (t) => {
+  const { promise: posted, resolve } = signalled()
+  const calls = install(t, hang(resolve))
+  const caller = new AbortController()
+  const reception = receive('https://media/whep', caller.signal)
+  await posted
+  caller.abort(new Error('player left'))
+  await assert.rejects(reception, /player left/)
+  assert.equal(calls[0].signal?.aborted, true)
+  assert.equal(FakePeer.last.closed, true)
+})
+
+test('a peer that fails after the answer deletes the WHEP session once', async (t) => {
+  const calls = install(t, created, 'failed')
+  await assert.rejects(receive('https://media/whep', new AbortController().signal), /failed/)
+  assert.deepEqual(
+    calls.map((c) => [c.method, c.url]),
+    [
+      ['POST', 'https://media/whep'],
+      ['DELETE', 'https://media/session/1'],
+    ],
+  )
+  assert.equal(FakePeer.last.closed, true)
+})
+
+test('a connected peer keeps its session until close', async (t) => {
+  const calls = install(t, created)
+  const reception = await receive('https://media/whep', new AbortController().signal)
+  assert.equal(reception.peer.connectionState, 'connected')
+  assert.equal(calls.length, 1)
+  reception.close()
+  assert.deepEqual(
+    calls.map((c) => [c.method, c.url]),
+    [
+      ['POST', 'https://media/whep'],
+      ['DELETE', 'https://media/session/1'],
+    ],
+  )
+  assert.equal(FakePeer.last.closed, true)
+})
