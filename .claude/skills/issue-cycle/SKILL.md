@@ -20,18 +20,32 @@ ls -d ~/.claude/plugins/cache/*/pstack/*/skills/poteto-mode/SKILL.md | sort -V |
 이 스킬은 이 프로젝트 전용이고 플러그인 두 개가 있어야 한다. 시작 전에 확인하고, 하나라도 없으면 아무 작업도 하지 않고 멈춘 뒤 무엇이 없는지 알린다.
 
 - **pstack**: 위 `ls` 명령이 `poteto-mode/SKILL.md` 경로를 출력한다.
-- **jk**: 사용 가능한 스킬 목록에 `jk:code-review`, `jk:session-summary`, `jk:session-context`가 있다.
+- **jk**: 0.4.0 이상이고, 사용 가능한 스킬 목록에 `jk:code-review`, `jk:session-summary`, `jk:session-context`가 있다.
+- **jk 버전 일치**: 세션이 불러온 jk 스킬 경로(각 스킬의 base directory, 예: `.../plugins/cache/open-claude/jk/<version>/skills/...`)의 `<version>`이 `~/.claude/plugins/installed_plugins.json`의 `jk@open-claude` `version`과 같다. 세션은 시작할 때의 플러그인 버전을 계속 쓴다. 더 낮은 버전을 불러왔으면 멈추고 Claude Code를 다시 시작하라고 알린다.
+
+```bash
+grep -A4 '"jk@open-claude"' ~/.claude/plugins/installed_plugins.json | grep '"version"'
+```
 
 ## 1. 준비
 
 1. `gh issue view <N>`으로 목표·범위·완료 조건을 읽는다. 완료 조건이 확인 가능한 문장이 아니면 사용자에게 묻고 멈춘다.
 2. 이 PR이 이슈를 끝내는지 판단한다. 끝내면 PR 본문에 `Closes #N`, 아니면 `Refs #N`. 애매하면 `Refs`로 두고 보고에 적는다.
-3. 최신 `main`에서 `<type>/<N>` 브랜치를 만든다. 같은 이름이 이미 있으면 멈추고 묻는다.
+3. 최신 `main`에서 `<type>/<N>` 브랜치를 별도 worktree로 만든다. `<repo>`는 메인 체크아웃의 폴더 이름이다. 같은 이름의 브랜치나 폴더가 이미 있으면 멈추고 묻는다.
+
+   ```bash
+   git fetch origin
+   git worktree add ../<repo>-<type>-<N> -b <type>/<N> origin/main
+   ```
+
+   이후 단계는 모두 이 worktree에서 진행한다.
 4. **jk:session-context**로 관련 ADR을 불러온다 (`CLAUDE.md`의 `docs/adr` 경로 규칙대로).
 
 ## 2. 구현 (poteto-mode)
 
 - 이슈의 완료 조건을 finish condition으로 삼아 poteto-mode의 해당 playbook(Feature, Bug fix 등)대로 구현한다.
+- 메인 대화는 설계를 하고, 구현은 `pstack:poteto-agent` 서브에이전트에 맡긴다. 지시문에는 바꿀 파일, 데이터 형태, 이미 내린 결정, 검증 명령을 적는다.
+- 서브에이전트가 돌아오면 메인 대화가 diff를 직접 읽고 검증 명령을 직접 다시 돌린다. 서브에이전트의 보고를 확인 없이 그대로 옮기지 않는다.
 - 최소 기능 단위마다 커밋한다. 각 커밋은 `DEVELOPMENT.md` §6 검증 명령을 통과해야 하고 메시지는 §4 형식(`Refs #N`)을 따른다.
 - 완료 조건마다 실제로 돌린 증거(명령과 출력)를 남겨 둔다. PR 본문에 쓴다.
 
@@ -39,13 +53,16 @@ ls -d ~/.claude/plugins/cache/*/pstack/*/skills/poteto-mode/SKILL.md | sort -V |
 
 - **jk:code-review**를 현재 브랜치에 실행한다. PR이 아직 없으므로 의도(intent)는 1단계의 이슈 목표·완료 조건을 그대로 넘긴다.
 - 결과의 지적사항 표(ID, 위치, 심각도, 지적, 근거, 제안, 처리)와 Repro 목록을 그대로 다음 단계에 넘긴다. 요약하거나 행을 빼지 않는다.
-- Java·Rust 파일이 없어 리뷰가 멈추면 "리뷰 대상 아님"으로 기록하고 5단계로 간다.
+- 리뷰 대상 언어는 Java, Rust, TypeScript다 (jk 0.4.0). diff에 이 언어가 하나도 없어 리뷰가 멈출 때만 "리뷰 대상 아님"으로 기록하고 5단계로 간다.
+- 재리뷰의 ID는 직전 리뷰의 마지막 ID + 1부터 빈 번호 없이 잇는다.
 
 ## 4. 리뷰 처리 (poteto-mode)
 
 poteto-mode에 리뷰 결과를 넣고 **각 항목을 수용/거부로 판단하고 이유를 남긴다**. 모든 행에 판단이 있어야 한다.
 
 - **수용**: 고친다.
+  - 수정은 새 `pstack:poteto-agent`에 맡긴다. 지시문에는 수용한 행, 이미 내린 결정, 실패하는 테스트를 먼저 쓰는 규칙을 적는다. 돌아온 diff와 검증은 2단계처럼 메인 대화가 직접 확인한다.
+  - 예외: 두 번째(마지막) 리뷰의 수정이 각각 몇 줄이면 메인 대화가 직접 고쳐도 된다. 그렇게 했으면 보고에 적는다.
   - `proven`이 아닌 행은 Repro의 테스트를 먼저 쓰고 **실패하는 것을 확인한 뒤** 고치고, 통과를 확인한다.
   - 지적 하나(또는 같은 원인의 묶음)마다 커밋한다. 본문에 처리한 ID(`F2`)를 적는다.
 - **거부**: 고치지 않는다. 이유는 의견이 아니라 근거로 쓴다: 반증하는 테스트 실행 결과, 이미 그 경우를 막는 코드 위치(`path:line`), 또는 이슈 범위 밖이라는 근거(이슈 문장 인용).
@@ -76,7 +93,7 @@ poteto-mode에 리뷰 결과를 넣고 **각 항목을 수용/거부로 판단�
 
 1. `bash scripts/check-commit-msg.sh origin/main..HEAD`가 통과해야 한다.
 2. `git push -u origin <type>/<N>`.
-3. `gh pr create --draft`. 제목은 커밋 형식 `<type>: <한국어 요약>`, 본문은 `.github/PULL_REQUEST_TEMPLATE.md`를 채운다.
+3. `gh pr create --draft`. 제목은 커밋 형식 `<type>: <한국어 요약>`, 본문은 `.github/PULL_REQUEST_TEMPLATE.md`를 채운다. jk `pr-create`는 쓰지 않는다.
    - `작업 내용`: 구현 내용과 완료 조건별 증거(명령과 결과).
    - `설계 기록(ADR)`: 5단계에서 만든 파일 경로. 없으면 줄을 지운다.
    - `수정 사항`: 4단계 결과 표. 리뷰를 건너뛰었으면 그 이유.

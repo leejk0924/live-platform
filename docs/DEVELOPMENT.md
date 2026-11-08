@@ -6,13 +6,13 @@
 ## 1. 작업 흐름
 
 ```text
-이슈 생성 → 브랜치 생성 → 최소 단위로 커밋 → PR → 리뷰 → squash merge → 브랜치 삭제 → 문서 갱신
+이슈 생성 → 브랜치(worktree) 생성 → 최소 단위로 커밋 → PR → 리뷰 → squash merge → 브랜치 삭제 → 문서 갱신
 ```
 
 - 모든 작업은 GitHub 이슈에서 시작한다. 이슈 없는 작업은 하지 않는다.
 - 이슈 하나에 PR 여러 개가 붙을 수 있다. PR 하나는 한 가지 목적만 담는다.
 - `main`에 직접 커밋하거나 push하지 않는다.
-- Claude Code로 작업할 때는 `/issue-cycle <이슈 번호>` 한 번으로 구현 → 리뷰 → 리뷰 처리(수용/거부) → ADR → draft PR까지 진행한다. 절차는 [`.claude/skills/issue-cycle/SKILL.md`](../.claude/skills/issue-cycle/SKILL.md). 머지는 사람이 한다. 이 프로젝트 전용이며 Claude Code에 pstack과 jk 플러그인이 설치되어 있어야 한다.
+- Claude Code로 작업할 때는 `/issue-cycle <이슈 번호>` 한 번으로 구현 → 리뷰 → 리뷰 처리(수용/거부) → ADR → draft PR까지 진행한다. 절차는 [`.claude/skills/issue-cycle/SKILL.md`](../.claude/skills/issue-cycle/SKILL.md). 머지는 사람이 한다. 이 프로젝트 전용이며 Claude Code에 pstack과 jk(0.4.0 이상) 플러그인이 설치되어 있어야 한다. 구현과 리뷰 수정은 `pstack:poteto-agent` 서브에이전트가 하고, 메인 대화가 diff를 검토하고 검증을 다시 돌린다.
 
 ## 2. 이슈
 
@@ -44,7 +44,13 @@ infra/2           ✗  infra는 type이 아니다 → build/2 또는 ci/2
 6-broadcast-crud  ✗  type 없음
 ```
 
-- 브랜치는 항상 최신 `main`에서 만든다.
+- 브랜치는 항상 최신 `main`에서 만든다. 메인 체크아웃 옆의 별도 worktree에서 작업한다. `<repo>`는 메인 체크아웃의 폴더 이름이다.
+
+```bash
+git fetch origin
+git worktree add ../<repo>-<type>-<N> -b <type>/<N> origin/main
+```
+
 - 한 이슈에서 성격이 다른 PR을 내면 type으로 브랜치를 나눈다 (예: `feat/6`, `test/6`).
 - 같은 이슈·같은 type의 PR을 또 내야 하면 앞 PR을 merge하고 브랜치를 지운 뒤 같은 이름으로 다시 만든다.
 - merge 후 원격·로컬 브랜치를 지운다.
