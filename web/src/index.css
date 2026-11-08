@@ -184,3 +184,12 @@ button,
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+
+.publisher .preview {
+  width: 100%;
+  background: #000;
+}
+
+.notice {
+  color: color-mix(in srgb, currentColor 70%, transparent);
+}
