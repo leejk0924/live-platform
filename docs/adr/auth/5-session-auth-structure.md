@@ -52,3 +52,7 @@ related: [1, 6, 10, 14]
 ## Follow-up (2026-11-08, 코드 대조)
 
 "만료 세션 전역 정리는 #10 reaper와 같이 만든다"고 했지만 #10(PR #24)의 reaper는 방송과 송출 토큰만 다룬다. 지금도 로그인 때 그 사용자의 만료 세션만 지운다. #27에서 넣는다.
+
+## Follow-up (2026-11-08, #27)
+
+만료 세션 전역 정리를 reaper 패스에 넣고, 로그인 때 하던 사용자별 만료 세션 삭제는 지웠다. 만료 판정 SQL은 reaper 한 곳에만 있다. 자세한 내용은 [common/27-request-limits-housekeeping](../common/27-request-limits-housekeeping.md).
