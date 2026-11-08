@@ -4,6 +4,7 @@ mod broadcast;
 mod comment;
 mod publish_ticket;
 mod reaper;
+mod recording;
 mod session;
 mod user;
 mod worker_lease;
@@ -24,6 +25,7 @@ pub use comment::{
 };
 pub use publish_ticket::PgPublishTicketLedger;
 pub use reaper::{PgReaperStore, REAPER_LOCK_KEY};
+pub use recording::{PgRecordingQuery, PgRecordingRepository};
 pub use session::{ABSOLUTE_TIMEOUT, IDLE_TIMEOUT, PgSessionStore};
 pub use sqlx::Error as DbError;
 pub use user::PgUserRepository;

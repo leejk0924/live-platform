@@ -5,6 +5,7 @@ pub mod event_bus;
 pub mod id;
 pub mod media;
 pub mod rate_limit;
+pub mod recording;
 
 use thiserror::Error;
 
