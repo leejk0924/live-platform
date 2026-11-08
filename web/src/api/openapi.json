@@ -14,7 +14,7 @@
         "tags": [
           "broadcasts"
         ],
-        "summary": "Public key that verifies publish tokens; read by the media server",
+        "summary": "Public key that verifies publish tokens",
         "operationId": "getJwks",
         "responses": {
           "200": {
@@ -763,7 +763,7 @@
         "tags": [
           "broadcasts"
         ],
-        "summary": "Go live, or get a fresh publish token for a live broadcast; owner only",
+        "summary": "Go live, or get a fresh publish token for a live or interrupted broadcast; owner only",
         "operationId": "startBroadcast",
         "parameters": [
           {
@@ -778,7 +778,7 @@
         ],
         "responses": {
           "200": {
-            "description": "`READY` became `LIVE`, or the broadcast was already `LIVE` and only a new token was issued.",
+            "description": "`READY` became `LIVE`, or the broadcast was already `LIVE` or `INTERRUPTED` and only a new token was issued.",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -826,7 +826,7 @@
             }
           },
           "409": {
-            "description": "`BROADCAST_NOT_STARTABLE`: interrupted or ended",
+            "description": "`BROADCAST_NOT_STARTABLE`: ended; `OWNER_ALREADY_LIVE`: the owner's other broadcast is live or interrupted",
             "content": {
               "application/json": {
                 "schema": {
@@ -1158,12 +1158,12 @@
           "expiresIn": {
             "type": "integer",
             "format": "int64",
-            "description": "Seconds until the token expires. The media server also ends the\npublish session then.",
+            "description": "Seconds the token may wait before its one use. The publish session it\nopens lasts until the publisher leaves or the broadcast ends.",
             "minimum": 0
           },
           "token": {
             "type": "string",
-            "description": "Send as `Authorization: Bearer <token>` on the WHIP request. Allows\npublishing to this broadcast only."
+            "description": "Send as `Authorization: Bearer <token>` on the WHIP request. Allows\npublishing to this broadcast only, once."
           },
           "whipUrl": {
             "type": "string",

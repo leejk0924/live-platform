@@ -1,7 +1,7 @@
 //! Broadcasts: what a streamer registers before going live, and its lifecycle
 //! status.
 
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use thiserror::Error;
 
@@ -20,8 +20,12 @@ pub const DESCRIPTION_MAX_CHARS: usize = 2000;
 pub const PAGE_SIZE_DEFAULT: u32 = 20;
 pub const PAGE_SIZE_MAX: u32 = 50;
 
-/// `READY -> LIVE <-> INTERRUPTED -> ENDED`. Interruption and resumption
-/// are not modelled yet.
+/// How long an `INTERRUPTED` broadcast waits for its publisher to come back
+/// before it ends.
+pub const INTERRUPT_GRACE: Duration = Duration::from_secs(30);
+
+/// `READY -> LIVE <-> INTERRUPTED -> ENDED`. Which status follows which is
+/// decided only by [`BroadcastEvent::transition`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BroadcastStatus {
     Ready,
@@ -37,14 +41,23 @@ impl BroadcastStatus {
     /// set into their conditional writes instead of restating it.
     pub const DELETABLE: [Self; 2] = [Self::Ready, Self::Ended];
 
-    /// Statuses a broadcast may go live from.
-    pub const STARTABLE: [Self; 1] = [Self::Ready];
-
-    /// Statuses a broadcast may be ended from.
-    pub const STOPPABLE: [Self; 2] = [Self::Live, Self::Interrupted];
+    /// On air: the publisher may send media, the owner may stop it, and an
+    /// owner has at most one broadcast in these statuses.
+    pub const ACTIVE: [Self; 2] = [Self::Live, Self::Interrupted];
 
     pub fn is_deletable(self) -> bool {
         Self::DELETABLE.contains(&self)
+    }
+
+    pub fn is_active(self) -> bool {
+        Self::ACTIVE.contains(&self)
+    }
+
+    /// The status `event` moves this one to, or `None` when the event does
+    /// not apply here.
+    pub fn apply(self, event: BroadcastEvent) -> Option<Self> {
+        let transition = event.transition();
+        transition.from.contains(&self).then_some(transition.to)
     }
 
     pub fn as_str(self) -> &'static str {
@@ -58,6 +71,62 @@ impl BroadcastStatus {
 
     pub fn parse(raw: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|status| status.as_str() == raw)
+    }
+}
+
+/// Something that changes a broadcast's status. The owner starts and stops
+/// it, the media server's reports interrupt and resume it, and
+/// [`INTERRUPT_GRACE`] running out expires it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BroadcastEvent {
+    Start,
+    Interrupt,
+    Resume,
+    Stop,
+    Expire,
+}
+
+/// The statuses an event may leave and the one it enters. Adapters bind both
+/// into one conditional write instead of restating them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Transition {
+    pub from: &'static [BroadcastStatus],
+    pub to: BroadcastStatus,
+}
+
+impl BroadcastEvent {
+    pub const ALL: [Self; 5] = [
+        Self::Start,
+        Self::Interrupt,
+        Self::Resume,
+        Self::Stop,
+        Self::Expire,
+    ];
+
+    pub const fn transition(self) -> Transition {
+        use BroadcastStatus::{Ended, Interrupted, Live, Ready};
+        match self {
+            Self::Start => Transition {
+                from: &[Ready],
+                to: Live,
+            },
+            Self::Interrupt => Transition {
+                from: &[Live],
+                to: Interrupted,
+            },
+            Self::Resume => Transition {
+                from: &[Interrupted],
+                to: Live,
+            },
+            Self::Stop => Transition {
+                from: &BroadcastStatus::ACTIVE,
+                to: Ended,
+            },
+            Self::Expire => Transition {
+                from: &[Interrupted],
+                to: Ended,
+            },
+        }
     }
 }
 
@@ -142,10 +211,12 @@ pub enum BroadcastError {
     VersionConflict,
     #[error("a broadcast that is live or interrupted cannot be deleted")]
     NotDeletable,
-    #[error("only a ready broadcast can start; an ended one cannot go live again")]
+    #[error("an ended broadcast cannot go live again")]
     NotStartable,
     #[error("the broadcast is not live")]
     NotLive,
+    #[error("the owner already has another live broadcast; end it first")]
+    OwnerAlreadyLive,
 }
 
 impl DomainError for BroadcastError {
@@ -156,9 +227,11 @@ impl DomainError for BroadcastError {
             }
             Self::NotFound => ErrorKind::NotFound,
             Self::NotOwner => ErrorKind::Forbidden,
-            Self::VersionConflict | Self::NotDeletable | Self::NotStartable | Self::NotLive => {
-                ErrorKind::Conflict
-            }
+            Self::VersionConflict
+            | Self::NotDeletable
+            | Self::NotStartable
+            | Self::NotLive
+            | Self::OwnerAlreadyLive => ErrorKind::Conflict,
         }
     }
 
@@ -173,6 +246,7 @@ impl DomainError for BroadcastError {
             Self::NotDeletable => "BROADCAST_NOT_DELETABLE",
             Self::NotStartable => "BROADCAST_NOT_STARTABLE",
             Self::NotLive => "BROADCAST_NOT_LIVE",
+            Self::OwnerAlreadyLive => "OWNER_ALREADY_LIVE",
         }
     }
 }
@@ -233,18 +307,76 @@ mod tests {
     }
 
     #[test]
-    fn only_ready_starts_and_only_live_or_interrupted_stops() {
-        assert_eq!(BroadcastStatus::STARTABLE, [BroadcastStatus::Ready]);
+    fn every_status_and_event_has_one_outcome() {
+        use BroadcastEvent::*;
+        use BroadcastStatus::*;
+        let table = [
+            (Ready, Start, Some(Live)),
+            (Ready, Interrupt, None),
+            (Ready, Resume, None),
+            (Ready, Stop, None),
+            (Ready, Expire, None),
+            (Live, Start, None),
+            (Live, Interrupt, Some(Interrupted)),
+            (Live, Resume, None),
+            (Live, Stop, Some(Ended)),
+            (Live, Expire, None),
+            (Interrupted, Start, None),
+            (Interrupted, Interrupt, None),
+            (Interrupted, Resume, Some(Live)),
+            (Interrupted, Stop, Some(Ended)),
+            (Interrupted, Expire, Some(Ended)),
+            (Ended, Start, None),
+            (Ended, Interrupt, None),
+            (Ended, Resume, None),
+            (Ended, Stop, None),
+            (Ended, Expire, None),
+        ];
         assert_eq!(
-            BroadcastStatus::STOPPABLE,
+            table.len(),
+            BroadcastStatus::ALL.len() * BroadcastEvent::ALL.len()
+        );
+        for status in BroadcastStatus::ALL {
+            for event in BroadcastEvent::ALL {
+                let (_, _, next) = table
+                    .iter()
+                    .find(|(s, e, _)| *s == status && *e == event)
+                    .unwrap_or_else(|| panic!("{status:?} x {event:?} missing from the table"));
+                assert_eq!(status.apply(event), *next, "{status:?} x {event:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn ended_is_final_and_active_is_live_or_interrupted() {
+        for event in BroadcastEvent::ALL {
+            assert_eq!(BroadcastStatus::Ended.apply(event), None, "{event:?}");
+        }
+        let active: Vec<_> = BroadcastStatus::ALL
+            .into_iter()
+            .filter(|s| s.is_active())
+            .collect();
+        assert_eq!(
+            active,
             [BroadcastStatus::Live, BroadcastStatus::Interrupted]
         );
-        assert_eq!(BroadcastError::NotStartable.kind(), ErrorKind::Conflict);
         assert_eq!(
-            BroadcastError::NotStartable.code(),
-            "BROADCAST_NOT_STARTABLE"
+            BroadcastEvent::Stop.transition().from,
+            BroadcastStatus::ACTIVE
         );
-        assert_eq!(BroadcastError::NotLive.code(), "BROADCAST_NOT_LIVE");
+        assert_eq!(INTERRUPT_GRACE, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn transition_errors_are_conflicts_with_stable_codes() {
+        for (err, code) in [
+            (BroadcastError::NotStartable, "BROADCAST_NOT_STARTABLE"),
+            (BroadcastError::NotLive, "BROADCAST_NOT_LIVE"),
+            (BroadcastError::OwnerAlreadyLive, "OWNER_ALREADY_LIVE"),
+        ] {
+            assert_eq!(err.kind(), ErrorKind::Conflict, "{code}");
+            assert_eq!(err.code(), code);
+        }
     }
 
     #[test]

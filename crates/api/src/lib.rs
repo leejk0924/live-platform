@@ -6,10 +6,12 @@ pub mod broadcast;
 pub mod config;
 pub mod csrf;
 pub mod error;
+pub mod internal;
 pub mod json;
 pub mod live;
 pub mod openapi;
 pub mod rate_limit;
+pub mod reaper;
 #[cfg(test)]
 mod test_support;
 
@@ -17,6 +19,7 @@ use std::sync::Arc;
 
 use application::ports::id::IdGenerator;
 use axum::{Router, middleware, routing::get};
+use domain::secret::Secret;
 use infrastructure::media::PublicJwk;
 use tower_http::catch_panic::CatchPanicLayer;
 
@@ -36,8 +39,10 @@ pub struct AppState {
     pub broadcasts: Arc<BroadcastUseCases>,
     pub allowed_origins: Arc<[Origin]>,
     pub limits: Arc<RateLimits>,
-    /// Served as the JWKS MediaMTX verifies publish tokens with.
+    /// Served as the JWKS that verifies publish tokens.
     pub publish_jwk: Arc<PublicJwk>,
+    /// What MediaMTX must present on `/internal/*`.
+    pub media_secret: Arc<Secret<String>>,
 }
 
 impl AppState {
@@ -47,6 +52,7 @@ impl AppState {
         allowed_origins: Vec<Origin>,
         demo_login_enabled: bool,
         publish_jwk: PublicJwk,
+        media_secret: Secret<String>,
     ) -> Self {
         let broadcasts =
             BroadcastUseCases::new(broadcast_ports, ports.ids.clone(), ports.users.clone());
@@ -57,6 +63,7 @@ impl AppState {
             allowed_origins: allowed_origins.into(),
             limits: Arc::new(RateLimits::default()),
             publish_jwk: Arc::new(publish_jwk),
+            media_secret: Arc::new(media_secret),
         }
     }
 }
@@ -72,7 +79,8 @@ pub fn app(state: AppState) -> Router {
             Arc::clone(&state.allowed_origins),
             csrf::guard,
         ));
-    with_envelope(Router::new().nest("/api", api)).with_state(state)
+    let internal = internal::routes(Arc::clone(&state.media_secret));
+    with_envelope(Router::new().nest("/api", api).nest("/internal", internal)).with_state(state)
 }
 
 /// Wraps `routes` so that every error, including the ones axum produces

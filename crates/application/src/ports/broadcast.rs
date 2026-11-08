@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 use domain::{
     auth::{UserId, Username},
@@ -35,6 +37,8 @@ pub enum TransitionRejection {
     /// The broadcast was in this status when the rejection was read, which
     /// may already differ from the status the write saw.
     InStatus(BroadcastStatus),
+    /// Going live would give the owner a second active broadcast.
+    OwnerAlreadyActive,
 }
 
 /// The write side. Each write checks ownership, version and status in the
@@ -64,21 +68,84 @@ pub trait BroadcastRepository: Send + Sync {
         owner: UserId,
     ) -> Result<Result<(), WriteRejection>, PortError>;
 
-    /// Moves a broadcast from a [`BroadcastStatus::STARTABLE`] status to
-    /// `LIVE` if `owner` owns it, and bumps the version.
+    /// Applies [`domain::broadcast::BroadcastEvent::Start`] if `owner` owns the broadcast, and
+    /// bumps the version.
     async fn start(
         &self,
         id: BroadcastId,
         owner: UserId,
     ) -> Result<Result<Broadcast, TransitionRejection>, PortError>;
 
-    /// Moves a broadcast from a [`BroadcastStatus::STOPPABLE`] status to
-    /// `ENDED` if `owner` owns it, and bumps the version.
+    /// Applies [`domain::broadcast::BroadcastEvent::Stop`] if `owner` owns the broadcast, and
+    /// bumps the version.
     async fn stop(
         &self,
         id: BroadcastId,
         owner: UserId,
     ) -> Result<Result<Broadcast, TransitionRejection>, PortError>;
+}
+
+/// Status changes that follow the publisher's connection rather than the
+/// owner, so no owner is checked. Each is one conditional write; one that
+/// does not apply in the current status changes nothing.
+#[async_trait]
+pub trait PublisherPresence: Send + Sync {
+    /// Applies [`domain::broadcast::BroadcastEvent::Interrupt`], starting the
+    /// grace period. Whether the status changed.
+    async fn interrupt(&self, id: BroadcastId) -> Result<bool, PortError>;
+
+    /// Applies [`domain::broadcast::BroadcastEvent::Resume`]. Whether the
+    /// status changed.
+    async fn resume(&self, id: BroadcastId) -> Result<bool, PortError>;
+
+    /// Whether the broadcast is stored, not deleted, and in
+    /// [`BroadcastStatus::ACTIVE`].
+    async fn is_active(&self, id: BroadcastId) -> Result<bool, PortError>;
+}
+
+/// Where the reaper's passes run. One pass at a time across every API
+/// instance.
+#[async_trait]
+pub trait ReaperStore: Send + Sync {
+    /// Starts a pass, or `None` while another instance is in one.
+    async fn begin(&self) -> Result<Option<Box<dyn ReapPass>>, PortError>;
+}
+
+/// One reaper pass. Its writes take effect together at [`ReapPass::finish`];
+/// dropping it unfinished undoes them. Times are the store's clock, and
+/// "now" is when the pass began.
+#[async_trait]
+pub trait ReapPass: Send {
+    /// Applies [`domain::broadcast::BroadcastEvent::Resume`] to the
+    /// interrupted broadcasts in `on_air` that were interrupted before the
+    /// pass began, and [`domain::broadcast::BroadcastEvent::Interrupt`] to the
+    /// live broadcasts not in `on_air` that went live longer than `grace`
+    /// ago, so one that just started or resumed has time to connect.
+    async fn reconcile(
+        &mut self,
+        on_air: &[BroadcastId],
+        grace: Duration,
+    ) -> Result<Reconciled, PortError>;
+
+    /// The broadcasts in `on_air` that are not active: ended, deleted, or
+    /// never stored. Nobody may publish to them.
+    async fn not_active(&mut self, on_air: &[BroadcastId]) -> Result<Vec<BroadcastId>, PortError>;
+
+    /// Applies [`domain::broadcast::BroadcastEvent::Expire`] to every
+    /// broadcast interrupted longer than `grace` ago.
+    async fn expire(&mut self, grace: Duration) -> Result<Vec<BroadcastId>, PortError>;
+
+    /// Deletes the records of publish tickets that can no longer be
+    /// presented. Returns how many.
+    async fn forget_spent_tickets(&mut self) -> Result<u64, PortError>;
+
+    async fn finish(self: Box<Self>) -> Result<(), PortError>;
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Reconciled {
+    pub interrupted: Vec<BroadcastId>,
+    pub resumed: Vec<BroadcastId>,
 }
 
 /// A broadcast as viewers see it, with its owner's name.

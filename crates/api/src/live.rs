@@ -1,5 +1,5 @@
-//! Going live and ending a broadcast, and the public key MediaMTX verifies
-//! publish tokens with.
+//! Going live and ending a broadcast, and the public key that verifies
+//! publish tokens.
 
 use application::{live::PublishGrant, ports::media::PublishCredential};
 use axum::{
@@ -21,7 +21,7 @@ use crate::{
     error::{ApiError, ErrorBody},
 };
 
-/// MediaMTX fetches the key set again at most hourly, so a short shared cache
+/// The key changes only when the operator rotates it, so a short shared cache
 /// costs nothing.
 pub const JWKS_CACHE_CONTROL: &str = "public, max-age=300";
 
@@ -40,10 +40,10 @@ pub struct PublishGrantDto {
     #[schema(example = "/media/webrtc/live/112007303372210176/whip")]
     whip_url: String,
     /// Send as `Authorization: Bearer <token>` on the WHIP request. Allows
-    /// publishing to this broadcast only.
+    /// publishing to this broadcast only, once.
     token: String,
-    /// Seconds until the token expires. The media server also ends the
-    /// publish session then.
+    /// Seconds the token may wait before its one use. The publish session it
+    /// opens lasts until the publisher leaves or the broadcast ends.
     expires_in: u64,
 }
 
@@ -63,17 +63,17 @@ impl From<PublishGrant> for PublishGrantDto {
     path = "/api/broadcasts/{id}/start",
     operation_id = "startBroadcast",
     tag = "broadcasts",
-    summary = "Go live, or get a fresh publish token for a live broadcast; owner only",
+    summary = "Go live, or get a fresh publish token for a live or interrupted broadcast; owner only",
     params(("id" = String, Path, description = "Broadcast id")),
     security(("session" = [])),
     responses(
         (status = 200, body = PublishGrantDto,
-            description = "`READY` became `LIVE`, or the broadcast was already `LIVE` and only a new token was issued.",
+            description = "`READY` became `LIVE`, or the broadcast was already `LIVE` or `INTERRUPTED` and only a new token was issued.",
             headers(("Cache-Control" = String, description = "`no-store`"))),
         (status = 401, body = ErrorBody, description = "`UNAUTHENTICATED`"),
         (status = 403, body = ErrorBody, description = "`NOT_BROADCAST_OWNER` or `CSRF_REJECTED`"),
         (status = 404, body = ErrorBody, description = "`BROADCAST_NOT_FOUND`"),
-        (status = 409, body = ErrorBody, description = "`BROADCAST_NOT_STARTABLE`: interrupted or ended"),
+        (status = 409, body = ErrorBody, description = "`BROADCAST_NOT_STARTABLE`: ended; `OWNER_ALREADY_LIVE`: the owner's other broadcast is live or interrupted"),
     ),
 )]
 pub(crate) async fn start(
@@ -179,7 +179,7 @@ impl From<PublicJwk> for Jwks {
     path = "/api/.well-known/jwks.json",
     operation_id = "getJwks",
     tag = "broadcasts",
-    summary = "Public key that verifies publish tokens; read by the media server",
+    summary = "Public key that verifies publish tokens",
     responses(
         (status = 200, body = Jwks, description = "The current signing key.",
             headers(("Cache-Control" = String, description = "`public, max-age=300`"))),

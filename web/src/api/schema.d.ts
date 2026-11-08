@@ -11,7 +11,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Public key that verifies publish tokens; read by the media server */
+        /** Public key that verifies publish tokens */
         get: operations["getJwks"];
         put?: never;
         post?: never;
@@ -169,7 +169,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Go live, or get a fresh publish token for a live broadcast; owner only */
+        /** Go live, or get a fresh publish token for a live or interrupted broadcast; owner only */
         post: operations["startBroadcast"];
         delete?: never;
         options?: never;
@@ -278,13 +278,13 @@ export interface components {
         PublishGrant: {
             /**
              * Format: int64
-             * @description Seconds until the token expires. The media server also ends the
-             *     publish session then.
+             * @description Seconds the token may wait before its one use. The publish session it
+             *     opens lasts until the publisher leaves or the broadcast ends.
              */
             expiresIn: number;
             /**
              * @description Send as `Authorization: Bearer <token>` on the WHIP request. Allows
-             *     publishing to this broadcast only.
+             *     publishing to this broadcast only, once.
              */
             token: string;
             /**
@@ -873,7 +873,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description `READY` became `LIVE`, or the broadcast was already `LIVE` and only a new token was issued. */
+            /** @description `READY` became `LIVE`, or the broadcast was already `LIVE` or `INTERRUPTED` and only a new token was issued. */
             200: {
                 headers: {
                     /** @description `no-store` */
@@ -911,7 +911,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
-            /** @description `BROADCAST_NOT_STARTABLE`: interrupted or ended */
+            /** @description `BROADCAST_NOT_STARTABLE`: ended; `OWNER_ALREADY_LIVE`: the owner's other broadcast is live or interrupted */
             409: {
                 headers: {
                     [name: string]: unknown;

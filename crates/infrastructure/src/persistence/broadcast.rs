@@ -3,23 +3,29 @@ use std::time::SystemTime;
 use application::ports::{
     PortError,
     broadcast::{
-        BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, TransitionRejection,
-        WriteRejection,
+        BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, PublisherPresence,
+        TransitionRejection, WriteRejection,
     },
 };
 use async_trait::async_trait;
 use domain::{
     auth::{UserId, Username},
     broadcast::{
-        Broadcast, BroadcastDescription, BroadcastId, BroadcastStatus, BroadcastTitle, Version,
+        Broadcast, BroadcastDescription, BroadcastEvent, BroadcastId, BroadcastStatus,
+        BroadcastTitle, Version,
     },
     id::SnowflakeId,
 };
 use sqlx::{PgPool, types::time::OffsetDateTime};
 
+use super::status_names;
+
 fn port_error(err: sqlx::Error) -> PortError {
     PortError(err.to_string())
 }
+
+/// The partial unique index that keeps one active broadcast per owner.
+const ONE_ACTIVE_PER_OWNER: &str = "broadcasts_one_active_per_owner";
 
 /// A macro rather than a const so `concat!` builds every statement at
 /// compile time; no SQL is assembled at run time.
@@ -80,25 +86,34 @@ impl PgBroadcastRepository {
     }
 
     /// Runs `sql`, a conditional status change binding `$1` id, `$2` owner,
-    /// `$3` the statuses it may leave and `$4` the one it enters, and says why
-    /// when it matched no row.
+    /// `$3` the statuses `event` may leave and `$4` the one it enters, and
+    /// says why when it matched no row.
     async fn transition(
         &self,
         sql: &'static str,
         id: BroadcastId,
         owner: UserId,
-        from: &[BroadcastStatus],
-        to: BroadcastStatus,
+        event: BroadcastEvent,
     ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
-        let from: Vec<&str> = from.iter().map(|status| status.as_str()).collect();
-        let row: Option<BroadcastRow> = sqlx::query_as(sql)
+        let transition = event.transition();
+        let row = sqlx::query_as::<_, BroadcastRow>(sql)
             .bind(id.as_i64())
             .bind(owner.as_i64())
-            .bind(&from)
-            .bind(to.as_str())
+            .bind(status_names(transition.from))
+            .bind(transition.to.as_str())
             .fetch_optional(&self.pool)
-            .await
-            .map_err(port_error)?;
+            .await;
+        let row = match row {
+            Err(err)
+                if err
+                    .as_database_error()
+                    .and_then(|db| db.constraint())
+                    .is_some_and(|name| name == ONE_ACTIVE_PER_OWNER) =>
+            {
+                return Ok(Err(TransitionRejection::OwnerAlreadyActive));
+            }
+            row => row.map_err(port_error)?,
+        };
         if let Some(row) = row {
             return Ok(Ok(to_broadcast(row)?));
         }
@@ -176,10 +191,6 @@ impl BroadcastRepository for PgBroadcastRepository {
         id: BroadcastId,
         owner: UserId,
     ) -> Result<Result<(), WriteRejection>, PortError> {
-        let deletable: Vec<&str> = BroadcastStatus::DELETABLE
-            .iter()
-            .map(|status| status.as_str())
-            .collect();
         let result = sqlx::query(
             "UPDATE broadcasts \
              SET deleted_at = now(), version = version + 1, updated_at = now() \
@@ -187,7 +198,7 @@ impl BroadcastRepository for PgBroadcastRepository {
         )
         .bind(id.as_i64())
         .bind(owner.as_i64())
-        .bind(&deletable)
+        .bind(status_names(&BroadcastStatus::DELETABLE))
         .execute(&self.pool)
         .await
         .map_err(port_error)?;
@@ -208,19 +219,13 @@ impl BroadcastRepository for PgBroadcastRepository {
     ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
         let sql = concat!(
             "UPDATE broadcasts AS b \
-             SET status = $4, started_at = now(), version = version + 1, updated_at = now() \
+             SET status = $4, started_at = now(), live_since = now(), \
+                 version = version + 1, updated_at = now() \
              WHERE id = $1 AND owner_id = $2 AND status = ANY($3) AND deleted_at IS NULL \
              RETURNING ",
             columns!()
         );
-        self.transition(
-            sql,
-            id,
-            owner,
-            &BroadcastStatus::STARTABLE,
-            BroadcastStatus::Live,
-        )
-        .await
+        self.transition(sql, id, owner, BroadcastEvent::Start).await
     }
 
     async fn stop(
@@ -230,19 +235,62 @@ impl BroadcastRepository for PgBroadcastRepository {
     ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
         let sql = concat!(
             "UPDATE broadcasts AS b \
-             SET status = $4, ended_at = now(), version = version + 1, updated_at = now() \
+             SET status = $4, ended_at = now(), interrupted_at = NULL, live_since = NULL, \
+                 version = version + 1, updated_at = now() \
              WHERE id = $1 AND owner_id = $2 AND status = ANY($3) AND deleted_at IS NULL \
              RETURNING ",
             columns!()
         );
-        self.transition(
-            sql,
-            id,
-            owner,
-            &BroadcastStatus::STOPPABLE,
-            BroadcastStatus::Ended,
+        self.transition(sql, id, owner, BroadcastEvent::Stop).await
+    }
+}
+
+impl PgBroadcastRepository {
+    /// Moves the broadcast between `LIVE` and `INTERRUPTED` as `event` says,
+    /// whoever owns it. `interrupted_at` and `live_since` are set on entering
+    /// their status and cleared on leaving it.
+    async fn presence(&self, id: BroadcastId, event: BroadcastEvent) -> Result<bool, PortError> {
+        let transition = event.transition();
+        let result = sqlx::query(
+            "UPDATE broadcasts \
+             SET status = $3, \
+                 interrupted_at = CASE WHEN $3 = 'INTERRUPTED' THEN now() END, \
+                 live_since = CASE WHEN $3 = 'LIVE' THEN now() END, \
+                 version = version + 1, updated_at = now() \
+             WHERE id = $1 AND status = ANY($2) AND deleted_at IS NULL",
         )
+        .bind(id.as_i64())
+        .bind(status_names(transition.from))
+        .bind(transition.to.as_str())
+        .execute(&self.pool)
         .await
+        .map_err(port_error)?;
+        Ok(result.rows_affected() == 1)
+    }
+}
+
+#[async_trait]
+impl PublisherPresence for PgBroadcastRepository {
+    async fn interrupt(&self, id: BroadcastId) -> Result<bool, PortError> {
+        self.presence(id, BroadcastEvent::Interrupt).await
+    }
+
+    async fn resume(&self, id: BroadcastId) -> Result<bool, PortError> {
+        self.presence(id, BroadcastEvent::Resume).await
+    }
+
+    async fn is_active(&self, id: BroadcastId) -> Result<bool, PortError> {
+        sqlx::query_scalar(
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM broadcasts \
+                 WHERE id = $1 AND status = ANY($2) AND deleted_at IS NULL \
+             )",
+        )
+        .bind(id.as_i64())
+        .bind(status_names(&BroadcastStatus::ACTIVE))
+        .fetch_one(&self.pool)
+        .await
+        .map_err(port_error)
     }
 }
 

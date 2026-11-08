@@ -10,11 +10,15 @@ use application::{
         UpdateBroadcast,
     },
     live::{StartBroadcast, StopBroadcast},
+    media::{AdmitMediaAccess, TrackPublisher},
     ports::{
         auth::UserRepository,
-        broadcast::{BroadcastQuery, BroadcastRepository, BroadcastView},
+        broadcast::{BroadcastQuery, BroadcastRepository, BroadcastView, PublisherPresence},
         id::IdGenerator,
-        media::{IngestRouter, PublishAuthorizer, StreamTerminator},
+        media::{
+            IngestRouter, MediaCredentialVerifier, PublishAuthorizer, PublishTicketLedger,
+            StreamTerminator,
+        },
     },
 };
 use axum::{
@@ -53,6 +57,10 @@ pub struct BroadcastUseCases {
     pub list: ListBroadcasts,
     pub start: StartBroadcast,
     pub stop: StopBroadcast,
+    /// Answers MediaMTX's question whether to let a publisher in.
+    pub admit: AdmitMediaAccess,
+    /// Follows MediaMTX's reports that a publisher arrived or left.
+    pub track: TrackPublisher,
 }
 
 /// The ports the broadcast use cases need beyond the auth ones.
@@ -62,6 +70,9 @@ pub struct BroadcastPorts {
     pub ingest: Arc<dyn IngestRouter>,
     pub authorizer: Arc<dyn PublishAuthorizer>,
     pub terminator: Arc<dyn StreamTerminator>,
+    pub verifier: Arc<dyn MediaCredentialVerifier>,
+    pub tickets: Arc<dyn PublishTicketLedger>,
+    pub presence: Arc<dyn PublisherPresence>,
 }
 
 impl BroadcastUseCases {
@@ -76,6 +87,9 @@ impl BroadcastUseCases {
             ingest,
             authorizer,
             terminator,
+            verifier,
+            tickets,
+            presence,
         } = ports;
         Self {
             create: CreateBroadcast {
@@ -94,6 +108,16 @@ impl BroadcastUseCases {
                 broadcasts: repository.clone(),
                 ingest: ingest.clone(),
                 authorizer,
+            },
+            admit: AdmitMediaAccess {
+                verifier,
+                ingest: ingest.clone(),
+                tickets,
+            },
+            track: TrackPublisher {
+                presence,
+                ingest: ingest.clone(),
+                terminator: terminator.clone(),
             },
             stop: StopBroadcast {
                 broadcasts: repository,

@@ -7,12 +7,13 @@ use application::ports::{
     PortError,
     auth::{Inserted, PasswordHasher, SessionStore, UserRepository},
     broadcast::{
-        BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, TransitionRejection,
-        WriteRejection,
+        BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, PublisherPresence,
+        TransitionRejection, WriteRejection,
     },
     id::{IdGenerationError, IdGenerator},
     media::{
-        IngestEndpoint, IngestRouter, PublishAuthorizer, PublishCredential, StreamPath,
+        IngestEndpoint, IngestRouter, MediaCredentialVerifier, PublishAuthorizer,
+        PublishCredential, PublishTicket, PublishTicketLedger, RedeemRejection, StreamPath,
         StreamTerminator,
     },
 };
@@ -21,6 +22,7 @@ use domain::{
     auth::{Password, PasswordHash, SessionToken, User, UserId, Username},
     broadcast::{Broadcast, BroadcastDescription, BroadcastId, BroadcastTitle, Version},
     id::SnowflakeId,
+    secret::Secret,
 };
 use infrastructure::{auth::BreachedPasswordList, media::PublishKey};
 use tracing::Subscriber;
@@ -125,6 +127,21 @@ impl BroadcastRepository for Unavailable {
 }
 
 #[async_trait]
+impl PublisherPresence for Unavailable {
+    async fn interrupt(&self, _: BroadcastId) -> Result<bool, PortError> {
+        unavailable()
+    }
+
+    async fn resume(&self, _: BroadcastId) -> Result<bool, PortError> {
+        unavailable()
+    }
+
+    async fn is_active(&self, _: BroadcastId) -> Result<bool, PortError> {
+        unavailable()
+    }
+}
+
+#[async_trait]
 impl BroadcastQuery for Unavailable {
     async fn list(&self, _: Option<BroadcastId>, _: u32) -> Result<Vec<BroadcastView>, PortError> {
         unavailable()
@@ -138,6 +155,31 @@ impl BroadcastQuery for Unavailable {
 impl IngestRouter for Unavailable {
     fn route(&self, _: BroadcastId) -> IngestEndpoint {
         unreachable!("not available in this test")
+    }
+
+    fn broadcast_of(&self, _: &StreamPath) -> Option<BroadcastId> {
+        unreachable!("not available in this test")
+    }
+}
+
+impl MediaCredentialVerifier for Unavailable {
+    fn publish_ticket(&self, _: &Secret<String>) -> Option<PublishTicket> {
+        unreachable!("not available in this test")
+    }
+
+    fn is_control_credential(&self, _: &Secret<String>) -> bool {
+        unreachable!("not available in this test")
+    }
+}
+
+#[async_trait]
+impl PublishTicketLedger for Unavailable {
+    async fn redeem(
+        &self,
+        _: &PublishTicket,
+        _: BroadcastId,
+    ) -> Result<Result<(), RedeemRejection>, PortError> {
+        unavailable()
     }
 }
 
@@ -156,6 +198,7 @@ impl StreamTerminator for Unavailable {
 }
 
 pub const TEST_ORIGIN: &str = "https://app.test";
+pub const TEST_MEDIA_SECRET: &str = "0123456789abcdef0123456789abcdef";
 
 pub fn test_state() -> AppState {
     let ports = AuthPorts {
@@ -171,6 +214,9 @@ pub fn test_state() -> AppState {
         ingest: Arc::new(Unavailable),
         authorizer: Arc::new(Unavailable),
         terminator: Arc::new(Unavailable),
+        verifier: Arc::new(Unavailable),
+        tickets: Arc::new(Unavailable),
+        presence: Arc::new(Unavailable),
     };
     AppState::new(
         ports,
@@ -178,6 +224,7 @@ pub fn test_state() -> AppState {
         vec![Origin::parse(TEST_ORIGIN).unwrap()],
         false,
         PublishKey::generate().public_jwk(),
+        Secret::new(TEST_MEDIA_SECRET.into()),
     )
 }
 

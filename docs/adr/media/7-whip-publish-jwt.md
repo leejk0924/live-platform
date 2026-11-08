@@ -38,3 +38,7 @@ related: [1, 3, 6, 10]
 - INTERRUPTED에서 start는 지금 409다. #10에서 재연결을 설계할 때 LIVE처럼 재발급할지 정한다.
 - 키(`PUBLISH_JWT_PRIVATE_KEY`)를 바꾸면 MediaMTX를 재시작해야 한다. MediaMTX는 JWKS를 처음 인증할 때 받아 1시간 캐시한다(소스로 확인). 지금 JWKS에는 키가 하나뿐이라, 키를 바꾸는 순간 발급된 토큰이 모두 무효가 된다.
 - (unverified) 실기기 화면 공유의 2.5Mbps/720p 상한 도달, Android 브라우저.
+
+## Follow-up (2026-11-08, #10)
+
+송출 허가를 MediaMTX `authMethod: http`로 바꿨다. 이제 API가 상태와 1회용 `jti`를 검사한다. 그래서 토큰 TTL은 60초로 돌아갔고, 종료 후 재송출 공백도 닫혔다. 위 "Cautions"의 12시간 토큰과 재송출 항목은 더 이상 맞지 않는다. 자세한 내용은 [media/10-publish-admission-reaper](10-publish-admission-reaper.md).

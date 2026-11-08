@@ -1,11 +1,11 @@
-//! MediaMTX as the media server: stream paths, WHIP URLs and kicking a
-//! publisher through its Control API.
+//! MediaMTX as the media server: stream paths, WHIP URLs, and its Control
+//! API for kicking publishers and listing the streams on air.
 
 use std::{sync::Arc, time::Duration};
 
 use application::ports::{
     PortError,
-    media::{IngestEndpoint, IngestRouter, StreamPath, StreamTerminator},
+    media::{IngestEndpoint, IngestRouter, StreamPath, StreamProbe, StreamTerminator},
 };
 use async_trait::async_trait;
 use domain::broadcast::BroadcastId;
@@ -25,17 +25,22 @@ impl IngestRouter for MediaMtxIngestRouter {
             whip_url: format!("/media/webrtc/live/{broadcast}/whip"),
         }
     }
+
+    fn broadcast_of(&self, path: &StreamPath) -> Option<BroadcastId> {
+        let id: BroadcastId = path.as_str().strip_prefix("live/")?.parse().ok()?;
+        (self.route(id).path == *path).then_some(id)
+    }
 }
 
-/// Kicks a path's publisher through the Control API, authenticating with a
-/// token signed by the same key MediaMTX already trusts.
-pub struct MediaMtxStreamTerminator {
+/// The Control API, called with a token the API signs itself; MediaMTX hands
+/// it back to the API to check.
+pub struct MediaMtxControlApi {
     http: reqwest::Client,
     api_url: String,
     key: Arc<PublishKey>,
 }
 
-impl MediaMtxStreamTerminator {
+impl MediaMtxControlApi {
     /// `api_url` is the Control API base, such as `http://mediamtx:9997`.
     pub fn new(api_url: String, key: Arc<PublishKey>) -> Result<Self, PortError> {
         let http = reqwest::Client::builder()
@@ -59,11 +64,25 @@ struct Session {
     path: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PathPage {
+    page_count: u32,
+    items: Vec<PathItem>,
+}
+
+#[derive(Deserialize)]
+struct PathItem {
+    name: String,
+    /// A publisher is sending (`ready` in older versions).
+    available: bool,
+}
+
 fn port_error(err: reqwest::Error) -> PortError {
     PortError(format!("mediamtx api: {err}"))
 }
 
-impl MediaMtxStreamTerminator {
+impl MediaMtxControlApi {
     /// Every WebRTC session on `path`. A WHIP session joins this list as soon
     /// as its offer is answered, while the path itself names it as the source
     /// only once ICE connects.
@@ -101,10 +120,10 @@ impl MediaMtxStreamTerminator {
 }
 
 #[async_trait]
-impl StreamTerminator for MediaMtxStreamTerminator {
+impl StreamTerminator for MediaMtxControlApi {
     /// WHIP is the only way in; every other protocol is off in mediamtx.yml.
     async fn kick(&self, path: &StreamPath) -> Result<(), PortError> {
-        let token = self.key.api_token()?;
+        let token = self.key.control_token()?;
         for id in self.sessions_on(path, &token).await? {
             let response = self
                 .http
@@ -122,6 +141,39 @@ impl StreamTerminator for MediaMtxStreamTerminator {
     }
 }
 
+#[async_trait]
+impl StreamProbe for MediaMtxControlApi {
+    async fn live_paths(&self) -> Result<Vec<StreamPath>, PortError> {
+        let token = self.key.control_token()?;
+        let mut live = Vec::new();
+        let mut page = 0;
+        loop {
+            let paths: PathPage = self
+                .http
+                .get(format!("{}/v3/paths/list?page={page}", self.api_url))
+                .bearer_auth(&token)
+                .send()
+                .await
+                .and_then(reqwest::Response::error_for_status)
+                .map_err(port_error)?
+                .json()
+                .await
+                .map_err(port_error)?;
+            live.extend(
+                paths
+                    .items
+                    .into_iter()
+                    .filter(|path| path.available)
+                    .map(|path| StreamPath::new(path.name)),
+            );
+            page += 1;
+            if page >= paths.page_count {
+                return Ok(live);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,6 +186,50 @@ mod tests {
         assert_eq!(
             endpoint.whip_url,
             "/media/webrtc/live/112007303372210176/whip"
+        );
+        assert_eq!(MediaMtxIngestRouter.broadcast_of(&endpoint.path), Some(id));
+    }
+
+    /// Captured from the Control API of the MediaMTX image in compose while
+    /// one WHIP publisher was on air.
+    #[test]
+    fn a_paths_list_from_mediamtx_1_21_3_names_the_path_on_air() {
+        let page: PathPage =
+            serde_json::from_str(include_str!("testdata/mediamtx-1.21.3-paths-list.json")).unwrap();
+        assert_eq!(page.page_count, 1);
+        let on_air: Vec<_> = page
+            .items
+            .iter()
+            .filter(|path| path.available)
+            .map(|path| path.name.as_str())
+            .collect();
+        assert_eq!(on_air, ["live/112845401270296576"]);
+    }
+
+    #[test]
+    fn only_paths_the_router_would_produce_name_a_broadcast() {
+        for raw in [
+            "live/",
+            "live/abc",
+            "live/-1",
+            "live/+7",
+            "live/007",
+            "live/7/x",
+            "live/7 ",
+            "other/7",
+            "7",
+            "",
+            "live/99999999999999999999",
+        ] {
+            assert_eq!(
+                MediaMtxIngestRouter.broadcast_of(&StreamPath::new(raw.into())),
+                None,
+                "{raw:?}"
+            );
+        }
+        assert_eq!(
+            MediaMtxIngestRouter.broadcast_of(&StreamPath::new("live/7".into())),
+            BroadcastId::try_from(7).ok()
         );
     }
 }

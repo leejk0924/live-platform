@@ -42,3 +42,7 @@ related: []
 ## Follow-up (2026-11-08, #7)
 
 송출 토큰 TTL은 60초가 아니라 12시간이다. MediaMTX 1.21.3이 JWT `exp`에 송출 세션을 끊기 때문이다. `jti` 1회용은 강제하지 못한다. 그래서 종료한 방송에 같은 토큰으로 다시 송출할 수 있다. 막는 방법은 #10의 publish hook이다. 자세한 내용은 [media/7-whip-publish-jwt](../media/7-whip-publish-jwt.md).
+
+## Follow-up (2026-11-08, #10)
+
+"송출 인증을 MediaMTX → API HTTP 콜백으로" 하는 방식은 처음에 기각했다. 이 결정을 송출에 한해 뒤집었다. 콜백은 송출 시도에서만 생기고 시청에서는 생기지 않는다. 이렇게 해서 TTL 60초와 `jti` 1회용을 실제로 강제한다. 자세한 내용은 [media/10-publish-admission-reaper](../media/10-publish-admission-reaper.md).
