@@ -117,6 +117,7 @@ impl BroadcastUseCases {
             track: TrackPublisher {
                 presence,
                 ingest: ingest.clone(),
+                terminator: terminator.clone(),
             },
             stop: StopBroadcast {
                 broadcasts: repository,

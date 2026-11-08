@@ -153,6 +153,21 @@ async fn hook(State(state): State<AppState>, body: Bytes) -> Result<StatusCode, 
         Observed::Unchanged(id) => {
             tracing::info!(?event, path, broadcast = %id, "hook changed nothing")
         }
+        Observed::NotActive { broadcast, kick } => match kick {
+            Ok(()) => tracing::warn!(
+                ?event,
+                path,
+                %broadcast,
+                "stream of a broadcast that is not active; publisher disconnected"
+            ),
+            Err(err) => tracing::warn!(
+                ?event,
+                path,
+                %broadcast,
+                %err,
+                "stream of a broadcast that is not active; disconnect failed, the reaper retries"
+            ),
+        },
     }
     Ok(StatusCode::NO_CONTENT)
 }

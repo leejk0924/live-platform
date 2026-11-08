@@ -135,6 +135,10 @@ impl PublisherPresence for Unavailable {
     async fn resume(&self, _: BroadcastId) -> Result<bool, PortError> {
         unavailable()
     }
+
+    async fn is_active(&self, _: BroadcastId) -> Result<bool, PortError> {
+        unavailable()
+    }
 }
 
 #[async_trait]

@@ -201,7 +201,8 @@ async fn missed_reports_are_repaired_from_what_is_on_air(pool: PgPool) {
     assert_eq!(stored(&pool, 4).await, ("LIVE".into(), 2, false, false));
     assert!(reaped.expired.is_empty());
     assert_eq!(stored(&pool, 5).await, ("ENDED".into(), 1, false, false));
-    assert!(kicks.0.lock().unwrap().is_empty());
+    assert_eq!(reaped.not_active, ids(&[5]), "ended, yet still on air");
+    assert_eq!(*kicks.0.lock().unwrap(), ["live/5"]);
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -304,4 +305,34 @@ async fn an_edit_does_not_postpone_the_interrupt_of_a_live_broadcast_without_a_s
         .unwrap();
 
     assert_eq!(reaped.reconciled.interrupted, ids(&[1]));
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn streams_of_broadcasts_that_are_not_on_air_are_kicked_every_pass(pool: PgPool) {
+    owners(&pool, 3).await;
+    broadcast(&pool, 1, "LIVE", 60.0).await;
+    broadcast(&pool, 2, "ENDED", 60.0).await;
+    broadcast(&pool, 3, "ENDED", 60.0).await;
+    sqlx::query("UPDATE broadcasts SET deleted_at = now() WHERE id = 3")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let unknown = 99;
+    let kicks = Arc::new(Kicks::default());
+
+    for pass in 1..=2 {
+        let mut reaped = reaper(&pool, Probe::on_air(&[1, 2, 3, unknown]), kicks.clone())
+            .tick()
+            .await
+            .unwrap()
+            .unwrap();
+        reaped.not_active.sort_by_key(|id| id.as_i64());
+        assert_eq!(reaped.not_active, ids(&[2, 3, unknown]), "pass {pass}");
+        let mut kicked = kicks.0.lock().unwrap().clone();
+        kicked.sort();
+        assert_eq!(kicked, ["live/2", "live/3", "live/99"], "pass {pass}");
+        kicks.0.lock().unwrap().clear();
+    }
+    assert_eq!(stored(&pool, 2).await, ("ENDED".into(), 1, false, false));
 }

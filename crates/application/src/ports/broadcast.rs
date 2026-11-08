@@ -97,6 +97,10 @@ pub trait PublisherPresence: Send + Sync {
     /// Applies [`domain::broadcast::BroadcastEvent::Resume`]. Whether the
     /// status changed.
     async fn resume(&self, id: BroadcastId) -> Result<bool, PortError>;
+
+    /// Whether the broadcast is stored, not deleted, and in
+    /// [`BroadcastStatus::ACTIVE`].
+    async fn is_active(&self, id: BroadcastId) -> Result<bool, PortError>;
 }
 
 /// Where the reaper's passes run. One pass at a time across every API
@@ -122,6 +126,10 @@ pub trait ReapPass: Send {
         on_air: &[BroadcastId],
         grace: Duration,
     ) -> Result<Reconciled, PortError>;
+
+    /// The broadcasts in `on_air` that are not active: ended, deleted, or
+    /// never stored. Nobody may publish to them.
+    async fn not_active(&mut self, on_air: &[BroadcastId]) -> Result<Vec<BroadcastId>, PortError>;
 
     /// Applies [`domain::broadcast::BroadcastEvent::Expire`] to every
     /// broadcast interrupted longer than `grace` ago.

@@ -39,7 +39,13 @@ pub fn spawn(reaper: Reaper) -> ReaperHandle {
                         tracing::warn!(%err, "reaper could not list the streams on air; nothing reconciled");
                     }
                     for (broadcast, err) in &reaped.kick_failures {
-                        tracing::warn!(%err, %broadcast, "expired, but the publisher was not disconnected");
+                        tracing::warn!(%err, %broadcast, "publisher was not disconnected; the next pass retries");
+                    }
+                    if !reaped.not_active.is_empty() {
+                        tracing::warn!(
+                            broadcasts = %joined(&reaped.not_active),
+                            "disconnecting publishers of broadcasts that are not active"
+                        );
                     }
                     let changed = !reaped.expired.is_empty()
                         || !reaped.reconciled.interrupted.is_empty()

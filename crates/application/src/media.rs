@@ -14,7 +14,7 @@ use crate::ports::{
     broadcast::PublisherPresence,
     media::{
         IngestRouter, MediaCredentialVerifier, PublishTicketLedger, RedeemRejection, StreamPath,
-        TicketId,
+        StreamTerminator, TicketId,
     },
 };
 
@@ -78,8 +78,10 @@ pub struct AdmitMediaAccess {
 impl AdmitMediaAccess {
     /// A publisher gets in only with an unused ticket for this path, issued to
     /// the owner of a broadcast that is live or interrupted. Using the ticket
-    /// up and checking the broadcast happen in one write, so a stopped
-    /// broadcast or a replayed ticket is refused even under races.
+    /// up and checking the broadcast happen in one write, so a replayed ticket
+    /// is refused even under races. A stop that commits after that write
+    /// cannot keep this publisher out; [`TrackPublisher`] disconnects it when
+    /// its stream comes up, and the reaper on its next pass.
     pub async fn run(&self, access: MediaAccess) -> Result<Result<Admitted, Denied>, PortError> {
         match access {
             MediaAccess::Publish { path, token } => self.publish(&path, token).await,
@@ -140,7 +142,7 @@ pub enum PublisherSignal {
     Left,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Observed {
     /// The path names no broadcast.
     UnknownPath,
@@ -149,6 +151,12 @@ pub enum Observed {
     /// The signal did not apply in the broadcast's status, such as a late
     /// report about an ended broadcast.
     Unchanged(BroadcastId),
+    /// A stream came up for a broadcast that is not active, so its publisher
+    /// was told to leave.
+    NotActive {
+        broadcast: BroadcastId,
+        kick: Result<(), PortError>,
+    },
 }
 
 /// Follows the media server's reports. They are hints that can arrive late,
@@ -157,6 +165,7 @@ pub enum Observed {
 pub struct TrackPublisher {
     pub presence: Arc<dyn PublisherPresence>,
     pub ingest: Arc<dyn IngestRouter>,
+    pub terminator: Arc<dyn StreamTerminator>,
 }
 
 impl TrackPublisher {
@@ -172,11 +181,16 @@ impl TrackPublisher {
             PublisherSignal::Arrived => self.presence.resume(broadcast).await?,
             PublisherSignal::Left => self.presence.interrupt(broadcast).await?,
         };
-        Ok(if changed {
-            Observed::Changed(broadcast)
-        } else {
-            Observed::Unchanged(broadcast)
-        })
+        if changed {
+            return Ok(Observed::Changed(broadcast));
+        }
+        if signal == PublisherSignal::Arrived && !self.presence.is_active(broadcast).await? {
+            return Ok(Observed::NotActive {
+                broadcast,
+                kick: self.terminator.kick(path).await,
+            });
+        }
+        Ok(Observed::Unchanged(broadcast))
     }
 }
 
@@ -370,29 +384,59 @@ mod tests {
         assert_eq!(redeemed, 0);
     }
 
+    /// Interrupts change the status of an active broadcast, resumes never
+    /// change it.
     #[derive(Default)]
-    struct Presence(Mutex<Vec<(&'static str, BroadcastId)>>);
+    struct Presence {
+        calls: Mutex<Vec<(&'static str, BroadcastId)>>,
+        active: bool,
+    }
 
     #[async_trait]
     impl PublisherPresence for Presence {
         async fn interrupt(&self, id: BroadcastId) -> Result<bool, PortError> {
-            self.0.lock().unwrap().push(("interrupt", id));
-            Ok(true)
+            self.calls.lock().unwrap().push(("interrupt", id));
+            Ok(self.active)
         }
 
         async fn resume(&self, id: BroadcastId) -> Result<bool, PortError> {
-            self.0.lock().unwrap().push(("resume", id));
+            self.calls.lock().unwrap().push(("resume", id));
             Ok(false)
         }
+
+        async fn is_active(&self, _: BroadcastId) -> Result<bool, PortError> {
+            Ok(self.active)
+        }
+    }
+
+    #[derive(Default)]
+    struct Kicks(Mutex<Vec<String>>);
+
+    #[async_trait]
+    impl StreamTerminator for Kicks {
+        async fn kick(&self, path: &StreamPath) -> Result<(), PortError> {
+            self.0.lock().unwrap().push(path.as_str().to_owned());
+            Ok(())
+        }
+    }
+
+    fn track(active: bool) -> (TrackPublisher, Arc<Presence>, Arc<Kicks>) {
+        let presence = Arc::new(Presence {
+            active,
+            ..Presence::default()
+        });
+        let kicks = Arc::new(Kicks::default());
+        let track = TrackPublisher {
+            presence: presence.clone(),
+            ingest: Arc::new(Live),
+            terminator: kicks.clone(),
+        };
+        (track, presence, kicks)
     }
 
     #[tokio::test]
     async fn arrivals_resume_departures_interrupt_and_unknown_paths_do_nothing() {
-        let presence = Arc::new(Presence::default());
-        let track = TrackPublisher {
-            presence: presence.clone(),
-            ingest: Arc::new(Live),
-        };
+        let (track, presence, kicks) = track(true);
         let live = path(&format!("live/{BROADCAST}"));
         assert_eq!(
             track.run(&live, PublisherSignal::Left).await.unwrap(),
@@ -410,8 +454,28 @@ mod tests {
             Observed::UnknownPath
         );
         assert_eq!(
-            *presence.0.lock().unwrap(),
+            *presence.calls.lock().unwrap(),
             [("interrupt", id(BROADCAST)), ("resume", id(BROADCAST))]
         );
+        assert!(kicks.0.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_comes_up_for_a_broadcast_that_is_not_active_is_kicked() {
+        let (track, _, kicks) = track(false);
+        let live = path(&format!("live/{BROADCAST}"));
+        assert_eq!(
+            track.run(&live, PublisherSignal::Arrived).await.unwrap(),
+            Observed::NotActive {
+                broadcast: id(BROADCAST),
+                kick: Ok(())
+            }
+        );
+        assert_eq!(
+            track.run(&live, PublisherSignal::Left).await.unwrap(),
+            Observed::Unchanged(id(BROADCAST)),
+            "a departure is never kicked"
+        );
+        assert_eq!(*kicks.0.lock().unwrap(), [live.as_str()]);
     }
 }

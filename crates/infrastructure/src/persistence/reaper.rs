@@ -6,7 +6,7 @@ use application::ports::{
 };
 use async_trait::async_trait;
 use domain::{
-    broadcast::{BroadcastEvent, BroadcastId},
+    broadcast::{BroadcastEvent, BroadcastId, BroadcastStatus},
     id::SnowflakeId,
 };
 use sqlx::{PgPool, Postgres, Transaction};
@@ -111,6 +111,23 @@ impl ReapPass for PgReapPass {
             interrupted: to_ids(interrupted)?,
             resumed: to_ids(resumed)?,
         })
+    }
+
+    async fn not_active(&mut self, on_air: &[BroadcastId]) -> Result<Vec<BroadcastId>, PortError> {
+        let on_air: Vec<i64> = on_air.iter().map(|id| id.as_i64()).collect();
+        let not_active: Vec<i64> = sqlx::query_scalar(
+            "SELECT on_air.id FROM unnest($1::BIGINT[]) AS on_air(id) \
+             WHERE NOT EXISTS ( \
+                 SELECT 1 FROM broadcasts b \
+                 WHERE b.id = on_air.id AND b.status = ANY($2) AND b.deleted_at IS NULL \
+             )",
+        )
+        .bind(&on_air)
+        .bind(status_names(&BroadcastStatus::ACTIVE))
+        .fetch_all(&mut *self.tx)
+        .await
+        .map_err(port_error)?;
+        to_ids(not_active)
     }
 
     async fn expire(&mut self, grace: Duration) -> Result<Vec<BroadcastId>, PortError> {

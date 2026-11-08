@@ -278,6 +278,20 @@ impl PublisherPresence for PgBroadcastRepository {
     async fn resume(&self, id: BroadcastId) -> Result<bool, PortError> {
         self.presence(id, BroadcastEvent::Resume).await
     }
+
+    async fn is_active(&self, id: BroadcastId) -> Result<bool, PortError> {
+        sqlx::query_scalar(
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM broadcasts \
+                 WHERE id = $1 AND status = ANY($2) AND deleted_at IS NULL \
+             )",
+        )
+        .bind(id.as_i64())
+        .bind(status_names(&BroadcastStatus::ACTIVE))
+        .fetch_one(&self.pool)
+        .await
+        .map_err(port_error)
+    }
 }
 
 /// The read side of `broadcasts`, joined with the owner's name.

@@ -20,12 +20,17 @@ pub const REAP_INTERVAL: Duration = Duration::from_secs(5);
 pub struct Reaped {
     pub reconciled: Reconciled,
     pub expired: Vec<BroadcastId>,
+    /// On air although not active, such as a broadcast stopped while its
+    /// publisher was being let in, or one whose kick failed before. Kicked on
+    /// every pass that still sees them.
+    pub not_active: Vec<BroadcastId>,
     pub forgotten_tickets: u64,
     /// The media server could not be asked, so nothing was reconciled. A
     /// pass never interrupts broadcasts because the media server is
     /// unreachable.
     pub probe_failure: Option<PortError>,
-    /// Ended broadcasts whose publisher could not be disconnected.
+    /// Expired or not active broadcasts whose publisher could not be
+    /// disconnected; the next pass tries again while they are on air.
     pub kick_failures: Vec<(BroadcastId, PortError)>,
 }
 
@@ -52,6 +57,7 @@ impl Reaper {
                     .filter_map(|path| self.ingest.broadcast_of(path))
                     .collect();
                 reaped.reconciled = pass.reconcile(&on_air, INTERRUPT_GRACE).await?;
+                reaped.not_active = pass.not_active(&on_air).await?;
             }
             Err(err) => reaped.probe_failure = Some(err),
         }
@@ -59,7 +65,7 @@ impl Reaper {
         reaped.forgotten_tickets = pass.forget_spent_tickets().await?;
         pass.finish().await?;
 
-        for &id in &reaped.expired {
+        for &id in reaped.expired.iter().chain(&reaped.not_active) {
             if let Err(err) = self.terminator.kick(&self.ingest.route(id).path).await {
                 reaped.kick_failures.push((id, err));
             }

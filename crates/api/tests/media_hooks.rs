@@ -11,7 +11,9 @@ use axum::{
 use base64ct::{Base64, Encoding};
 use serde_json::{Value, json};
 use sqlx::PgPool;
-use support::{MEDIA_SECRET, PASSWORD, Reply, request, send, sign_up, state};
+use std::sync::atomic::Ordering;
+
+use support::{MEDIA_SECRET, PASSWORD, Reply, live_state, request, send, sign_up, state};
 
 async fn hook_with(router: &Router, secret: Option<&str>, body: Value) -> Reply {
     let mut builder = Request::builder()
@@ -114,19 +116,26 @@ async fn a_publisher_leaving_interrupts_and_coming_back_resumes(pool: PgPool) {
 
 #[sqlx::test(migrations = "../infrastructure/migrations")]
 #[ignore = "requires DATABASE_URL (Postgres)"]
-async fn reports_never_move_a_ready_or_ended_broadcast(pool: PgPool) {
-    let router = api::app(state(&pool, false).await);
+async fn reports_never_move_a_ready_or_ended_broadcast_and_its_stream_is_kicked(pool: PgPool) {
+    let (state, kicks) = live_state(&pool, false).await;
+    let router = api::app(state);
     let owner = sign_up(&router, "owner", PASSWORD).await.token();
     for status in ["READY", "ENDED"] {
         let id = broadcast_in(&router, &pool, &owner, status).await;
         let before = stored(&pool, &id).await;
-        for event in ["available", "unavailable"] {
+        for (event, kicked) in [("available", 1), ("unavailable", 0)] {
+            let kicks_before = kicks.kicks.load(Ordering::SeqCst);
             assert_eq!(
                 hook(&router, event, &id).await,
                 StatusCode::NO_CONTENT,
                 "{status} {event}"
             );
             assert_eq!(stored(&pool, &id).await, before, "{status} {event}");
+            assert_eq!(
+                kicks.kicks.load(Ordering::SeqCst) - kicks_before,
+                kicked,
+                "{status} {event}"
+            );
         }
     }
 }
