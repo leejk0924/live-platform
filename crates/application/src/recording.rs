@@ -726,6 +726,39 @@ mod tests {
         }
     }
 
+    /// Records the filter each list was asked for.
+    #[derive(Default)]
+    struct Filters(Mutex<Vec<RecordingFilter>>);
+
+    #[async_trait]
+    impl RecordingQuery for Filters {
+        async fn list(
+            &self,
+            filter: RecordingFilter,
+            _: Option<RecordingId>,
+            _: u32,
+        ) -> Result<Vec<RecordingView>, PortError> {
+            self.0.lock().unwrap().push(filter);
+            Ok(Vec::new())
+        }
+
+        async fn get(&self, _: RecordingId) -> Result<Option<RecordingView>, PortError> {
+            Ok(None)
+        }
+    }
+
+    #[tokio::test]
+    async fn list_passes_the_broadcast_filter_through() {
+        let filters = Arc::new(Filters::default());
+        let list = ListRecordings {
+            query: filters.clone(),
+        };
+        let only = RecordingFilter::Broadcast(id(BROADCAST));
+        list.run(only, None, None).await.unwrap();
+        list.run(RecordingFilter::All, None, None).await.unwrap();
+        assert_eq!(*filters.0.lock().unwrap(), [only, RecordingFilter::All]);
+    }
+
     /// Writes the expiry it was asked for into the URL.
     struct Signer;
 
