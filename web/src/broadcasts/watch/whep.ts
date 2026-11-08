@@ -14,7 +14,12 @@ const CONNECT_TIMEOUT_MS = 10_000
 // Watching needs no credentials, so unlike WHIP there is no bearer token.
 // Resolves only once media can flow, so a caller never shows a peer that is still connecting.
 export async function receive(whepUrl: string, signal: AbortSignal): Promise<Reception> {
-  const deadline = AbortSignal.any([signal, AbortSignal.timeout(CONNECT_TIMEOUT_MS)])
+  // Hand-rolled rather than AbortSignal.any, which iOS lacks before 17.4, and iOS plays only through WHEP.
+  const deadline = new AbortController()
+  const abort = () => deadline.abort(signal.reason)
+  if (signal.aborted) abort()
+  else signal.addEventListener('abort', abort, { once: true })
+  const timer = setTimeout(() => deadline.abort(new DOMException('WHEP did not connect in time', 'TimeoutError')), CONNECT_TIMEOUT_MS)
   const peer = new RTCPeerConnection()
   const stream = new MediaStream()
   peer.addEventListener('track', (event) => stream.addTrack(event.track))
@@ -33,15 +38,18 @@ export async function receive(whepUrl: string, signal: AbortSignal): Promise<Rec
       method: 'POST',
       headers: { 'Content-Type': 'application/sdp' },
       body: peer.localDescription?.sdp,
-      signal: deadline,
+      signal: deadline.signal,
     })
     if (response.status !== 201) throw new Error(`WHEP endpoint answered ${response.status}`)
     session = response.headers.get('Location')
     await peer.setRemoteDescription({ type: 'answer', sdp: await response.text() })
-    await waitConnected(peer, deadline)
+    await waitConnected(peer, deadline.signal)
     return { peer, stream, close }
   } catch (error) {
     close()
     throw error
+  } finally {
+    clearTimeout(timer)
+    signal.removeEventListener('abort', abort)
   }
 }
