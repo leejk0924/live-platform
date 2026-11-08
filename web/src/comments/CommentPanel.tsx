@@ -4,7 +4,7 @@ import { ApiError, errorMessage } from '../api/client.ts'
 import { commentApi, eventsUrl } from '../api/comments.ts'
 import type { Broadcast, ChatPolicy, Comment } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
-import { draftAfterSaveError, startEdit, type EditDraft } from './commentEdit.ts'
+import { draftAfterSaveError, saveArgs, startEdit, type EditDraft } from './commentEdit.ts'
 import { parseComments } from './events.ts'
 import { commentsReducer, initialComments, visibleComments, type CommentsAction } from './commentsState.ts'
 
@@ -207,7 +207,8 @@ function CommentItem({
     if (draft === null) return
     void run(
       async () => {
-        const saved = await commentApi.edit(broadcastId, comment.id, draft.version, draft.body)
+        const { commentId, version, body } = saveArgs(comment, draft)
+        const saved = await commentApi.edit(broadcastId, commentId, version, body)
         dispatch({ type: 'changed', items: [saved] })
         setDraft(null)
       },

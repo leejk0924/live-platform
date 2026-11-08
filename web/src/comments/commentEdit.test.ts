@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { ApiError } from '../api/client.ts'
 import type { Comment } from '../api/types.ts'
-import { draftAfterSaveError, startEdit } from './commentEdit.ts'
+import { draftAfterSaveError, saveArgs, startEdit } from './commentEdit.ts'
 
 const comment = (version: number, body: string): Comment => ({
   id: '1',
@@ -18,10 +18,10 @@ const comment = (version: number, body: string): Comment => ({
 })
 
 test('an edit saves against the version it started from', () => {
-  const draft = startEdit(comment(1, 'first'))
+  const draft = { ...startEdit(comment(1, 'first')), body: 'mine' }
   // Another tab edits the comment while this draft is open; the stream brings version 2.
-  const typed = { ...draft, body: 'mine' }
-  assert.deepEqual(typed, { body: 'mine', version: 1 })
+  const latest = comment(2, 'theirs')
+  assert.deepEqual(saveArgs(latest, draft), { commentId: '1', version: 1, body: 'mine' })
 })
 
 test('a version conflict closes the draft so the current comment shows', () => {

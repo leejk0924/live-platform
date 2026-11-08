@@ -7,6 +7,13 @@ export type EditDraft = { body: string; version: number }
 
 export const startEdit = (comment: Comment): EditDraft => ({ body: comment.body ?? '', version: comment.version })
 
+// What saving `draft` sends: the comment is the one shown now, the version the draft's own.
+export const saveArgs = (comment: Comment, draft: EditDraft) => ({
+  commentId: comment.id,
+  version: draft.version,
+  body: draft.body,
+})
+
 // The draft to keep after saving failed. A version conflict closes it: its version can never
 // succeed again, and the form would hide the comment that changed. Editing again starts from the
 // current version.
