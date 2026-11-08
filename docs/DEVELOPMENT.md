@@ -121,7 +121,7 @@ docker run -d --name lp-test-pg -e POSTGRES_PASSWORD=test -p 55432:5432 postgres
 `web/`을 바꿨다면:
 
 ```bash
-cd web && npm run lint && npm run typecheck && npm run build
+cd web && npm run lint && npm test && npm run typecheck && npm run build
 ```
 
 | CI job | 검사 |
@@ -130,7 +130,7 @@ cd web && npm run lint && npm run typecheck && npm run build
 | `cargo-deny` | 라이선스, 취약점, 금지 crate |
 | `gitleaks` | 비밀값 유출 |
 | `commit-messages` | 커밋 메시지 형식 (PR만) |
-| `web` | lint, typecheck, build |
+| `web` | lint, test, typecheck, build |
 
 ## 7. 코드 규칙 요약
 
