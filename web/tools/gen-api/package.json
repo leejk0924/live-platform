@@ -1,0 +1,11 @@
+{
+  "name": "gen-api",
+  "private": true,
+  "scripts": {
+    "gen": "openapi-typescript ../../src/api/openapi.json -o ../../src/api/schema.d.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,4 +1,7 @@
-use application::ports::auth::{Inserted, PortError, UserRepository};
+use application::ports::{
+    PortError,
+    auth::{Inserted, UserRepository},
+};
 use async_trait::async_trait;
 use domain::{
     auth::{Credential, PasswordHash, User, UserId, Username},

@@ -4,19 +4,22 @@ use std::{
 };
 
 use application::ports::{
-    auth::{Inserted, PasswordHasher, PortError, SessionStore, UserRepository},
+    PortError,
+    auth::{Inserted, PasswordHasher, SessionStore, UserRepository},
+    broadcast::{BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, WriteRejection},
     id::{IdGenerationError, IdGenerator},
 };
 use async_trait::async_trait;
 use domain::{
     auth::{Password, PasswordHash, SessionToken, User, UserId, Username},
+    broadcast::{Broadcast, BroadcastDescription, BroadcastId, BroadcastTitle, Version},
     id::SnowflakeId,
 };
 use infrastructure::auth::BreachedPasswordList;
 use tracing::Subscriber;
 use tracing_subscriber::fmt::MakeWriter;
 
-use crate::{AppState, auth::AuthPorts, config::Origin};
+use crate::{AppState, auth::AuthPorts, broadcast::BroadcastPorts, config::Origin};
 
 /// Stands in for every port a test does not exercise; each call fails.
 struct Unavailable;
@@ -72,6 +75,43 @@ impl PasswordHasher for Unavailable {
     }
 }
 
+#[async_trait]
+impl BroadcastRepository for Unavailable {
+    async fn insert(&self, _: &NewBroadcast) -> Result<Broadcast, PortError> {
+        unavailable()
+    }
+
+    async fn update(
+        &self,
+        _: BroadcastId,
+        _: UserId,
+        _: Version,
+        _: &BroadcastTitle,
+        _: &BroadcastDescription,
+    ) -> Result<Result<Broadcast, WriteRejection>, PortError> {
+        unavailable()
+    }
+
+    async fn soft_delete(
+        &self,
+        _: BroadcastId,
+        _: UserId,
+    ) -> Result<Result<(), WriteRejection>, PortError> {
+        unavailable()
+    }
+}
+
+#[async_trait]
+impl BroadcastQuery for Unavailable {
+    async fn list(&self, _: Option<BroadcastId>, _: u32) -> Result<Vec<BroadcastView>, PortError> {
+        unavailable()
+    }
+
+    async fn get(&self, _: BroadcastId) -> Result<Option<BroadcastView>, PortError> {
+        unavailable()
+    }
+}
+
 pub const TEST_ORIGIN: &str = "https://app.test";
 
 pub fn test_state() -> AppState {
@@ -82,7 +122,16 @@ pub fn test_state() -> AppState {
         hasher: Arc::new(Unavailable),
         breached: Arc::new(BreachedPasswordList::load()),
     };
-    AppState::new(ports, vec![Origin::parse(TEST_ORIGIN).unwrap()], false)
+    let broadcast_ports = BroadcastPorts {
+        repository: Arc::new(Unavailable),
+        query: Arc::new(Unavailable),
+    };
+    AppState::new(
+        ports,
+        broadcast_ports,
+        vec![Origin::parse(TEST_ORIGIN).unwrap()],
+        false,
+    )
 }
 
 /// Captures JSON log lines so tests can assert what reached the logs.

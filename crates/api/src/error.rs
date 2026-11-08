@@ -20,6 +20,7 @@ use axum::{
 use domain::error::{DomainError, ErrorKind};
 use serde::Serialize;
 use tracing::Instrument;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 pub const TRACE_ID_HEADER: &str = "x-trace-id";
@@ -65,6 +66,30 @@ impl ApiError {
         )
     }
 
+    pub fn invalid_query() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "INVALID_QUERY",
+            "query parameters are invalid",
+        )
+    }
+
+    pub fn if_match_required() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "IF_MATCH_REQUIRED",
+            "If-Match header with the version to update is required",
+        )
+    }
+
+    pub fn invalid_if_match() -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "INVALID_IF_MATCH",
+            "If-Match must be one version tag such as \"3\"",
+        )
+    }
+
     pub fn csrf_rejected() -> Self {
         Self::new(
             StatusCode::FORBIDDEN,
@@ -83,6 +108,11 @@ impl ApiError {
                 "too many requests, try again later",
             )
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn code(&self) -> &'static str {
+        self.code
     }
 
     fn new(status: StatusCode, code: &'static str, message: &str) -> Self {
@@ -147,11 +177,15 @@ impl IntoResponse for ApiError {
     }
 }
 
-#[derive(Serialize)]
+/// The body of every error response.
+#[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct ErrorBody<'a> {
+pub struct ErrorBody<'a> {
+    /// Stable SCREAMING_SNAKE identifier to match on, such as `VERSION_CONFLICT`.
     code: &'a str,
+    /// Human-readable; do not match on it.
     message: &'a str,
+    /// Also in the `x-trace-id` header; quote it when reporting a problem.
     trace_id: &'a str,
 }
 

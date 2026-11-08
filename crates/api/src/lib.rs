@@ -2,10 +2,12 @@
 //! tests share it, and items the next handlers will use are not dead code.
 
 pub mod auth;
+pub mod broadcast;
 pub mod config;
 pub mod csrf;
 pub mod error;
 pub mod json;
+pub mod openapi;
 pub mod rate_limit;
 #[cfg(test)]
 mod test_support;
@@ -18,6 +20,7 @@ use tower_http::catch_panic::CatchPanicLayer;
 
 use crate::{
     auth::{AuthPorts, AuthUseCases},
+    broadcast::{BroadcastPorts, BroadcastUseCases},
     config::Origin,
     error::ApiError,
     rate_limit::RateLimits,
@@ -28,15 +31,24 @@ use crate::{
 pub struct AppState {
     pub ids: Arc<dyn IdGenerator>,
     pub auth: Arc<AuthUseCases>,
+    pub broadcasts: Arc<BroadcastUseCases>,
     pub allowed_origins: Arc<[Origin]>,
     pub limits: Arc<RateLimits>,
 }
 
 impl AppState {
-    pub fn new(ports: AuthPorts, allowed_origins: Vec<Origin>, demo_login_enabled: bool) -> Self {
+    pub fn new(
+        ports: AuthPorts,
+        broadcast_ports: BroadcastPorts,
+        allowed_origins: Vec<Origin>,
+        demo_login_enabled: bool,
+    ) -> Self {
+        let broadcasts =
+            BroadcastUseCases::new(broadcast_ports, ports.ids.clone(), ports.users.clone());
         Self {
             ids: ports.ids.clone(),
             auth: Arc::new(AuthUseCases::new(ports, demo_login_enabled)),
+            broadcasts: Arc::new(broadcasts),
             allowed_origins: allowed_origins.into(),
             limits: Arc::new(RateLimits::default()),
         }
@@ -46,7 +58,9 @@ impl AppState {
 pub fn app(state: AppState) -> Router {
     let api = Router::new()
         .route("/healthz", get(healthz))
+        .route("/openapi.json", get(openapi::spec))
         .nest("/auth", auth::routes())
+        .merge(broadcast::routes())
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state.allowed_origins),
             csrf::guard,
@@ -91,6 +105,25 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), 64).await.unwrap();
         assert_eq!(&body[..], b"ok");
+    }
+
+    #[tokio::test]
+    async fn openapi_json_is_served() {
+        let response = app(test_state())
+            .oneshot(
+                Request::get("/api/openapi.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1 << 20).await.unwrap())
+                .unwrap();
+        assert_eq!(body["info"]["title"], "live-platform API");
+        assert!(body["paths"]["/api/broadcasts/{id}"]["put"].is_object());
     }
 
     async fn envelope_of(router: Router, request: Request<Body>) -> (StatusCode, Value) {

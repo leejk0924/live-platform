@@ -12,12 +12,16 @@ use std::{
 use api::{
     AppState, app,
     auth::AuthPorts,
+    broadcast::BroadcastPorts,
     config::{Config, listen_addr},
 };
 use infrastructure::{
     auth::{Argon2Hasher, BreachedPasswordList},
     id::SnowflakeIdGenerator,
-    persistence::{self, PgSessionStore, PgUserRepository, PgWorkerIdAllocator},
+    persistence::{
+        self, PgBroadcastQuery, PgBroadcastRepository, PgSessionStore, PgUserRepository,
+        PgWorkerIdAllocator,
+    },
 };
 use tokio::{net::TcpListener, sync::oneshot};
 use tracing_subscriber::EnvFilter;
@@ -91,8 +95,13 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         hasher: Arc::new(hasher),
         breached: Arc::new(BreachedPasswordList::load()),
     };
+    let broadcast_ports = BroadcastPorts {
+        repository: Arc::new(PgBroadcastRepository::new(pool.clone())),
+        query: Arc::new(PgBroadcastQuery::new(pool.clone())),
+    };
     let state = AppState::new(
         ports,
+        broadcast_ports,
         config.allowed_origins.clone(),
         config.demo_login_enabled,
     );

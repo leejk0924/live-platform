@@ -1,23 +1,10 @@
-// Hand-written until issue #6 generates these from the OpenAPI document.
+import type { components } from './schema.d.ts'
 
-export type User = {
-  id: string
-  username: string
-}
+type Schemas = components['schemas']
 
-export type Credentials = {
-  username: string
-  password: string
-}
-
-export type DemoAccount = 'streamer' | 'viewer'
-
-export type DemoStatus = {
-  enabled: boolean
-}
-
-export type ErrorBody = {
-  code: string
-  message: string
-  traceId: string
-}
+export type User = Schemas['User']
+export type Credentials = Schemas['Credentials']
+export type DemoAccount = Schemas['DemoAccount']
+export type Broadcast = Schemas['Broadcast']
+export type BroadcastInput = Schemas['BroadcastInput']
+export type BroadcastStatus = Schemas['BroadcastStatus']

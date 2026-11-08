@@ -1,5 +1,6 @@
 //! PostgreSQL adapters.
 
+mod broadcast;
 mod session;
 mod user;
 mod worker_lease;
@@ -13,6 +14,7 @@ use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
 };
 
+pub use broadcast::{PgBroadcastQuery, PgBroadcastRepository};
 pub use session::{ABSOLUTE_TIMEOUT, IDLE_TIMEOUT, PgSessionStore};
 pub use sqlx::Error as DbError;
 pub use user::PgUserRepository;

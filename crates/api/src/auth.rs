@@ -28,8 +28,13 @@ use domain::{
 };
 use infrastructure::persistence::ABSOLUTE_TIMEOUT;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-use crate::{AppState, error::ApiError, rate_limit::ClientKey};
+use crate::{
+    AppState,
+    error::{ApiError, ErrorBody},
+    rate_limit::ClientKey,
+};
 
 pub const SESSION_COOKIE: &str = "__Host-session";
 
@@ -163,21 +168,25 @@ impl FromRequestParts<AppState> for MaybeUser {
     }
 }
 
-#[derive(Deserialize)]
-struct Credentials {
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct Credentials {
+    /// 3 to 20 characters of `a-z`, `0-9`, `_` and `-`.
     username: String,
+    /// 10 to 128 characters.
+    #[schema(format = Password)]
     password: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct DemoLoginRequest {
+pub(crate) struct DemoLoginRequest {
     account: DemoAccountDto,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
-enum DemoAccountDto {
+#[schema(as = DemoAccount)]
+pub(crate) enum DemoAccountDto {
     Streamer,
     Viewer,
 }
@@ -191,10 +200,13 @@ impl From<DemoAccountDto> for DemoAccount {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct UserResponse {
+#[schema(as = User)]
+pub(crate) struct UserResponse {
+    /// Snowflake id as a decimal string.
     #[serde(with = "crate::json::snowflake_id")]
+    #[schema(value_type = String, example = "112007302751453184")]
     id: SnowflakeId,
     username: String,
 }
@@ -208,9 +220,9 @@ impl From<&User> for UserResponse {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct DemoStatus {
+pub(crate) struct DemoStatus {
     enabled: bool,
 }
 
@@ -236,7 +248,22 @@ fn signed_in(status: StatusCode, signed_in: SignedIn) -> Response {
         .into_response()
 }
 
-async fn sign_up(
+#[utoipa::path(
+    post,
+    path = "/api/auth/signup",
+    operation_id = "signUp",
+    tag = "auth",
+    summary = "Create an account and sign in",
+    request_body = Credentials,
+    responses(
+        (status = 201, body = UserResponse, description = "Signed up and signed in.", headers(("Set-Cookie" = String, description = "`__Host-session=<token>; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`"))),
+        (status = 400, body = ErrorBody, description = "`INVALID_USERNAME`, `PASSWORD_TOO_SHORT`, `PASSWORD_TOO_LONG`, `PASSWORD_BREACHED` or `INVALID_REQUEST`"),
+        (status = 403, body = ErrorBody, description = "`CSRF_REJECTED`"),
+        (status = 409, body = ErrorBody, description = "`USERNAME_TAKEN`"),
+        (status = 429, body = ErrorBody, description = "`RATE_LIMITED`", headers(("Retry-After" = String, description = "Seconds to wait"))),
+    ),
+)]
+pub(crate) async fn sign_up(
     State(state): State<AppState>,
     client: ClientKey,
     SessionCookie(previous): SessionCookie,
@@ -257,7 +284,22 @@ async fn sign_up(
     Ok(signed_in(StatusCode::CREATED, result))
 }
 
-async fn log_in(
+#[utoipa::path(
+    post,
+    path = "/api/auth/login",
+    operation_id = "logIn",
+    tag = "auth",
+    summary = "Sign in with a password",
+    request_body = Credentials,
+    responses(
+        (status = 200, body = UserResponse, description = "Signed in; any session the request carried is revoked.", headers(("Set-Cookie" = String, description = "`__Host-session=<token>; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`"))),
+        (status = 400, body = ErrorBody, description = "`INVALID_REQUEST`"),
+        (status = 401, body = ErrorBody, description = "`INVALID_CREDENTIALS`"),
+        (status = 403, body = ErrorBody, description = "`CSRF_REJECTED`"),
+        (status = 429, body = ErrorBody, description = "`RATE_LIMITED`", headers(("Retry-After" = String, description = "Seconds to wait"))),
+    ),
+)]
+pub(crate) async fn log_in(
     State(state): State<AppState>,
     client: ClientKey,
     SessionCookie(previous): SessionCookie,
@@ -278,7 +320,22 @@ async fn log_in(
     Ok(signed_in(StatusCode::OK, result))
 }
 
-async fn demo_log_in(
+#[utoipa::path(
+    post,
+    path = "/api/auth/demo-login",
+    operation_id = "demoLogIn",
+    tag = "auth",
+    summary = "Sign in to a demo account",
+    request_body = DemoLoginRequest,
+    responses(
+        (status = 200, body = UserResponse, description = "Signed in.", headers(("Set-Cookie" = String, description = "`__Host-session=<token>; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`"))),
+        (status = 400, body = ErrorBody, description = "`INVALID_REQUEST`"),
+        (status = 403, body = ErrorBody, description = "`CSRF_REJECTED`"),
+        (status = 404, body = ErrorBody, description = "`NOT_FOUND`: demo login is disabled"),
+        (status = 429, body = ErrorBody, description = "`RATE_LIMITED`", headers(("Retry-After" = String, description = "Seconds to wait"))),
+    ),
+)]
+pub(crate) async fn demo_log_in(
     State(state): State<AppState>,
     client: ClientKey,
     SessionCookie(previous): SessionCookie,
@@ -295,7 +352,18 @@ async fn demo_log_in(
     Ok(signed_in(StatusCode::OK, result))
 }
 
-async fn log_out(
+#[utoipa::path(
+    post,
+    path = "/api/auth/logout",
+    operation_id = "logOut",
+    tag = "auth",
+    summary = "Sign out; succeeds without a session too",
+    responses(
+        (status = 204, description = "Signed out.", headers(("Set-Cookie" = String, description = "Clears the session cookie"))),
+        (status = 403, body = ErrorBody, description = "`CSRF_REJECTED`"),
+    ),
+)]
+pub(crate) async fn log_out(
     State(state): State<AppState>,
     SessionCookie(token): SessionCookie,
 ) -> Result<Response, ApiError> {
@@ -308,7 +376,19 @@ async fn log_out(
     Ok((StatusCode::NO_CONTENT, [(SET_COOKIE, cleared_cookie())]).into_response())
 }
 
-async fn me(
+#[utoipa::path(
+    get,
+    path = "/api/auth/me",
+    operation_id = "getMe",
+    tag = "auth",
+    summary = "The signed-in user",
+    security(("session" = [])),
+    responses(
+        (status = 200, body = UserResponse, description = "The signed-in user."),
+        (status = 401, body = ErrorBody, description = "`UNAUTHENTICATED`"),
+    ),
+)]
+pub(crate) async fn me(
     State(state): State<AppState>,
     SessionCookie(token): SessionCookie,
 ) -> Result<Json<UserResponse>, ApiError> {
@@ -322,7 +402,15 @@ async fn me(
     Ok(Json(UserResponse::from(&user)))
 }
 
-async fn demo_status(State(state): State<AppState>) -> Json<DemoStatus> {
+#[utoipa::path(
+    get,
+    path = "/api/auth/demo",
+    operation_id = "getDemoStatus",
+    tag = "auth",
+    summary = "Whether demo login is enabled",
+    responses((status = 200, body = DemoStatus, description = "Demo login availability.")),
+)]
+pub(crate) async fn demo_status(State(state): State<AppState>) -> Json<DemoStatus> {
     Json(DemoStatus {
         enabled: state.auth.demo_log_in.enabled,
     })

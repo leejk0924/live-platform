@@ -2,7 +2,10 @@
 
 use std::{collections::HashSet, sync::Arc};
 
-use application::ports::auth::{BreachedPasswords, PasswordHasher, PortError};
+use application::ports::{
+    PortError,
+    auth::{BreachedPasswords, PasswordHasher},
+};
 use argon2::{
     Algorithm, Argon2, Params, Version,
     password_hash::{Error as HashError, PasswordHasher as _, PasswordVerifier as _},
