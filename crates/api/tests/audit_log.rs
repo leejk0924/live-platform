@@ -145,3 +145,29 @@ async fn an_owner_ending_a_broadcast_audits_the_kick(pool: PgPool) {
     assert!(line.contains(&format!(r#""user":"{owner_id}""#)), "{line}");
     assert!(logs.audits("kick_failed").is_empty(), "{}", logs.contents());
 }
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_username_that_cannot_be_one_stays_out_of_the_audit(pool: PgPool) {
+    const MISTYPED_PASSWORD: &str = "Hunter2!Secret";
+    let (logs, _guard) = LogBuffer::capture();
+    let router = router(&pool, false).await;
+
+    let body = json!({"username": MISTYPED_PASSWORD, "password": WRONG_PASSWORD});
+    let reply = send(
+        &router,
+        request(Method::POST, "/api/auth/login", Some(body), None),
+    )
+    .await;
+
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{}", reply.body);
+    let audits = logs.audits("login_failed");
+    let [line] = audits.as_slice() else {
+        panic!("one login_failed audit expected in {}", logs.contents());
+    };
+    assert!(line.contains(r#""username":"<invalid>""#), "{line}");
+    assert!(
+        !logs.contents().contains(MISTYPED_PASSWORD),
+        "the mistyped password reached the logs"
+    );
+}

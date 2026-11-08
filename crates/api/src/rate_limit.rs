@@ -76,8 +76,8 @@ impl RateLimits {
 }
 
 /// Usernames are at most 20 characters, so keeping more of what a client
-/// sent buys an attacker nothing but memory and log volume.
-pub(crate) fn bounded_username(username: &str) -> String {
+/// sent buys an attacker nothing but memory.
+fn bounded_username(username: &str) -> String {
     username.chars().take(32).collect()
 }
 

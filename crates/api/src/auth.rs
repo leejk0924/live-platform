@@ -22,7 +22,7 @@ use axum::{
     routing::{get, post},
 };
 use domain::{
-    auth::{AuthError, DemoAccount, SessionToken, User, UserId},
+    auth::{AuthError, DemoAccount, SessionToken, User, UserId, Username},
     error::DomainError,
     id::SnowflakeId,
     secret::Secret,
@@ -35,7 +35,7 @@ use crate::{
     AppState,
     audit::{AuditEvent, audit},
     error::{ApiError, ErrorBody},
-    rate_limit::{ClientKey, bounded_username},
+    rate_limit::ClientKey,
 };
 
 pub const SESSION_COOKIE: &str = "__Host-session";
@@ -311,12 +311,15 @@ pub(crate) async fn log_in(
     body: Result<Json<Credentials>, JsonRejection>,
 ) -> Result<Response, ApiError> {
     let Json(body) = body.map_err(invalid_request)?;
+    // Anything that is not a username may be a password typed into the
+    // wrong field, so it stays out of the log.
+    let username = Username::parse(&body.username).ok();
     let refused = |code: &str| {
         audit!(
             warn,
             AuditEvent::LoginFailed,
             code,
-            username = bounded_username(&body.username),
+            username = username.as_ref().map_or("<invalid>", Username::as_str),
             "login refused"
         );
     };
