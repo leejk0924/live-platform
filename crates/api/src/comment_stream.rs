@@ -1,8 +1,9 @@
-//! `GET /api/broadcasts/{id}/events`: a broadcast's live comments as
-//! Server-Sent Events. Comment changes are batched for up to
+//! `GET /api/broadcasts/{id}/events`: a broadcast's live comments and
+//! donations as Server-Sent Events. Comment changes are batched for up to
 //! [`BATCH_WINDOW`] into one `comments` event whose id is the newest
 //! revision in it, so a reconnecting `EventSource` resumes from there with
-//! `Last-Event-ID`.
+//! `Last-Event-ID`. Donation events carry no id: they are not on that
+//! cursor.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -13,7 +14,10 @@ use std::{
 
 use application::{
     comment::{CommentFeed, FeedItem},
-    ports::comment::CommentView,
+    ports::{
+        comment::CommentView,
+        donation::{DonationCredit, DonationSummary},
+    },
 };
 use axum::{
     extract::{Path, Query, State, rejection::QueryRejection},
@@ -36,12 +40,14 @@ use crate::{
     AppState,
     broadcast::broadcast_id,
     comment::{ChatPolicyDto, CommentDto, api_error},
+    donation::{DonationDto, DonationTotals},
     error::{ApiError, ErrorBody},
     rate_limit::ClientKey,
 };
 
 /// How long the first pending comment change waits for more to share its
-/// event. The broadcaster's comments, policy changes and resets do not wait.
+/// event. The broadcaster's comments, donations, policy changes and resets
+/// do not wait.
 pub const BATCH_WINDOW: Duration = Duration::from_millis(200);
 
 /// Open event streams per client (see [`ClientKey`]); each holds a
@@ -131,12 +137,19 @@ struct ResetData {
     revision: String,
 }
 
+#[derive(Serialize)]
+struct DonationData {
+    donation: DonationDto,
+    #[serde(flatten)]
+    totals: DonationTotals,
+}
+
 #[utoipa::path(
     get,
     path = "/api/broadcasts/{id}/events",
     operation_id = "followBroadcastEvents",
     tag = "comments",
-    summary = "Follow a broadcast's comments live (Server-Sent Events)",
+    summary = "Follow a broadcast's comments and donations live (Server-Sent Events)",
     description = "A `text/event-stream` with these events:\n\n\
         - `comments`: `data` is a JSON array of `Comment`, every change (post, edit, delete) \
           within about 200 ms, oldest first; `id` is the newest `revision` in it. Upsert by \
@@ -144,7 +157,14 @@ struct ResetData {
         - `policy`: `data` is a `ChatPolicy`; sent when the stream opens, after catching up \
           what it missed, and on every change.\n\
         - `reset`: too much was missed to replay; reload the list. `data` is \
-          `{\"revision\": string}`, also the event's `id`.\n\n\
+          `{\"revision\": string}`, also the event's `id`.\n\
+        - `donation`: a donation was just paid. `data` is \
+          `{\"donation\": Donation, \"total\": number, \"count\": number}`, the broadcast's \
+          totals including it. No `id`.\n\
+        - `donations`: `data` is `{\"total\": number, \"count\": number}`, the broadcast's \
+          donation totals; sent right after `policy` when the stream opens and after catching \
+          up. No `id`. Totals only grow: keep the highest seen, since this one may be older \
+          than a `donation` still on its way.\n\n\
         Not subject to the 10 second request limit. A reconnecting `EventSource` sends \
         `Last-Event-ID` and receives what it missed.",
     params(
@@ -262,6 +282,14 @@ impl Follower {
                 self.flush();
                 self.ready.push_back(reset_event(cursor));
             }
+            Ok(Some(FeedItem::Donation(credit))) => {
+                self.flush();
+                self.ready.push_back(donation_event(credit));
+            }
+            Ok(Some(FeedItem::DonationSummary(summary))) => {
+                self.flush();
+                self.ready.push_back(totals_event(summary));
+            }
             Ok(None) => {
                 self.flush();
                 self.done = true;
@@ -303,6 +331,23 @@ fn policy_event(policy: ChatPolicy) -> Event {
         .expect("a policy serializes")
 }
 
+fn donation_event(credit: DonationCredit) -> Event {
+    Event::default()
+        .event("donation")
+        .json_data(DonationData {
+            donation: credit.donation.into(),
+            totals: credit.summary.into(),
+        })
+        .expect("a donation serializes")
+}
+
+fn totals_event(summary: DonationSummary) -> Event {
+    Event::default()
+        .event("donations")
+        .json_data(DonationTotals::from(summary))
+        .expect("totals serialize")
+}
+
 fn reset_event(cursor: Revision) -> Event {
     let revision = cursor.get().to_string();
     Event::default()
@@ -318,6 +363,7 @@ mod tests {
 
     use application::ports::{
         comment::CommentView,
+        donation::DonationView,
         event_bus::{EventBus, EventKind, RealtimeEvent},
     };
     use axum::{
@@ -328,6 +374,7 @@ mod tests {
         auth::Username,
         broadcast::Version,
         comment::{Comment, CommentBody},
+        donation::DonationAmount,
         id::SnowflakeId,
     };
     use futures_util::StreamExt;
@@ -399,11 +446,20 @@ mod tests {
             SseReader::new(response)
         }
 
-        /// A stream past the policy it opens with.
+        /// A stream past the policy and donation totals it opens with.
         async fn follow(&self) -> SseReader {
             let mut events = self.stream().await;
             let opening = events.next().await.expect("the policy comes first");
             assert_eq!(opening.event, "policy");
+            let totals = events.next().await.expect("the totals come next");
+            assert_eq!(
+                (totals.event.as_str(), totals.id.as_deref(), totals.json()),
+                (
+                    "donations",
+                    None,
+                    serde_json::json!({"total": 0, "count": 0})
+                )
+            );
             events
         }
 
@@ -479,6 +535,59 @@ mod tests {
         assert_eq!(
             (policy.event.as_str(), policy.id.as_deref(), policy.json()),
             ("policy", None, serde_json::json!({"slowModeSeconds": 30}))
+        );
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_donation_follows_the_pending_comments_at_once_without_an_id() {
+        let client = Client::new();
+        let mut events = client.follow().await;
+        let started = Instant::now();
+        client.publish(comment(1, false)).await;
+        client
+            .publish(RealtimeEvent {
+                broadcast: id(BROADCAST),
+                priority: true,
+                kind: EventKind::Donation(DonationCredit {
+                    donation: DonationView {
+                        id: id(77),
+                        broadcast_id: id(BROADCAST),
+                        donor_name: Username::parse("donor").unwrap(),
+                        amount: DonationAmount::parse(5_000).unwrap(),
+                        approved_at: SystemTime::UNIX_EPOCH + Duration::from_secs(1_707_794_294),
+                    },
+                    summary: DonationSummary {
+                        total: 12_000,
+                        count: 3,
+                    },
+                }),
+            })
+            .await;
+
+        assert_eq!(revisions(&events.next().await.unwrap().json()), ["1"]);
+        let donation = events.next().await.unwrap();
+        assert_eq!(
+            (
+                donation.event.as_str(),
+                donation.id.as_deref(),
+                donation.json()
+            ),
+            (
+                "donation",
+                None,
+                serde_json::json!({
+                    "donation": {
+                        "id": "77",
+                        "broadcastId": "1",
+                        "donorName": "donor",
+                        "amount": 5000,
+                        "approvedAt": "2024-02-13T03:18:14Z",
+                    },
+                    "total": 12000,
+                    "count": 3,
+                })
+            )
         );
         assert_eq!(started.elapsed(), Duration::ZERO);
     }

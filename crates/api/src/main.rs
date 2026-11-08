@@ -32,8 +32,9 @@ use infrastructure::{
     },
     persistence::{
         self, PgBroadcastQuery, PgBroadcastRepository, PgChatPolicyStore, PgCommentQuery,
-        PgCommentRepository, PgPublishTicketLedger, PgReaperStore, PgRecordingQuery,
-        PgRecordingRepository, PgSessionStore, PgUserRepository, PgWorkerIdAllocator,
+        PgCommentRepository, PgDonationQuery, PgPublishTicketLedger, PgReaperStore,
+        PgRecordingQuery, PgRecordingRepository, PgSessionStore, PgUserRepository,
+        PgWorkerIdAllocator,
     },
     rate_limit::InMemoryRateLimiter,
     realtime::PgEventBus,
@@ -169,6 +170,7 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         query: Arc::new(PgCommentQuery::new(pool.clone())),
         policies: Arc::new(PgChatPolicyStore::new(pool.clone())),
         limiter: comment_limiter.clone(),
+        donations: Arc::new(PgDonationQuery::new(pool.clone())),
         events,
     };
     let recording_repository = Arc::new(PgRecordingRepository::new(pool.clone()));

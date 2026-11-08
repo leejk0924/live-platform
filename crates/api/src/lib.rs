@@ -8,6 +8,7 @@ pub mod comment;
 pub mod comment_stream;
 pub mod config;
 pub mod csrf;
+pub mod donation;
 pub mod error;
 pub mod if_match;
 pub mod internal;

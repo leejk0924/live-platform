@@ -20,6 +20,7 @@ use crate::ports::{
         ChatPolicyStore, ChatTarget, CommentQuery, CommentRepository, CommentView,
         CommentWriteRejection, NewComment, PolicyRejection,
     },
+    donation::{DonationCredit, DonationQuery, DonationSummary},
     event_bus::{Delivery, EventBus, EventKind, EventSubscription, RealtimeEvent},
     id::{IdGenerationError, IdGenerator},
     rate_limit::{RateKey, RateLimiter},
@@ -232,7 +233,7 @@ impl SetChatPolicy {
     }
 }
 
-/// What a follower of a broadcast's comments receives next.
+/// What a follower of a broadcast's live events receives next.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FeedItem {
     /// Changed comments, by ascending revision when they come from the
@@ -243,6 +244,14 @@ pub enum FeedItem {
         priority: bool,
     },
     Policy(ChatPolicy),
+    /// A donation just credited. Not on the comment revision cursor, so it
+    /// is passed on as it arrives.
+    Donation(DonationCredit),
+    /// The broadcast's donation totals, sent with the policy. A client keeps
+    /// the highest total and count it has seen: this one may have been read
+    /// before a credit whose event is still on its way, and is then lower
+    /// than what that event brings.
+    DonationSummary(DonationSummary),
     /// More changed than one catch-up holds: reload the list. The feed goes
     /// on from `cursor`, the newest revision when the reset was decided.
     Reset {
@@ -253,6 +262,7 @@ pub enum FeedItem {
 pub struct FollowComments {
     pub query: Arc<dyn CommentQuery>,
     pub policies: Arc<dyn ChatPolicyStore>,
+    pub donations: Arc<dyn DonationQuery>,
     pub events: Arc<dyn EventBus>,
 }
 
@@ -282,6 +292,7 @@ impl FollowComments {
             broadcast,
             query: Arc::clone(&self.query),
             policies: Arc::clone(&self.policies),
+            donations: Arc::clone(&self.donations),
             subscription,
             cursor,
             behind,
@@ -297,6 +308,7 @@ pub struct CommentFeed {
     broadcast: BroadcastId,
     query: Arc<dyn CommentQuery>,
     policies: Arc<dyn ChatPolicyStore>,
+    donations: Arc<dyn DonationQuery>,
     subscription: Box<dyn EventSubscription>,
     /// The newest revision delivered. A broadcast's comment events arrive in
     /// revision order, so a live event at or below it was delivered by a
@@ -304,8 +316,8 @@ pub struct CommentFeed {
     cursor: Revision,
     /// Events may be missing after `cursor`; the next call catches up first.
     behind: bool,
-    /// The policy is sent when the feed opens and after every catch-up,
-    /// since a missed event may have changed it.
+    /// The policy and the donation summary are sent when the feed opens and
+    /// after every catch-up, since a missed event may have changed them.
     policy_due: bool,
     /// Delivered before anything else.
     queued: Option<FeedItem>,
@@ -330,8 +342,10 @@ impl CommentFeed {
             }
             if self.policy_due {
                 let target = self.policies.target(self.broadcast).await?;
+                let summary = self.donations.summary(self.broadcast).await?;
                 self.policy_due = false;
                 if let Some(target) = target {
+                    self.queued = Some(FeedItem::DonationSummary(summary));
                     return Ok(Some(FeedItem::Policy(target.policy)));
                 }
                 continue;
@@ -351,6 +365,7 @@ impl CommentFeed {
     fn accept(&mut self, event: &RealtimeEvent) -> Option<FeedItem> {
         match &event.kind {
             EventKind::ChatPolicy(policy) => Some(FeedItem::Policy(*policy)),
+            EventKind::Donation(credit) => Some(FeedItem::Donation(credit.clone())),
             EventKind::Comment(view) => {
                 if view.revision <= self.cursor {
                     return None;
@@ -438,11 +453,13 @@ mod tests {
         }
     }
 
-    /// Holds the comments with revisions `1..=stored` of one open broadcast.
+    /// Holds the comments with revisions `1..=stored` of one open broadcast,
+    /// and its donation summary.
     struct Store {
         stored: Mutex<i64>,
         policy: ChatPolicy,
         status: BroadcastStatus,
+        donations: Mutex<DonationSummary>,
     }
 
     impl Store {
@@ -451,7 +468,24 @@ mod tests {
                 stored: Mutex::new(stored),
                 policy: ChatPolicy::OFF,
                 status: BroadcastStatus::Live,
+                donations: Mutex::default(),
             })
+        }
+    }
+
+    #[async_trait]
+    impl DonationQuery for Store {
+        async fn list(
+            &self,
+            _: BroadcastId,
+            _: Option<domain::donation::DonationId>,
+            _: u32,
+        ) -> Result<Vec<crate::ports::donation::DonationView>, PortError> {
+            unreachable!()
+        }
+
+        async fn summary(&self, _: BroadcastId) -> Result<DonationSummary, PortError> {
+            Ok(*self.donations.lock().unwrap())
         }
     }
 
@@ -563,22 +597,32 @@ mod tests {
         FollowComments {
             query: store.clone(),
             policies: store.clone(),
+            donations: store.clone(),
             events: bus.clone(),
         }
         .open(id(BROADCAST), after.and_then(Revision::new))
         .await
     }
 
+    async fn next_any(feed: &mut CommentFeed) -> FeedItem {
+        tokio::time::timeout(Duration::from_secs(1), feed.next())
+            .await
+            .expect("an item")
+            .unwrap()
+            .expect("the bus is open")
+    }
+
     /// The next item, skipping the re-sent policy of a store whose chat
-    /// is unrestricted; the policy tests use another.
+    /// is unrestricted and the re-sent summary of one without donations;
+    /// the policy and summary tests use other stores.
     async fn next(feed: &mut CommentFeed) -> FeedItem {
         loop {
-            let item = tokio::time::timeout(Duration::from_secs(1), feed.next())
-                .await
-                .expect("an item")
-                .unwrap()
-                .expect("the bus is open");
-            if item != FeedItem::Policy(ChatPolicy::OFF) {
+            let item = next_any(feed).await;
+            let resent = [
+                FeedItem::Policy(ChatPolicy::OFF),
+                FeedItem::DonationSummary(DonationSummary::default()),
+            ];
+            if !resent.contains(&item) {
                 return item;
             }
         }
@@ -722,6 +766,7 @@ mod tests {
             stored: Mutex::new(2),
             policy: slow,
             status: BroadcastStatus::Live,
+            donations: Mutex::default(),
         });
         let (bus, tx) = Bus::new();
         let mut feed = open(&store, &bus, Some(1)).await.unwrap();
@@ -733,6 +778,77 @@ mod tests {
             next(&mut feed).await,
             FeedItem::Policy(slow),
             "also when nothing was missed"
+        );
+    }
+
+    fn credit(total: i64, count: i64) -> DonationCredit {
+        DonationCredit {
+            donation: crate::ports::donation::DonationView {
+                id: id(900 + count),
+                broadcast_id: id(BROADCAST),
+                donor_name: Username::parse("donor").unwrap(),
+                amount: domain::donation::DonationAmount::parse(1_000).unwrap(),
+                approved_at: SystemTime::UNIX_EPOCH,
+            },
+            summary: DonationSummary { total, count },
+        }
+    }
+
+    #[tokio::test]
+    async fn the_donation_summary_follows_the_policy_on_open_and_after_every_miss() {
+        let store = Store::with(0);
+        *store.donations.lock().unwrap() = DonationSummary {
+            total: 3_000,
+            count: 2,
+        };
+        let (bus, tx) = Bus::new();
+        let mut feed = open(&store, &bus, None).await.unwrap();
+        assert_eq!(next_any(&mut feed).await, FeedItem::Policy(ChatPolicy::OFF));
+        assert_eq!(
+            next_any(&mut feed).await,
+            FeedItem::DonationSummary(DonationSummary {
+                total: 3_000,
+                count: 2
+            })
+        );
+
+        *store.donations.lock().unwrap() = DonationSummary {
+            total: 4_000,
+            count: 3,
+        };
+        tx.send(Delivery::Missed).unwrap();
+        assert_eq!(next_any(&mut feed).await, FeedItem::Policy(ChatPolicy::OFF));
+        assert_eq!(
+            next_any(&mut feed).await,
+            FeedItem::DonationSummary(DonationSummary {
+                total: 4_000,
+                count: 3
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn donation_events_pass_straight_through_beside_comments() {
+        let store = Store::with(5);
+        let (bus, tx) = Bus::new();
+        let mut feed = open(&store, &bus, None).await.unwrap();
+        let donation = |credit: DonationCredit| {
+            Delivery::Event(Arc::new(RealtimeEvent {
+                broadcast: id(BROADCAST),
+                priority: true,
+                kind: EventKind::Donation(credit),
+            }))
+        };
+        tx.send(donation(credit(1_000, 1))).unwrap();
+        tx.send(live(6)).unwrap();
+        tx.send(donation(credit(2_000, 2))).unwrap();
+
+        assert_eq!(next(&mut feed).await, FeedItem::Donation(credit(1_000, 1)));
+        assert_eq!(revisions(&next(&mut feed).await), [6]);
+        assert_eq!(
+            next(&mut feed).await,
+            FeedItem::Donation(credit(2_000, 2)),
+            "the comment cursor does not hold it back"
         );
     }
 
@@ -760,7 +876,8 @@ mod tests {
         let (bus, _tx) = Bus::new();
         let result = FollowComments {
             query: store.clone(),
-            policies: store,
+            policies: store.clone(),
+            donations: store,
             events: bus,
         }
         .open(id(999), None)
@@ -851,6 +968,7 @@ mod tests {
                     stored: Mutex::new(0),
                     policy,
                     status,
+                    donations: Mutex::default(),
                 }),
                 limiter: Arc::new(Limiter {
                     refuse,

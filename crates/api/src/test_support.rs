@@ -14,6 +14,7 @@ use application::ports::{
         ChatPolicyStore, ChatTarget, CommentQuery, CommentRepository, CommentView,
         CommentWriteRejection, NewComment, PolicyRejection,
     },
+    donation::{DonationQuery, DonationSummary, DonationView},
     event_bus::{EventBus, EventSubscription, RealtimeEvent},
     id::{IdGenerationError, IdGenerator},
     media::{
@@ -34,6 +35,7 @@ use domain::{
         Broadcast, BroadcastDescription, BroadcastId, BroadcastStatus, BroadcastTitle, Version,
     },
     comment::{ChatPolicy, CommentBody, CommentId, Revision},
+    donation::DonationId,
     id::SnowflakeId,
     recording::{RecordingId, RecordingKey, StoreRetry},
     secret::Secret,
@@ -293,6 +295,22 @@ impl ChatPolicyStore for Unavailable {
     }
 }
 
+#[async_trait]
+impl DonationQuery for Unavailable {
+    async fn list(
+        &self,
+        _: BroadcastId,
+        _: Option<DonationId>,
+        _: u32,
+    ) -> Result<Vec<DonationView>, PortError> {
+        unavailable()
+    }
+
+    async fn summary(&self, _: BroadcastId) -> Result<DonationSummary, PortError> {
+        unavailable()
+    }
+}
+
 impl RateLimiter for Unavailable {
     fn acquire(&self, _: &[(RateKey, std::time::Duration)]) -> Result<(), std::time::Duration> {
         unreachable!("not available in this test")
@@ -374,18 +392,20 @@ pub fn test_state() -> AppState {
         query: Arc::new(Unavailable),
         policies: Arc::new(Unavailable),
         limiter: Arc::new(Unavailable),
+        donations: Arc::new(Unavailable),
         events: Arc::new(Unavailable),
     })
 }
 
-/// Every broadcast but 404 is live with no comments, and events travel over
-/// `bus`.
+/// Every broadcast but 404 is live with no comments and no donations, and
+/// events travel over `bus`.
 pub fn chat_state(bus: Arc<dyn EventBus>) -> AppState {
     state_with(CommentPorts {
         repository: Arc::new(Unavailable),
         query: Arc::new(EmptyChat),
         policies: Arc::new(EmptyChat),
         limiter: Arc::new(Unavailable),
+        donations: Arc::new(EmptyChat),
         events: bus,
     })
 }
@@ -414,6 +434,22 @@ impl CommentQuery for EmptyChat {
 
     async fn latest_revision(&self, _: BroadcastId) -> Result<Revision, PortError> {
         Ok(Revision::START)
+    }
+}
+
+#[async_trait]
+impl DonationQuery for EmptyChat {
+    async fn list(
+        &self,
+        _: BroadcastId,
+        _: Option<DonationId>,
+        _: u32,
+    ) -> Result<Vec<DonationView>, PortError> {
+        Ok(Vec::new())
+    }
+
+    async fn summary(&self, _: BroadcastId) -> Result<DonationSummary, PortError> {
+        Ok(DonationSummary::default())
     }
 }
 

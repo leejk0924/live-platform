@@ -41,8 +41,8 @@ use infrastructure::{
     media::{JwtPublishAuthorizer, MediaMtxIngestRouter, MediaMtxPlaybackResolver, PublishKey},
     persistence::{
         PgBroadcastQuery, PgBroadcastRepository, PgChatPolicyStore, PgCommentQuery,
-        PgCommentRepository, PgPublishTicketLedger, PgRecordingQuery, PgRecordingRepository,
-        PgSessionStore, PgUserRepository, PgWorkerIdAllocator,
+        PgCommentRepository, PgDonationQuery, PgPublishTicketLedger, PgRecordingQuery,
+        PgRecordingRepository, PgSessionStore, PgUserRepository, PgWorkerIdAllocator,
     },
     rate_limit::InMemoryRateLimiter,
     realtime::PgEventBus,
@@ -231,6 +231,7 @@ async fn build_state(
         query: Arc::new(PgCommentQuery::new(pool.clone())),
         policies: Arc::new(PgChatPolicyStore::new(pool.clone())),
         limiter: Arc::new(InMemoryRateLimiter::default()),
+        donations: Arc::new(PgDonationQuery::new(pool.clone())),
         events,
     };
     let state = AppState::new(
