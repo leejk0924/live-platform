@@ -7,6 +7,7 @@ mod support;
 use std::{
     io,
     sync::{Arc, Mutex, atomic::Ordering},
+    time::Duration,
 };
 
 use axum::{
@@ -456,6 +457,31 @@ async fn mixed_starts_and_stops_transition_at_most_once_each(pool: PgPool) {
             "round {round}"
         );
     }
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_client_that_hangs_up_mid_stop_still_gets_its_publisher_kicked(pool: PgPool) {
+    let world = World::with(
+        pool,
+        CountingTerminator {
+            delay: Duration::from_secs(1),
+            ..Default::default()
+        },
+    )
+    .await;
+    let id = world.broadcast_in("LIVE").await;
+
+    let hung_up = tokio::time::timeout(
+        Duration::from_millis(250),
+        call(&world.router, Op::Stop, &id, Some(&world.owner)),
+    )
+    .await;
+    assert!(hung_up.is_err(), "the client gave up before the kick ended");
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(world.kicks(), 1, "the kick ran to the end");
+    assert_eq!(world.stored(&id).await.status, "ENDED");
 }
 
 #[derive(Clone, Default)]

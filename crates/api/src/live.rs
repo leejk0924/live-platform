@@ -11,6 +11,7 @@ use axum::{
 };
 use infrastructure::media::PublicJwk;
 use serde::Serialize;
+use tracing::Instrument;
 use utoipa::ToSchema;
 
 use crate::{
@@ -115,15 +116,23 @@ pub(crate) async fn stop(
     AuthUser(actor): AuthUser,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let stopped = state
-        .broadcasts
-        .stop
-        .run(actor, broadcast_id(&id)?)
+    let broadcast = broadcast_id(&id)?;
+    // A client that hangs up drops this handler. Running the stop in its own
+    // task keeps the kick from being cancelled after the commit.
+    let stopping = tokio::spawn(
+        async move {
+            let stopped = state.broadcasts.stop.run(actor, broadcast).await?;
+            if let Some(err) = &stopped.kick_failure {
+                tracing::warn!(error = %err, broadcast = %broadcast, "ended, but the publisher was not disconnected");
+            }
+            Ok(stopped)
+        }
+        .in_current_span(),
+    );
+    let stopped = stopping
         .await
+        .map_err(ApiError::internal)?
         .map_err(api_error)?;
-    if let Some(err) = stopped.kick_failure {
-        tracing::warn!(error = %err, broadcast = %id, "ended, but the publisher was not disconnected");
-    }
     Ok(tagged(StatusCode::OK, stopped.broadcast))
 }
 
