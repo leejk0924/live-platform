@@ -6,6 +6,8 @@ import type { Broadcast, Comment } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
 import { draftAfterSaveError, saveArgs, startEdit, type EditDraft } from './commentEdit.ts'
 import { parseComments, parsePolicy } from './events.ts'
+import type { DonationsAction } from '../donations/donationsState.ts'
+import { parseDonation, parseTotals } from '../donations/events.ts'
 import { commentsReducer, initialComments, visibleComments, type CommentsAction } from './commentsState.ts'
 
 const MAX_CHARS = 500
@@ -25,7 +27,15 @@ function commentError(error: unknown): string {
   return errorMessage(error)
 }
 
-export default function CommentPanel({ broadcast }: { broadcast: Broadcast }) {
+// The stream also carries donations; they go to `onDonations`, which must keep its identity (a
+// reducer's dispatch), or every render would reconnect.
+export default function CommentPanel({
+  broadcast,
+  onDonations,
+}: {
+  broadcast: Broadcast
+  onDonations: (action: DonationsAction) => void
+}) {
   const { id } = broadcast
   const { auth } = useAuth()
   const [state, dispatch] = useReducer(commentsReducer, initialComments)
@@ -59,6 +69,16 @@ export default function CommentPanel({ broadcast }: { broadcast: Broadcast }) {
           if (policy) dispatch({ type: 'policy', slowModeSeconds: policy.slowModeSeconds })
           else reload()
         })
+        stream.addEventListener('donation', (e: MessageEvent<string>) => {
+          const event = parseDonation(e.data)
+          if (event) onDonations({ type: 'donated', ...event })
+          else reload()
+        })
+        stream.addEventListener('donations', (e: MessageEvent<string>) => {
+          const totals = parseTotals(e.data)
+          if (totals) onDonations({ type: 'totals', ...totals })
+          else reload()
+        })
         stream.addEventListener('reset', reload)
         stream.onerror = () => {
           if (stream.readyState === EventSource.CLOSED) setFeed({ status: 'closed' })
@@ -70,7 +90,7 @@ export default function CommentPanel({ broadcast }: { broadcast: Broadcast }) {
       active = false
       source?.close()
     }
-  }, [id, attempt])
+  }, [id, attempt, onDonations])
 
   function retry() {
     setFeed({ status: 'loading' })
