@@ -2,6 +2,7 @@ services:
   caddy:
     environment:
       SITE_ADDRESS: ${DOMAIN:?set DOMAIN in .env}
+      HSTS_MAX_AGE: "31536000"
 
   api:
     environment:

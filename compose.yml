@@ -24,6 +24,8 @@ services:
     user: "65532:65532"
     environment:
       SITE_ADDRESS: localhost
+      # The internal CA is accepted by hand, which browsers refuse on an HSTS host. compose.prod.yml turns it on.
+      HSTS_MAX_AGE: "0"
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
     ports:
       - "80:80"
