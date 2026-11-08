@@ -496,21 +496,6 @@ export interface components {
              */
             revision: string;
         };
-        ConfirmInput: {
-            /**
-             * Format: int64
-             * @description As Toss handed it to the success URL; must equal the order's.
-             */
-            amount: number;
-            orderId: string;
-            /** @description As Toss handed it to the success URL. */
-            paymentKey: string;
-        };
-        ConfirmedDto: {
-            /** @description `false` when an earlier request had already credited this payment. */
-            credited: boolean;
-            donation: components["schemas"]["Donation"];
-        };
         Credentials: {
             /**
              * Format: password
@@ -543,6 +528,21 @@ export interface components {
             /** @example 112007303372210176 */
             id: string;
         };
+        DonationConfirmInput: {
+            /**
+             * Format: int64
+             * @description As Toss handed it to the success URL; must equal the order's.
+             */
+            amount: number;
+            orderId: string;
+            /** @description As Toss handed it to the success URL. */
+            paymentKey: string;
+        };
+        DonationConfirmed: {
+            /** @description `false` when an earlier request had already credited this payment. */
+            credited: boolean;
+            donation: components["schemas"]["Donation"];
+        };
         DonationInput: {
             /**
              * Format: int64
@@ -551,7 +551,7 @@ export interface components {
             amount: number;
         };
         /** @description What the browser passes to Toss's payment window. */
-        DonationOrderDto: {
+        DonationOrder: {
             /** Format: int64 */
             amount: number;
             /** @description The Toss client key to open the payment window with. */
@@ -564,7 +564,7 @@ export interface components {
             /** @description Toss's `orderName`. */
             orderName: string;
         };
-        DonationPageDto: {
+        DonationPage: {
             /** Format: int64 */
             count: number;
             /** @description Newest order first. */
@@ -1629,7 +1629,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DonationPageDto"];
+                    "application/json": components["schemas"]["DonationPage"];
                 };
             };
             /** @description `INVALID_QUERY` or `INVALID_PAGE_SIZE` */
@@ -1674,7 +1674,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DonationOrderDto"];
+                    "application/json": components["schemas"]["DonationOrder"];
                 };
             };
             /** @description `INVALID_AMOUNT` or `INVALID_REQUEST` */
@@ -1966,7 +1966,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ConfirmInput"];
+                "application/json": components["schemas"]["DonationConfirmInput"];
             };
         };
         responses: {
@@ -1976,7 +1976,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConfirmedDto"];
+                    "application/json": components["schemas"]["DonationConfirmed"];
                 };
             };
             /** @description `AMOUNT_MISMATCH`, `PAYMENT_REJECTED`, `INVALID_PAYMENT_KEY` or `INVALID_REQUEST` */

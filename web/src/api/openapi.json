@@ -1324,7 +1324,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DonationPageDto"
+                  "$ref": "#/components/schemas/DonationPage"
                 }
               }
             }
@@ -1385,7 +1385,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DonationOrderDto"
+                  "$ref": "#/components/schemas/DonationOrder"
                 }
               }
             }
@@ -1787,7 +1787,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ConfirmInput"
+                "$ref": "#/components/schemas/DonationConfirmInput"
               }
             }
           },
@@ -1799,7 +1799,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConfirmedDto"
+                  "$ref": "#/components/schemas/DonationConfirmed"
                 }
               }
             }
@@ -2348,44 +2348,6 @@
           }
         }
       },
-      "ConfirmInput": {
-        "type": "object",
-        "required": [
-          "paymentKey",
-          "orderId",
-          "amount"
-        ],
-        "properties": {
-          "amount": {
-            "type": "integer",
-            "format": "int64",
-            "description": "As Toss handed it to the success URL; must equal the order's."
-          },
-          "orderId": {
-            "type": "string"
-          },
-          "paymentKey": {
-            "type": "string",
-            "description": "As Toss handed it to the success URL."
-          }
-        }
-      },
-      "ConfirmedDto": {
-        "type": "object",
-        "required": [
-          "donation",
-          "credited"
-        ],
-        "properties": {
-          "credited": {
-            "type": "boolean",
-            "description": "`false` when an earlier request had already credited this payment."
-          },
-          "donation": {
-            "$ref": "#/components/schemas/Donation"
-          }
-        }
-      },
       "Credentials": {
         "type": "object",
         "required": [
@@ -2468,6 +2430,44 @@
           }
         }
       },
+      "DonationConfirmInput": {
+        "type": "object",
+        "required": [
+          "paymentKey",
+          "orderId",
+          "amount"
+        ],
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "As Toss handed it to the success URL; must equal the order's."
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "paymentKey": {
+            "type": "string",
+            "description": "As Toss handed it to the success URL."
+          }
+        }
+      },
+      "DonationConfirmed": {
+        "type": "object",
+        "required": [
+          "donation",
+          "credited"
+        ],
+        "properties": {
+          "credited": {
+            "type": "boolean",
+            "description": "`false` when an earlier request had already credited this payment."
+          },
+          "donation": {
+            "$ref": "#/components/schemas/Donation"
+          }
+        }
+      },
       "DonationInput": {
         "type": "object",
         "required": [
@@ -2481,7 +2481,7 @@
           }
         }
       },
-      "DonationOrderDto": {
+      "DonationOrder": {
         "type": "object",
         "description": "What the browser passes to Toss's payment window.",
         "required": [
@@ -2510,7 +2510,7 @@
           }
         }
       },
-      "DonationPageDto": {
+      "DonationPage": {
         "type": "object",
         "required": [
           "items",

@@ -196,6 +196,7 @@ impl From<DonationSummary> for DonationTotals {
 
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+#[schema(as = DonationPage)]
 pub struct DonationPageDto {
     /// Newest order first.
     items: Vec<DonationDto>,
@@ -227,6 +228,7 @@ pub struct DonationInput {
 /// What the browser passes to Toss's payment window.
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+#[schema(as = DonationOrder)]
 pub struct DonationOrderDto {
     /// Toss's `orderId`.
     #[schema(example = "112007303372210176")]
@@ -240,6 +242,7 @@ pub struct DonationOrderDto {
 
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+#[schema(as = DonationConfirmInput)]
 pub struct ConfirmInput {
     /// As Toss handed it to the success URL.
     payment_key: String,
@@ -249,6 +252,7 @@ pub struct ConfirmInput {
 }
 
 #[derive(Serialize, ToSchema)]
+#[schema(as = DonationConfirmed)]
 pub struct ConfirmedDto {
     donation: DonationDto,
     /// `false` when an earlier request had already credited this payment.
