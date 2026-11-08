@@ -104,10 +104,18 @@ bash scripts/check-commit-msg.sh origin/main..HEAD
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
-cargo test --workspace
+DATABASE_URL=postgres://postgres:test@localhost:55432/postgres cargo test --workspace -- --include-ignored
 cargo deny check
 bash scripts/check-layer-deps.sh
 ```
+
+DB 테스트는 `#[ignore]`로 표시되어 있고 `--include-ignored`로 함께 돌린다. Postgres가 필요하다. CI와 같은 이미지로 테스트 전용 컨테이너를 띄운다. 비밀번호 `test`는 테스트 전용이다. 포트 55432는 compose의 Postgres와 겹치지 않게 고른 것이다.
+
+```bash
+docker run -d --name lp-test-pg -e POSTGRES_PASSWORD=test -p 55432:5432 postgres:17.11-trixie@sha256:748a18a54d3842d43bc156f0840d78029b8d349e0feca98c12b9c4ce3404a6b3
+```
+
+다음부터는 `docker start lp-test-pg`로 다시 켠다.
 
 `web/`을 바꿨다면:
 
@@ -117,7 +125,7 @@ cd web && npm run lint && npm run typecheck && npm run build
 
 | CI job | 검사 |
 |---|---|
-| `rust` | fmt, clippy, test, 계층 의존성(`check-layer-deps.sh`) |
+| `rust` | fmt, clippy, test(Postgres 서비스로 DB 테스트 포함), 계층 의존성(`check-layer-deps.sh`) |
 | `cargo-deny` | 라이선스, 취약점, 금지 crate |
 | `gitleaks` | 비밀값 유출 |
 | `commit-messages` | 커밋 메시지 형식 (PR만) |
