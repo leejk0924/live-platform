@@ -229,7 +229,7 @@ export interface paths {
          * @description A `text/event-stream` with these events:
          *
          *     - `comments`: `data` is a JSON array of `Comment`, every change (post, edit, delete) within about 200 ms, oldest first; `id` is the newest `revision` in it. Upsert by `id`, keeping the higher `revision`; a deleted comment arrives with `body: null`.
-         *     - `policy`: `data` is a `ChatPolicy`.
+         *     - `policy`: `data` is a `ChatPolicy`; sent when the stream opens, after catching up what it missed, and on every change.
          *     - `reset`: too much was missed to replay; reload the list. `data` is `{"revision": string}`, also the event's `id`.
          *
          *     Not subject to the 10 second request limit. A reconnecting `EventSource` sends `Last-Event-ID` and receives what it missed.

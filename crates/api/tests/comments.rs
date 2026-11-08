@@ -486,6 +486,11 @@ async fn reconnecting_replays_exactly_the_changes_after_the_last_event(pool: PgP
 async fn an_open_stream_receives_new_comments_and_policy_changes(pool: PgPool) {
     let chat = chat(&pool).await;
     let mut events = chat.follow(None).await;
+    let opening = events.next().await.unwrap();
+    assert_eq!(
+        (opening.event.as_str(), opening.json()),
+        ("policy", json!({"slowModeSeconds": 0}))
+    );
 
     let posted = chat.post(&chat.viewer, "실시간").await;
     let live = events.next().await.unwrap();

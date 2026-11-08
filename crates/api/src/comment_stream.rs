@@ -141,7 +141,8 @@ struct ResetData {
         - `comments`: `data` is a JSON array of `Comment`, every change (post, edit, delete) \
           within about 200 ms, oldest first; `id` is the newest `revision` in it. Upsert by \
           `id`, keeping the higher `revision`; a deleted comment arrives with `body: null`.\n\
-        - `policy`: `data` is a `ChatPolicy`.\n\
+        - `policy`: `data` is a `ChatPolicy`; sent when the stream opens, after catching up \
+          what it missed, and on every change.\n\
         - `reset`: too much was missed to replay; reload the list. `data` is \
           `{\"revision\": string}`, also the event's `id`.\n\n\
         Not subject to the 10 second request limit. A reconnecting `EventSource` sends \
@@ -389,13 +390,21 @@ mod tests {
                 .unwrap()
         }
 
-        async fn follow(&self) -> SseReader {
+        async fn stream(&self) -> SseReader {
             let response = self
                 .open(&format!("/api/broadcasts/{BROADCAST}/events"), None)
                 .await;
             assert_eq!(response.status(), StatusCode::OK);
             assert_eq!(response.headers()["content-type"], "text/event-stream");
             SseReader::new(response)
+        }
+
+        /// A stream past the policy it opens with.
+        async fn follow(&self) -> SseReader {
+            let mut events = self.stream().await;
+            let opening = events.next().await.expect("the policy comes first");
+            assert_eq!(opening.event, "policy");
+            events
         }
 
         async fn publish(&self, event: RealtimeEvent) {
@@ -492,7 +501,7 @@ mod tests {
         client.state.streams.close_all();
         assert!(events.next().await.is_none(), "ended");
 
-        let mut late = client.follow().await;
+        let mut late = client.stream().await;
         assert!(late.next().await.is_none(), "ended as it started");
     }
 

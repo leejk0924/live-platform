@@ -301,9 +301,11 @@ impl FollowComments {
         Ok(CommentFeed {
             broadcast,
             query: Arc::clone(&self.query),
+            policies: Arc::clone(&self.policies),
             subscription,
             cursor,
             behind,
+            policy_due: true,
             queued,
             caught_up: BTreeSet::new(),
         })
@@ -315,11 +317,15 @@ impl FollowComments {
 pub struct CommentFeed {
     broadcast: BroadcastId,
     query: Arc<dyn CommentQuery>,
+    policies: Arc<dyn ChatPolicyStore>,
     subscription: Box<dyn EventSubscription>,
     /// The newest revision delivered.
     cursor: Revision,
     /// Events may be missing after `cursor`; the next call catches up first.
     behind: bool,
+    /// The policy is sent when the feed opens and after every catch-up,
+    /// since a missed event may have changed it.
+    policy_due: bool,
     /// Delivered before anything else.
     queued: Option<FeedItem>,
     /// Revisions catch-ups delivered whose live events are still to come
@@ -342,8 +348,17 @@ impl CommentFeed {
             if self.behind {
                 let item = self.catch_up().await?;
                 self.behind = false;
+                self.policy_due = true;
                 if let Some(item) = item {
                     return Ok(Some(item));
+                }
+                continue;
+            }
+            if self.policy_due {
+                let target = self.policies.target(self.broadcast).await?;
+                self.policy_due = false;
+                if let Some(target) = target {
+                    return Ok(Some(FeedItem::Policy(target.policy)));
                 }
                 continue;
             }
@@ -586,12 +601,19 @@ mod tests {
         .await
     }
 
+    /// The next item, skipping the re-sent policy of a store whose chat
+    /// is unrestricted; the policy tests use another.
     async fn next(feed: &mut CommentFeed) -> FeedItem {
-        tokio::time::timeout(Duration::from_secs(1), feed.next())
-            .await
-            .expect("an item")
-            .unwrap()
-            .expect("the bus is open")
+        loop {
+            let item = tokio::time::timeout(Duration::from_secs(1), feed.next())
+                .await
+                .expect("an item")
+                .unwrap()
+                .expect("the bus is open");
+            if item != FeedItem::Policy(ChatPolicy::OFF) {
+                return item;
+            }
+        }
     }
 
     #[tokio::test]
@@ -722,6 +744,27 @@ mod tests {
             revisions(&next(&mut feed).await),
             [6],
             "followed from there"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_policy_is_sent_on_open_and_after_every_miss() {
+        let slow = ChatPolicy::from_secs(10).unwrap();
+        let store = Arc::new(Store {
+            stored: Mutex::new(2),
+            policy: slow,
+            status: BroadcastStatus::Live,
+        });
+        let (bus, tx) = Bus::new();
+        let mut feed = open(&store, &bus, Some(1)).await.unwrap();
+        assert_eq!(revisions(&next(&mut feed).await), [2]);
+        assert_eq!(next(&mut feed).await, FeedItem::Policy(slow));
+
+        tx.send(Delivery::Missed).unwrap();
+        assert_eq!(
+            next(&mut feed).await,
+            FeedItem::Policy(slow),
+            "also when nothing was missed"
         );
     }
 
