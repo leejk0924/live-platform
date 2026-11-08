@@ -11,6 +11,7 @@ pub mod json;
 pub mod live;
 pub mod openapi;
 pub mod rate_limit;
+pub mod reaper;
 #[cfg(test)]
 mod test_support;
 

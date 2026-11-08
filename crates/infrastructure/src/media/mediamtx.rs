@@ -1,11 +1,11 @@
-//! MediaMTX as the media server: stream paths, WHIP URLs and kicking a
-//! publisher through its Control API.
+//! MediaMTX as the media server: stream paths, WHIP URLs, and its Control
+//! API for kicking publishers and listing the streams on air.
 
 use std::{sync::Arc, time::Duration};
 
 use application::ports::{
     PortError,
-    media::{IngestEndpoint, IngestRouter, StreamPath, StreamTerminator},
+    media::{IngestEndpoint, IngestRouter, StreamPath, StreamProbe, StreamTerminator},
 };
 use async_trait::async_trait;
 use domain::broadcast::BroadcastId;
@@ -32,15 +32,15 @@ impl IngestRouter for MediaMtxIngestRouter {
     }
 }
 
-/// Kicks a path's publisher through the Control API, authenticating with a
-/// token signed by the same key MediaMTX already trusts.
-pub struct MediaMtxStreamTerminator {
+/// The Control API, called with a token the API signs itself; MediaMTX hands
+/// it back to the API to check.
+pub struct MediaMtxControlApi {
     http: reqwest::Client,
     api_url: String,
     key: Arc<PublishKey>,
 }
 
-impl MediaMtxStreamTerminator {
+impl MediaMtxControlApi {
     /// `api_url` is the Control API base, such as `http://mediamtx:9997`.
     pub fn new(api_url: String, key: Arc<PublishKey>) -> Result<Self, PortError> {
         let http = reqwest::Client::builder()
@@ -64,11 +64,25 @@ struct Session {
     path: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PathPage {
+    page_count: u32,
+    items: Vec<PathItem>,
+}
+
+#[derive(Deserialize)]
+struct PathItem {
+    name: String,
+    /// A publisher is sending (`ready` in older versions).
+    available: bool,
+}
+
 fn port_error(err: reqwest::Error) -> PortError {
     PortError(format!("mediamtx api: {err}"))
 }
 
-impl MediaMtxStreamTerminator {
+impl MediaMtxControlApi {
     /// Every WebRTC session on `path`. A WHIP session joins this list as soon
     /// as its offer is answered, while the path itself names it as the source
     /// only once ICE connects.
@@ -106,7 +120,7 @@ impl MediaMtxStreamTerminator {
 }
 
 #[async_trait]
-impl StreamTerminator for MediaMtxStreamTerminator {
+impl StreamTerminator for MediaMtxControlApi {
     /// WHIP is the only way in; every other protocol is off in mediamtx.yml.
     async fn kick(&self, path: &StreamPath) -> Result<(), PortError> {
         let token = self.key.control_token()?;
@@ -124,6 +138,39 @@ impl StreamTerminator for MediaMtxStreamTerminator {
             }
         }
         Ok(())
+    }
+}
+
+#[async_trait]
+impl StreamProbe for MediaMtxControlApi {
+    async fn live_paths(&self) -> Result<Vec<StreamPath>, PortError> {
+        let token = self.key.control_token()?;
+        let mut live = Vec::new();
+        let mut page = 0;
+        loop {
+            let paths: PathPage = self
+                .http
+                .get(format!("{}/v3/paths/list?page={page}", self.api_url))
+                .bearer_auth(&token)
+                .send()
+                .await
+                .and_then(reqwest::Response::error_for_status)
+                .map_err(port_error)?
+                .json()
+                .await
+                .map_err(port_error)?;
+            live.extend(
+                paths
+                    .items
+                    .into_iter()
+                    .filter(|path| path.available)
+                    .map(|path| StreamPath::new(path.name)),
+            );
+            page += 1;
+            if page >= paths.page_count {
+                return Ok(live);
+            }
+        }
     }
 }
 

@@ -14,14 +14,16 @@ use api::{
     auth::AuthPorts,
     broadcast::BroadcastPorts,
     config::{Config, listen_addr},
+    reaper,
 };
+use application::reaper::Reaper;
 use infrastructure::{
     auth::{Argon2Hasher, BreachedPasswordList},
     id::SnowflakeIdGenerator,
-    media::{JwtPublishAuthorizer, MediaMtxIngestRouter, MediaMtxStreamTerminator},
+    media::{JwtPublishAuthorizer, MediaMtxControlApi, MediaMtxIngestRouter},
     persistence::{
-        self, PgBroadcastQuery, PgBroadcastRepository, PgPublishTicketLedger, PgSessionStore,
-        PgUserRepository, PgWorkerIdAllocator,
+        self, PgBroadcastQuery, PgBroadcastRepository, PgPublishTicketLedger, PgReaperStore,
+        PgSessionStore, PgUserRepository, PgWorkerIdAllocator,
     },
 };
 use tokio::{net::TcpListener, sync::oneshot};
@@ -98,7 +100,10 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
     };
     let publish_jwk = config.publish_key.public_jwk();
     let publish_key = Arc::new(config.publish_key);
-    let terminator = MediaMtxStreamTerminator::new(config.mediamtx_api_url, publish_key.clone())?;
+    let control_api = Arc::new(MediaMtxControlApi::new(
+        config.mediamtx_api_url,
+        publish_key.clone(),
+    )?);
     let tokens = Arc::new(JwtPublishAuthorizer::new(publish_key));
     let broadcasts = Arc::new(PgBroadcastRepository::new(pool.clone()));
     let broadcast_ports = BroadcastPorts {
@@ -106,7 +111,7 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         query: Arc::new(PgBroadcastQuery::new(pool.clone())),
         ingest: Arc::new(MediaMtxIngestRouter),
         authorizer: tokens.clone(),
-        terminator: Arc::new(terminator),
+        terminator: control_api.clone(),
         verifier: tokens,
         tickets: Arc::new(PgPublishTicketLedger::new(pool.clone())),
         presence: broadcasts,
@@ -125,6 +130,12 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         }
         return Err(format!("demo account seeding failed: {err}").into());
     }
+    let reaper = reaper::spawn(Reaper {
+        store: Arc::new(PgReaperStore::new(pool.clone())),
+        probe: control_api.clone(),
+        ingest: Arc::new(MediaMtxIngestRouter),
+        terminator: control_api,
+    });
     let limits = Arc::clone(&state.limits);
     tokio::spawn(async move {
         let mut ticks = tokio::time::interval(RATE_LIMIT_CLEANUP);
@@ -152,6 +163,7 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
     })
     .await;
 
+    reaper.shutdown().await;
     match heartbeat.shutdown().await {
         Ok(()) => tracing::info!("worker id lease released"),
         Err(err) => tracing::warn!(%err, "could not release worker id lease"),

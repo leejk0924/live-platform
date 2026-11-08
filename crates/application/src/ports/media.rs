@@ -62,6 +62,13 @@ pub trait PublishAuthorizer: Send + Sync {
     ) -> Result<PublishCredential, PortError>;
 }
 
+/// What the media server says is on air right now.
+#[async_trait]
+pub trait StreamProbe: Send + Sync {
+    /// Every path a publisher is currently sending to.
+    async fn live_paths(&self) -> Result<Vec<StreamPath>, PortError>;
+}
+
 /// Disconnects whoever is publishing to a path.
 #[async_trait]
 pub trait StreamTerminator: Send + Sync {

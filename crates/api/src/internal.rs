@@ -98,8 +98,13 @@ async fn auth(State(state): State<AppState>, body: Bytes) -> Result<StatusCode, 
     let path = request.path.as_str();
     match decision {
         Ok(Admitted { ticket }) => {
-            let jti = ticket.as_ref().map(|(jti, _)| jti.as_str());
-            tracing::info!(action, path, jti, "media access admitted");
+            match ticket {
+                Some((jti, _)) => {
+                    tracing::info!(action, path, jti = jti.as_str(), "media access admitted");
+                }
+                // The reaper's own Control API calls, every few seconds.
+                None => tracing::debug!(action, "media access admitted"),
+            }
             Ok(StatusCode::NO_CONTENT)
         }
         Err(Denied { reason, ticket }) => {

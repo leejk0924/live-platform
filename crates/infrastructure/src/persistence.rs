@@ -2,6 +2,7 @@
 
 mod broadcast;
 mod publish_ticket;
+mod reaper;
 mod session;
 mod user;
 mod worker_lease;
@@ -17,6 +18,7 @@ use sqlx::{
 
 pub use broadcast::{PgBroadcastQuery, PgBroadcastRepository};
 pub use publish_ticket::PgPublishTicketLedger;
+pub use reaper::{PgReaperStore, REAPER_LOCK_KEY};
 pub use session::{ABSOLUTE_TIMEOUT, IDLE_TIMEOUT, PgSessionStore};
 pub use sqlx::Error as DbError;
 pub use user::PgUserRepository;

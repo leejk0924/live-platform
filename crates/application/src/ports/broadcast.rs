@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 use domain::{
     auth::{UserId, Username},
@@ -95,6 +97,47 @@ pub trait PublisherPresence: Send + Sync {
     /// Applies [`domain::broadcast::BroadcastEvent::Resume`]. Whether the
     /// status changed.
     async fn resume(&self, id: BroadcastId) -> Result<bool, PortError>;
+}
+
+/// Where the reaper's passes run. One pass at a time across every API
+/// instance.
+#[async_trait]
+pub trait ReaperStore: Send + Sync {
+    /// Starts a pass, or `None` while another instance is in one.
+    async fn begin(&self) -> Result<Option<Box<dyn ReapPass>>, PortError>;
+}
+
+/// One reaper pass. Its writes take effect together at [`ReapPass::finish`];
+/// dropping it unfinished undoes them. Times are the store's clock, and
+/// "now" is when the pass began.
+#[async_trait]
+pub trait ReapPass: Send {
+    /// Applies [`domain::broadcast::BroadcastEvent::Resume`] to the
+    /// interrupted broadcasts in `on_air` that were interrupted before the
+    /// pass began, and [`domain::broadcast::BroadcastEvent::Interrupt`] to the
+    /// live broadcasts not in `on_air` whose last change is older than
+    /// `grace`, so one that just started has time to connect.
+    async fn reconcile(
+        &mut self,
+        on_air: &[BroadcastId],
+        grace: Duration,
+    ) -> Result<Reconciled, PortError>;
+
+    /// Applies [`domain::broadcast::BroadcastEvent::Expire`] to every
+    /// broadcast interrupted longer than `grace` ago.
+    async fn expire(&mut self, grace: Duration) -> Result<Vec<BroadcastId>, PortError>;
+
+    /// Deletes the records of publish tickets that can no longer be
+    /// presented. Returns how many.
+    async fn forget_spent_tickets(&mut self) -> Result<u64, PortError>;
+
+    async fn finish(self: Box<Self>) -> Result<(), PortError>;
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Reconciled {
+    pub interrupted: Vec<BroadcastId>,
+    pub resumed: Vec<BroadcastId>,
 }
 
 /// A broadcast as viewers see it, with its owner's name.
