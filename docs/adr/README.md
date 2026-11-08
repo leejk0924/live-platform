@@ -55,4 +55,5 @@ related: [10]                          # 관련 이슈 번호
 | recording | [12-recording-replay](recording/12-recording-replay.md) | MediaMTX fMP4 세그먼트를 hook으로 등록하고 lease claim으로 로컬·S3에 저장, 5분 서명 URL(로컬 HMAC 매 요청 확인, CloudFront ECDSA P-256)로 일반 video 재생 |
 | comment | [1-realtime-sse-comments](comment/1-realtime-sse-comments.md) | REST 쓰기 + SSE push, 샘플링 없이 쓰기 측 제어 |
 | comment | [11-comment-feed-sse](comment/11-comment-feed-sse.md) | 방송별 advisory lock 아래 revision, 같은 트랜잭션의 pg_notify, revision 커서로 Last-Event-ID 복구와 200ms 배치, 클라이언트당 SSE 20개 |
+| donation | [13-toss-donation](donation/13-toss-donation.md) | donation id를 Toss orderId로, 주문 단위 Idempotency-Key 승인, 조건부 UPDATE 한 트랜잭션의 적립·합계·pg_notify, webhook은 paymentKey 조회로 재확인, Toss CSP는 /pay 문서에만 |
 | infra | [1-aws-single-ec2-compose](infra/1-aws-single-ec2-compose.md) | EC2 t3.medium 1대 + compose, 컨테이너 스로틀링 |
