@@ -11,7 +11,7 @@ use utoipa::{
     },
 };
 
-use crate::{auth, broadcast};
+use crate::{auth, broadcast, live};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -35,11 +35,14 @@ use crate::{auth, broadcast};
         broadcast::create,
         broadcast::update,
         broadcast::delete,
+        live::start,
+        live::stop,
+        live::jwks,
     ),
     modifiers(&SessionCookie),
     tags(
         (name = "auth", description = "Accounts and sessions"),
-        (name = "broadcasts", description = "Broadcast registration and browsing"),
+        (name = "broadcasts", description = "Broadcast registration, browsing, going live and ending"),
     ),
 )]
 pub struct ApiDoc;

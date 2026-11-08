@@ -36,7 +36,8 @@ deny = [
     { crate = "sqlx", wrappers = ["infrastructure", "api"], reason = "persistence is an outbound adapter" },
     { crate = "reqwest", wrappers = ["infrastructure"], reason = "outbound HTTP clients are adapters" },
     { crate = "jsonwebtoken", wrappers = ["infrastructure"], reason = "token signing is an outbound adapter" },
-    { crate = "ed25519-dalek", wrappers = ["infrastructure"], reason = "token signing is an outbound adapter" },
+    # api verifies issued tokens in its tests only.
+    { crate = "ed25519-dalek", wrappers = ["infrastructure", "api"], reason = "token signing is an outbound adapter" },
     { crate = "aws-config", wrappers = ["infrastructure"], reason = "cloud SDKs are outbound adapters" },
     { crate = "aws-sdk-s3", wrappers = ["infrastructure"], reason = "cloud SDKs are outbound adapters" },
 ]

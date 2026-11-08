@@ -11,6 +11,10 @@ use application::ports::{
         WriteRejection,
     },
     id::{IdGenerationError, IdGenerator},
+    media::{
+        IngestEndpoint, IngestRouter, PublishAuthorizer, PublishCredential, StreamPath,
+        StreamTerminator,
+    },
 };
 use async_trait::async_trait;
 use domain::{
@@ -18,7 +22,7 @@ use domain::{
     broadcast::{Broadcast, BroadcastDescription, BroadcastId, BroadcastTitle, Version},
     id::SnowflakeId,
 };
-use infrastructure::auth::BreachedPasswordList;
+use infrastructure::{auth::BreachedPasswordList, media::PublishKey};
 use tracing::Subscriber;
 use tracing_subscriber::fmt::MakeWriter;
 
@@ -131,6 +135,26 @@ impl BroadcastQuery for Unavailable {
     }
 }
 
+impl IngestRouter for Unavailable {
+    fn route(&self, _: BroadcastId) -> IngestEndpoint {
+        unreachable!("not available in this test")
+    }
+}
+
+#[async_trait]
+impl PublishAuthorizer for Unavailable {
+    async fn authorize(&self, _: UserId, _: &StreamPath) -> Result<PublishCredential, PortError> {
+        unavailable()
+    }
+}
+
+#[async_trait]
+impl StreamTerminator for Unavailable {
+    async fn kick(&self, _: &StreamPath) -> Result<(), PortError> {
+        unavailable()
+    }
+}
+
 pub const TEST_ORIGIN: &str = "https://app.test";
 
 pub fn test_state() -> AppState {
@@ -144,12 +168,16 @@ pub fn test_state() -> AppState {
     let broadcast_ports = BroadcastPorts {
         repository: Arc::new(Unavailable),
         query: Arc::new(Unavailable),
+        ingest: Arc::new(Unavailable),
+        authorizer: Arc::new(Unavailable),
+        terminator: Arc::new(Unavailable),
     };
     AppState::new(
         ports,
         broadcast_ports,
         vec![Origin::parse(TEST_ORIGIN).unwrap()],
         false,
+        PublishKey::generate().public_jwk(),
     )
 }
 

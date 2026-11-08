@@ -1,9 +1,22 @@
 //! The real router on real adapters, for tests that get a fresh Postgres
 //! database from `#[sqlx::test]`.
+// Each test crate compiles its own copy and uses only part of it.
+#![allow(dead_code)]
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use api::{AppState, app, auth::AuthPorts, broadcast::BroadcastPorts, config::Origin};
+use application::ports::{
+    PortError,
+    media::{StreamPath, StreamTerminator},
+};
+use async_trait::async_trait;
 use axum::{
     Router,
     body::{Body, to_bytes},
@@ -12,6 +25,7 @@ use axum::{
 use infrastructure::{
     auth::{Argon2Hasher, BreachedPasswordList},
     id::SnowflakeIdGenerator,
+    media::{JwtPublishAuthorizer, MediaMtxIngestRouter, PublishKey},
     persistence::{
         PgBroadcastQuery, PgBroadcastRepository, PgSessionStore, PgUserRepository,
         PgWorkerIdAllocator,
@@ -28,9 +42,31 @@ pub async fn router(pool: &PgPool, demo_login_enabled: bool) -> Router {
     app(state(pool, demo_login_enabled).await)
 }
 
+/// Stands in for MediaMTX's Control API and counts the publishers it kicks.
+#[derive(Default)]
+pub struct CountingTerminator {
+    pub kicks: AtomicUsize,
+}
+
+#[async_trait]
+impl StreamTerminator for CountingTerminator {
+    async fn kick(&self, _: &StreamPath) -> Result<(), PortError> {
+        self.kicks.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
 /// A brand-new app instance: its own id lease, rate limits and caches, with
 /// only the database shared.
 pub async fn state(pool: &PgPool, demo_login_enabled: bool) -> AppState {
+    live_state(pool, demo_login_enabled).await.0
+}
+
+/// [`state`] with real publish tokens and a counting stand-in for kicks.
+pub async fn live_state(
+    pool: &PgPool,
+    demo_login_enabled: bool,
+) -> (AppState, Arc<CountingTerminator>) {
     let ttl = Duration::from_secs(30);
     let allocator = Arc::new(PgWorkerIdAllocator::new(pool.clone(), ttl));
     let (ids, heartbeat) = SnowflakeIdGenerator::start(allocator, ttl).await.unwrap();
@@ -43,18 +79,24 @@ pub async fn state(pool: &PgPool, demo_login_enabled: bool) -> AppState {
         hasher: Arc::new(Argon2Hasher::new().unwrap()),
         breached: Arc::new(BreachedPasswordList::load()),
     };
+    let key = Arc::new(PublishKey::generate());
+    let terminator = Arc::new(CountingTerminator::default());
     let broadcast_ports = BroadcastPorts {
         repository: Arc::new(PgBroadcastRepository::new(pool.clone())),
         query: Arc::new(PgBroadcastQuery::new(pool.clone())),
+        ingest: Arc::new(MediaMtxIngestRouter),
+        authorizer: Arc::new(JwtPublishAuthorizer::new(key.clone())),
+        terminator: terminator.clone(),
     };
     let state = AppState::new(
         ports,
         broadcast_ports,
         vec![Origin::parse(ORIGIN).unwrap()],
         demo_login_enabled,
+        key.public_jwk(),
     );
     state.auth.demo_log_in.seed().await.unwrap();
-    state
+    (state, terminator)
 }
 
 pub struct Reply {

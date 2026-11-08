@@ -58,6 +58,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
       ALLOWED_ORIGINS: https://localhost
       DEMO_LOGIN_ENABLED: ${DEMO_LOGIN_ENABLED:-false}
+      PUBLISH_JWT_PRIVATE_KEY: ${PUBLISH_JWT_PRIVATE_KEY:?set PUBLISH_JWT_PRIVATE_KEY in .env}
     depends_on:
       postgres:
         condition: service_healthy

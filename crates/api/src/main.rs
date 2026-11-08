@@ -18,6 +18,7 @@ use api::{
 use infrastructure::{
     auth::{Argon2Hasher, BreachedPasswordList},
     id::SnowflakeIdGenerator,
+    media::{JwtPublishAuthorizer, MediaMtxIngestRouter, MediaMtxStreamTerminator},
     persistence::{
         self, PgBroadcastQuery, PgBroadcastRepository, PgSessionStore, PgUserRepository,
         PgWorkerIdAllocator,
@@ -95,15 +96,22 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         hasher: Arc::new(hasher),
         breached: Arc::new(BreachedPasswordList::load()),
     };
+    let publish_jwk = config.publish_key.public_jwk();
+    let publish_key = Arc::new(config.publish_key);
+    let terminator = MediaMtxStreamTerminator::new(config.mediamtx_api_url, publish_key.clone())?;
     let broadcast_ports = BroadcastPorts {
         repository: Arc::new(PgBroadcastRepository::new(pool.clone())),
         query: Arc::new(PgBroadcastQuery::new(pool.clone())),
+        ingest: Arc::new(MediaMtxIngestRouter),
+        authorizer: Arc::new(JwtPublishAuthorizer::new(publish_key)),
+        terminator: Arc::new(terminator),
     };
     let state = AppState::new(
         ports,
         broadcast_ports,
-        config.allowed_origins.clone(),
+        config.allowed_origins,
         config.demo_login_enabled,
+        publish_jwk,
     );
     if let Err(err) = state.auth.demo_log_in.seed().await {
         if let Err(release_err) = heartbeat.shutdown().await {
