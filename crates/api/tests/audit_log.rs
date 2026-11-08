@@ -6,12 +6,46 @@
 
 mod support;
 
-use axum::http::{Method, StatusCode};
-use serde_json::json;
+use axum::{
+    Router,
+    body::Body,
+    http::{Method, Request, StatusCode, header},
+};
+use base64ct::{Base64, Encoding};
+use serde_json::{Value, json};
 use sqlx::PgPool;
-use support::{LogBuffer, PASSWORD, live_state, request, router, send, sign_up};
+use support::{
+    LogBuffer, MEDIA_SECRET, PASSWORD, Reply, live_state, request, router, send, sign_up,
+};
 
 const WRONG_PASSWORD: &str = "not the password 7f3a";
+
+/// Posts `body` to an `/internal/media` route the way MediaMTX does.
+async fn from_media_server(router: &Router, path: &str, body: Value) -> Reply {
+    let basic = Base64::encode_string(format!("mediamtx:{MEDIA_SECRET}").as_bytes());
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri(path)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::AUTHORIZATION, format!("Basic {basic}"))
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    send(router, request).await
+}
+
+async fn create_broadcast(router: &Router, owner: &str) -> String {
+    let created = send(
+        router,
+        request(
+            Method::POST,
+            "/api/broadcasts",
+            Some(json!({"title": "라이브", "description": ""})),
+            Some(owner),
+        ),
+    )
+    .await;
+    created.body["id"].as_str().unwrap().to_owned()
+}
 
 #[sqlx::test(migrations = "../infrastructure/migrations")]
 #[ignore = "requires DATABASE_URL (Postgres)"]
@@ -169,5 +203,80 @@ async fn a_username_that_cannot_be_one_stays_out_of_the_audit(pool: PgPool) {
     assert!(
         !logs.contents().contains(MISTYPED_PASSWORD),
         "the mistyped password reached the logs"
+    );
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_stream_of_an_ended_broadcast_audits_the_hook_kick(pool: PgPool) {
+    let (logs, _guard) = LogBuffer::capture();
+    let router = api::app(live_state(&pool, false).await.0);
+    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let id = create_broadcast(&router, &owner).await;
+    sqlx::query("UPDATE broadcasts SET status = 'ENDED' WHERE id = $1")
+        .bind(id.parse::<i64>().unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let reply = from_media_server(
+        &router,
+        "/internal/media/hooks",
+        json!({"event": "available", "path": format!("live/{id}")}),
+    )
+    .await;
+
+    assert_eq!(reply.status, StatusCode::NO_CONTENT, "{}", reply.body);
+    let audits = logs.audits("publisher_kicked");
+    let [line] = audits.as_slice() else {
+        panic!("one publisher_kicked audit expected in {}", logs.contents());
+    };
+    assert!(line.contains(&format!(r#""broadcast":"{id}""#)), "{line}");
+    assert!(line.contains(r#""by":"hook""#), "{line}");
+    assert!(logs.audits("kick_failed").is_empty(), "{}", logs.contents());
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_refused_publish_token_is_audited_without_the_token(pool: PgPool) {
+    let (logs, _guard) = LogBuffer::capture();
+    let router = router(&pool, false).await;
+    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let id = create_broadcast(&router, &owner).await;
+    let other = create_broadcast(&router, &owner).await;
+    let started = send(
+        &router,
+        request(
+            Method::POST,
+            &format!("/api/broadcasts/{id}/start"),
+            None,
+            Some(&owner),
+        ),
+    )
+    .await;
+    let token = started.body["token"].as_str().unwrap().to_owned();
+
+    let reply = from_media_server(
+        &router,
+        "/internal/media/auth",
+        json!({"action": "publish", "path": format!("live/{other}"), "token": token}),
+    )
+    .await;
+
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{}", reply.body);
+    let audits = logs.audits("media_access_denied");
+    let [line] = audits.as_slice() else {
+        panic!(
+            "one media_access_denied audit expected in {}",
+            logs.contents()
+        );
+    };
+    assert!(
+        line.contains(&format!(r#""path":"live/{other}""#)),
+        "{line}"
+    );
+    assert!(
+        !logs.contents().contains(&token),
+        "the publish token reached the logs"
     );
 }

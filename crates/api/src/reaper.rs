@@ -145,3 +145,70 @@ fn joined(ids: &[BroadcastId]) -> String {
         .collect::<Vec<_>>()
         .join(",")
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{io, sync::Mutex};
+
+    use super::*;
+
+    #[derive(Clone, Default)]
+    struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+    impl io::Write for LogBuffer {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().write(buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn id(raw: i64) -> BroadcastId {
+        BroadcastId::try_from(raw).unwrap()
+    }
+
+    #[test]
+    fn report_pass_audits_each_kicked_broadcast_except_failed_ones() {
+        let logs = LogBuffer::default();
+        let writer = logs.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .with_writer(move || writer.clone())
+            .finish();
+        let (kicked, failed) = (id(1_001), id(1_002));
+        let reaped = Reaped {
+            not_active: vec![kicked, failed],
+            kick_failures: vec![(failed, PortError("media server down".into()))],
+            ..Reaped::default()
+        };
+
+        tracing::subscriber::with_default(subscriber, || report_pass(Ok(Ok(Some(reaped)))));
+
+        let logged = String::from_utf8(logs.0.lock().unwrap().clone()).unwrap();
+        let audits = |event: &str| -> Vec<&str> {
+            let event = format!(r#""event":"{event}""#);
+            logged
+                .lines()
+                .filter(|line| line.contains(r#""target":"audit""#) && line.contains(&event))
+                .collect()
+        };
+        let [kick] = audits("publisher_kicked")[..] else {
+            panic!("one publisher_kicked audit expected in {logged}");
+        };
+        assert!(
+            kick.contains(&format!(r#""broadcast":"{kicked}""#)),
+            "{kick}"
+        );
+        assert!(kick.contains(r#""by":"reaper""#), "{kick}");
+        let [failure] = audits("kick_failed")[..] else {
+            panic!("one kick_failed audit expected in {logged}");
+        };
+        assert!(
+            failure.contains(&format!(r#""broadcast":"{failed}""#)),
+            "{failure}"
+        );
+        assert!(failure.contains(r#""by":"reaper""#), "{failure}");
+    }
+}
