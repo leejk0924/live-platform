@@ -95,6 +95,8 @@ pub fn app(state: AppState) -> Router {
         ));
     let internal = internal::routes(Arc::clone(&state.media_secret));
     let bounded = Router::new().nest("/api", api).nest("/internal", internal);
+    // Routes that hold a connection open, such as SSE (#11), go in the
+    // second router: `bounded` cuts them off at `REQUEST_TIMEOUT`.
     with_envelope(bounded, Router::new()).with_state(state)
 }
 
