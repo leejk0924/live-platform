@@ -34,6 +34,8 @@ export async function receive(whepUrl: string, signal: AbortSignal): Promise<Rec
 
     await peer.setLocalDescription(await peer.createOffer())
     await waitIceGathering(peer)
+    // Aborted after the server created the session but before the 201 arrived, there is no Location
+    // to DELETE; the media server drops that session itself when its WebRTC handshake times out.
     const response = await fetch(whepUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/sdp' },
