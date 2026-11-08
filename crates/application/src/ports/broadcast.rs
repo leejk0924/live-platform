@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use domain::{
     auth::{UserId, Username},
-    broadcast::{Broadcast, BroadcastDescription, BroadcastId, BroadcastTitle, Version},
+    broadcast::{
+        Broadcast, BroadcastDescription, BroadcastId, BroadcastStatus, BroadcastTitle, Version,
+    },
 };
 
 use super::PortError;
@@ -22,6 +24,17 @@ pub enum WriteRejection {
     NotOwner,
     VersionMismatch,
     NotDeletable,
+}
+
+/// Why a status transition matched no row. Deleted broadcasts count as
+/// [`TransitionRejection::NotFound`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransitionRejection {
+    NotFound,
+    NotOwner,
+    /// The broadcast was in this status when the rejection was read, which
+    /// may already differ from the status the write saw.
+    InStatus(BroadcastStatus),
 }
 
 /// The write side. Each write checks ownership, version and status in the
@@ -50,6 +63,22 @@ pub trait BroadcastRepository: Send + Sync {
         id: BroadcastId,
         owner: UserId,
     ) -> Result<Result<(), WriteRejection>, PortError>;
+
+    /// Moves a broadcast from a [`BroadcastStatus::STARTABLE`] status to
+    /// `LIVE` if `owner` owns it, and bumps the version.
+    async fn start(
+        &self,
+        id: BroadcastId,
+        owner: UserId,
+    ) -> Result<Result<Broadcast, TransitionRejection>, PortError>;
+
+    /// Moves a broadcast from a [`BroadcastStatus::STOPPABLE`] status to
+    /// `ENDED` if `owner` owns it, and bumps the version.
+    async fn stop(
+        &self,
+        id: BroadcastId,
+        owner: UserId,
+    ) -> Result<Result<Broadcast, TransitionRejection>, PortError>;
 }
 
 /// A broadcast as viewers see it, with its owner's name.

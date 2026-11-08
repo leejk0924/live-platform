@@ -5,9 +5,11 @@ use std::{
 };
 
 use domain::secret::Secret;
+use infrastructure::media::PublishKey;
 use thiserror::Error;
 
 const DEFAULT_ADDR: &str = "0.0.0.0:8080";
+const DEFAULT_MEDIAMTX_API_URL: &str = "http://mediamtx:9997";
 const DEFAULT_LEASE_TTL_SECS: u64 = 30;
 /// The heartbeat renews every TTL/3, so shorter TTLs leave no room for a slow renewal.
 const MIN_LEASE_TTL_SECS: u64 = 3;
@@ -19,6 +21,10 @@ pub struct Config {
     pub worker_lease_ttl: Duration,
     pub allowed_origins: Vec<Origin>,
     pub demo_login_enabled: bool,
+    pub publish_key: PublishKey,
+    /// MediaMTX Control API base URL, reachable only inside the compose
+    /// network.
+    pub mediamtx_api_url: String,
 }
 
 /// A browser origin, `scheme://host[:port]`, in the form browsers send it in
@@ -75,6 +81,17 @@ pub enum ConfigError {
     AllowedOrigins(String),
     #[error("DEMO_LOGIN_ENABLED must be true or false, got {0:?}")]
     DemoLoginEnabled(String),
+    #[error("PUBLISH_JWT_PRIVATE_KEY is not set")]
+    MissingPublishKey,
+    #[error(
+        "PUBLISH_JWT_PRIVATE_KEY must be 32 random bytes in standard base64 (openssl rand -base64 32)"
+    )]
+    InvalidPublishKey,
+    #[error("MEDIAMTX_API_URL must be an http(s) URL without a trailing slash, got {0:?}")]
+    MediaMtxApiUrl(String),
+    /// Leaves the value out: it would carry the credentials.
+    #[error("MEDIAMTX_API_URL must not contain user:password@; the API signs its own token")]
+    MediaMtxApiUrlCredentials,
 }
 
 impl Config {
@@ -109,14 +126,42 @@ impl Config {
             Ok(raw) => return Err(ConfigError::DemoLoginEnabled(raw)),
             Err(err) => return Err(ConfigError::DemoLoginEnabled(err.to_string())),
         };
+        let publish_key = match lookup("PUBLISH_JWT_PRIVATE_KEY") {
+            Ok(raw) if !raw.is_empty() => PublishKey::from_base64_seed(&Secret::new(raw))
+                .map_err(|_| ConfigError::InvalidPublishKey)?,
+            Ok(_) | Err(VarError::NotPresent) => return Err(ConfigError::MissingPublishKey),
+            Err(VarError::NotUnicode(_)) => return Err(ConfigError::InvalidPublishKey),
+        };
+        let mediamtx_api_url = match lookup("MEDIAMTX_API_URL") {
+            Err(VarError::NotPresent) => DEFAULT_MEDIAMTX_API_URL.to_owned(),
+            Ok(raw) if has_userinfo(&raw) => return Err(ConfigError::MediaMtxApiUrlCredentials),
+            Ok(raw)
+                if (raw.starts_with("http://") || raw.starts_with("https://"))
+                    && !raw.ends_with('/') =>
+            {
+                raw
+            }
+            Ok(raw) => return Err(ConfigError::MediaMtxApiUrl(raw)),
+            Err(err) => return Err(ConfigError::MediaMtxApiUrl(err.to_string())),
+        };
         Ok(Self {
             listen_addr,
             database_url,
             worker_lease_ttl,
             allowed_origins,
             demo_login_enabled,
+            publish_key,
+            mediamtx_api_url,
         })
     }
+}
+
+/// Whether the authority part of `url` (after the scheme, up to the path)
+/// has a `user:password@` prefix.
+fn has_userinfo(url: &str) -> bool {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    authority.contains('@')
 }
 
 /// At least one origin; blanks around commas are ignored.
@@ -146,10 +191,17 @@ mod tests {
 
     const URL: &str = "postgres://app:s3cr3t-pw@db:5432/app";
     const ORIGIN: &str = "https://localhost";
+    /// RFC 8037 appendix A.1's private key.
+    const KEY: &str = "nWGxne/9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A=";
 
-    /// `DATABASE_URL` and `ALLOWED_ORIGINS` are filled in unless `vars` sets them.
+    /// `DATABASE_URL`, `ALLOWED_ORIGINS` and `PUBLISH_JWT_PRIVATE_KEY` are
+    /// filled in unless `vars` sets them.
     fn from(vars: &[(&str, &str)]) -> Result<Config, ConfigError> {
-        let required = [("DATABASE_URL", URL), ("ALLOWED_ORIGINS", ORIGIN)];
+        let required = [
+            ("DATABASE_URL", URL),
+            ("ALLOWED_ORIGINS", ORIGIN),
+            ("PUBLISH_JWT_PRIVATE_KEY", KEY),
+        ];
         from_exact(&[&required[..], vars].concat())
     }
 
@@ -169,6 +221,70 @@ mod tests {
         assert_eq!(config.worker_lease_ttl, Duration::from_secs(30));
         assert_eq!(config.allowed_origins, [Origin::parse(ORIGIN).unwrap()]);
         assert!(!config.demo_login_enabled);
+        assert_eq!(config.mediamtx_api_url, "http://mediamtx:9997");
+    }
+
+    #[test]
+    fn publish_key_is_required_and_never_echoed() {
+        assert!(matches!(
+            from_exact(&[("DATABASE_URL", URL), ("ALLOWED_ORIGINS", ORIGIN)]),
+            Err(ConfigError::MissingPublishKey)
+        ));
+        for bad in [
+            "",
+            "change-me",
+            "nWGxne/9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A",
+        ] {
+            let err = from(&[("PUBLISH_JWT_PRIVATE_KEY", bad)]).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    ConfigError::MissingPublishKey | ConfigError::InvalidPublishKey
+                ),
+                "{bad:?}"
+            );
+            assert!(bad.is_empty() || !err.to_string().contains(bad), "{err}");
+        }
+        let config = from(&[]).unwrap();
+        assert_eq!(
+            config.publish_key.public_jwk().kid,
+            "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"
+        );
+        assert!(!format!("{config:?}").contains(KEY));
+    }
+
+    #[test]
+    fn mediamtx_api_url_must_be_http_without_trailing_slash() {
+        let url = |raw| from(&[("MEDIAMTX_API_URL", raw)]).map(|c| c.mediamtx_api_url);
+        assert_eq!(
+            url("http://127.0.0.1:9997").unwrap(),
+            "http://127.0.0.1:9997"
+        );
+        for bad in ["", "mediamtx:9997", "http://mediamtx:9997/"] {
+            assert!(
+                matches!(url(bad), Err(ConfigError::MediaMtxApiUrl(_))),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn mediamtx_api_url_with_credentials_is_rejected_without_echoing_them() {
+        for bad in [
+            "http://admin:hunter2@mediamtx:9997",
+            "https://hunter2@mediamtx:9997",
+            "http://admin:hunter2@mediamtx:9997/v3",
+        ] {
+            let err = from(&[("MEDIAMTX_API_URL", bad)]).unwrap_err();
+            assert!(!err.to_string().contains("hunter2"), "{err}");
+        }
+        assert_eq!(
+            from(&[("MEDIAMTX_API_URL", "http://mediamtx:9997/a@b")])
+                .unwrap()
+                .mediamtx_api_url,
+            "http://mediamtx:9997/a@b",
+            "an @ after the host is not userinfo"
+        );
     }
 
     #[test]

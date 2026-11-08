@@ -38,3 +38,7 @@ related: []
 - CSRF는 SameSite만 믿지 않는다. 상태 변경 요청은 `Origin` 검증 + 커스텀 헤더 필수.
 - 인가는 유스케이스 계층에서. handler 우회 경로가 생기면 안 된다.
 - JWT 서명 개인키는 API만 가진다.
+
+## Follow-up (2026-11-08, #7)
+
+송출 토큰 TTL은 60초가 아니라 12시간이다. MediaMTX 1.21.3이 JWT `exp`에 송출 세션을 끊기 때문이다. `jti` 1회용은 강제하지 못한다. 그래서 종료한 방송에 같은 토큰으로 다시 송출할 수 있다. 막는 방법은 #10의 publish hook이다. 자세한 내용은 [media/7-whip-publish-jwt](../media/7-whip-publish-jwt.md).

@@ -1,20 +1,18 @@
 logLevel: info
 logDestinations: [stdout]
 
-# Deny by default: anyone may watch, nobody may publish until issue #7 switches to JWT.
-authMethod: internal
-authInternalUsers:
-  - user: any
-    pass:
-    ips: []
-    permissions:
-      - action: read
-      - action: playback
-  - user: any
-    pass:
-    ips: ["127.0.0.1", "::1"]
-    permissions:
-      - action: api
+# Anyone may watch. Publishing and the Control API need a JWT signed by the API's key:
+# a publish token covers one path, and the API signs its own short `api` token to kick.
+# MediaMTX fetches the JWKS on the first JWT check (not at startup), retries on failure,
+# and then keeps it for an hour; after rotating PUBLISH_JWT_PRIVATE_KEY, restart mediamtx.
+authMethod: jwt
+authJWTJWKS: http://api:8080/api/.well-known/jwks.json
+authJWTClaimKey: mediamtx_permissions
+# Must equal infrastructure::media::jwt::ISSUER.
+authJWTIssuer: live-platform
+authJWTExclude:
+  - action: read
+  - action: playback
 
 api: true
 apiAddress: :9997
@@ -40,3 +38,5 @@ webrtcAdditionalHosts: []
 
 paths:
   all_others:
+    # A second publisher with a valid token is refused instead of replacing the live one.
+    overridePublisher: false

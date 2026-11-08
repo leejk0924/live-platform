@@ -2,4 +2,5 @@
 
 pub mod auth;
 pub mod id;
+pub mod media;
 pub mod persistence;

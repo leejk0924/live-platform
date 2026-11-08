@@ -28,7 +28,9 @@
 
 ```bash
 cp .env.example .env
-# 로컬은 값을 그대로 둬도 동작한다. 비밀번호만 무작위로 바꾸려면 (macOS sed도 동작):
+# 송출 JWT 서명 키는 로컬에서도 만들어야 API가 뜬다 (macOS sed도 동작):
+sed -i.bak "s|^PUBLISH_JWT_PRIVATE_KEY=.*|PUBLISH_JWT_PRIVATE_KEY=$(openssl rand -base64 32)|" .env && rm .env.bak
+# 나머지는 그대로 둬도 동작한다. 비밀번호도 무작위로 바꾸려면:
 sed -i.bak "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 24)/" .env && rm .env.bak
 bash deploy/deploy.sh local
 ```
@@ -73,6 +75,7 @@ chmod 600 .env
 | `DOMAIN` | `<이름>.duckdns.org` |
 | `PUBLIC_IP` | 서버 공인 IP (WebRTC ICE 후보로 쓰인다) |
 | `DEMO_LOGIN_ENABLED` | 데모 계정 로그인을 열려면 `true`, 아니면 `false` |
+| `PUBLISH_JWT_PRIVATE_KEY` | `openssl rand -base64 32` 결과. 송출 토큰 서명 키라 API만 가진다. 바꾼 뒤에는 MediaMTX가 공개키를 다시 받도록 `docker compose restart mediamtx` |
 
 ```bash
 bash deploy/deploy.sh prod

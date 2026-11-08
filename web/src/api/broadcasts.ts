@@ -29,4 +29,6 @@ export const broadcastApi = {
       ),
     ),
   remove: (id: string) => write(unwrap(api.DELETE('/api/broadcasts/{id}', { params: { path: { id } } }))),
+  start: (id: string) => write(unwrap(api.POST('/api/broadcasts/{id}/start', { params: { path: { id } } }))),
+  stop: (id: string) => write(unwrap(api.POST('/api/broadcasts/{id}/stop', { params: { path: { id } } }))),
 }

@@ -9,10 +9,12 @@ use application::{
         CreateBroadcast, DeleteBroadcast, Error, GetBroadcast, ListBroadcasts, Page,
         UpdateBroadcast,
     },
+    live::{StartBroadcast, StopBroadcast},
     ports::{
         auth::UserRepository,
         broadcast::{BroadcastQuery, BroadcastRepository, BroadcastView},
         id::IdGenerator,
+        media::{IngestRouter, PublishAuthorizer, StreamTerminator},
     },
 };
 use axum::{
@@ -49,12 +51,17 @@ pub struct BroadcastUseCases {
     pub delete: DeleteBroadcast,
     pub get: GetBroadcast,
     pub list: ListBroadcasts,
+    pub start: StartBroadcast,
+    pub stop: StopBroadcast,
 }
 
 /// The ports the broadcast use cases need beyond the auth ones.
 pub struct BroadcastPorts {
     pub repository: Arc<dyn BroadcastRepository>,
     pub query: Arc<dyn BroadcastQuery>,
+    pub ingest: Arc<dyn IngestRouter>,
+    pub authorizer: Arc<dyn PublishAuthorizer>,
+    pub terminator: Arc<dyn StreamTerminator>,
 }
 
 impl BroadcastUseCases {
@@ -63,7 +70,13 @@ impl BroadcastUseCases {
         ids: Arc<dyn IdGenerator>,
         users: Arc<dyn UserRepository>,
     ) -> Self {
-        let BroadcastPorts { repository, query } = ports;
+        let BroadcastPorts {
+            repository,
+            query,
+            ingest,
+            authorizer,
+            terminator,
+        } = ports;
         Self {
             create: CreateBroadcast {
                 ids,
@@ -72,10 +85,21 @@ impl BroadcastUseCases {
             },
             update: UpdateBroadcast {
                 broadcasts: repository.clone(),
-                users,
+                users: users.clone(),
             },
             delete: DeleteBroadcast {
+                broadcasts: repository.clone(),
+            },
+            start: StartBroadcast {
+                broadcasts: repository.clone(),
+                ingest: ingest.clone(),
+                authorizer,
+            },
+            stop: StopBroadcast {
                 broadcasts: repository,
+                users,
+                ingest,
+                terminator,
             },
             get: GetBroadcast {
                 query: query.clone(),
@@ -91,7 +115,7 @@ pub fn routes() -> Router<AppState> {
         .route("/broadcasts/{id}", get(get_one).put(update).delete(delete))
 }
 
-fn api_error(err: Error) -> ApiError {
+pub(crate) fn api_error(err: Error) -> ApiError {
     match err {
         Error::Rejected(err) => err.into(),
         Error::Internal(err) => ApiError::internal(err),
@@ -99,7 +123,7 @@ fn api_error(err: Error) -> ApiError {
 }
 
 /// An id that is not a snowflake cannot name a broadcast.
-fn broadcast_id(raw: &str) -> Result<BroadcastId, ApiError> {
+pub(crate) fn broadcast_id(raw: &str) -> Result<BroadcastId, ApiError> {
     raw.parse().map_err(|_| BroadcastError::NotFound.into())
 }
 
@@ -227,7 +251,7 @@ pub struct ListParams {
 }
 
 /// `body` plus its version as the `ETag`.
-fn tagged(status: StatusCode, view: BroadcastView) -> Response {
+pub(crate) fn tagged(status: StatusCode, view: BroadcastView) -> Response {
     let tag = etag(view.broadcast.version);
     (status, [(ETAG, tag)], Json(BroadcastDto::from(view))).into_response()
 }

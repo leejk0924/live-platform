@@ -9,6 +9,35 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/.well-known/jwks.json": {
+      "get": {
+        "tags": [
+          "broadcasts"
+        ],
+        "summary": "Public key that verifies publish tokens; read by the media server",
+        "operationId": "getJwks",
+        "responses": {
+          "200": {
+            "description": "The current signing key.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`public, max-age=300`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Jwks"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/demo": {
       "get": {
         "tags": [
@@ -728,6 +757,176 @@
           }
         ]
       }
+    },
+    "/api/broadcasts/{id}/start": {
+      "post": {
+        "tags": [
+          "broadcasts"
+        ],
+        "summary": "Go live, or get a fresh publish token for a live broadcast; owner only",
+        "operationId": "startBroadcast",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "`READY` became `LIVE`, or the broadcast was already `LIVE` and only a new token was issued.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`no-store`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishGrant"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`NOT_BROADCAST_OWNER` or `CSRF_REJECTED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`BROADCAST_NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`BROADCAST_NOT_STARTABLE`: interrupted or ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/broadcasts/{id}/stop": {
+      "post": {
+        "tags": [
+          "broadcasts"
+        ],
+        "summary": "End a live or interrupted broadcast and disconnect its publisher; owner only",
+        "operationId": "stopBroadcast",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Now `ENDED`.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The new version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Broadcast"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`NOT_BROADCAST_OWNER` or `CSRF_REJECTED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`BROADCAST_NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`BROADCAST_NOT_LIVE`: ready or already ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -896,6 +1095,83 @@
           }
         }
       },
+      "Jwk": {
+        "type": "object",
+        "description": "An Ed25519 public key (RFC 8037).",
+        "required": [
+          "kty",
+          "crv",
+          "x",
+          "kid",
+          "alg",
+          "use"
+        ],
+        "properties": {
+          "alg": {
+            "type": "string",
+            "example": "EdDSA"
+          },
+          "crv": {
+            "type": "string",
+            "example": "Ed25519"
+          },
+          "kid": {
+            "type": "string",
+            "description": "RFC 7638 thumbprint; matches the `kid` header of every token."
+          },
+          "kty": {
+            "type": "string",
+            "example": "OKP"
+          },
+          "use": {
+            "type": "string",
+            "example": "sig"
+          },
+          "x": {
+            "type": "string",
+            "description": "The public key, base64url."
+          }
+        }
+      },
+      "Jwks": {
+        "type": "object",
+        "required": [
+          "keys"
+        ],
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Jwk"
+            }
+          }
+        }
+      },
+      "PublishGrant": {
+        "type": "object",
+        "required": [
+          "whipUrl",
+          "token",
+          "expiresIn"
+        ],
+        "properties": {
+          "expiresIn": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Seconds until the token expires. The media server also ends the\npublish session then.",
+            "minimum": 0
+          },
+          "token": {
+            "type": "string",
+            "description": "Send as `Authorization: Bearer <token>` on the WHIP request. Allows\npublishing to this broadcast only."
+          },
+          "whipUrl": {
+            "type": "string",
+            "description": "Same-origin WHIP endpoint to POST the SDP offer to.",
+            "example": "/media/webrtc/live/112007303372210176/whip"
+          }
+        }
+      },
       "User": {
         "type": "object",
         "required": [
@@ -930,7 +1206,7 @@
     },
     {
       "name": "broadcasts",
-      "description": "Broadcast registration and browsing"
+      "description": "Broadcast registration, browsing, going live and ending"
     }
   ]
 }

@@ -2,7 +2,10 @@ use std::time::SystemTime;
 
 use application::ports::{
     PortError,
-    broadcast::{BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, WriteRejection},
+    broadcast::{
+        BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, TransitionRejection,
+        WriteRejection,
+    },
 };
 use async_trait::async_trait;
 use domain::{
@@ -74,6 +77,47 @@ impl PgBroadcastRepository {
             Some(stored) if stored != owner.as_i64() => WriteRejection::NotOwner,
             Some(_) => otherwise,
         })
+    }
+
+    /// Runs `sql`, a conditional status change binding `$1` id, `$2` owner,
+    /// `$3` the statuses it may leave and `$4` the one it enters, and says why
+    /// when it matched no row.
+    async fn transition(
+        &self,
+        sql: &'static str,
+        id: BroadcastId,
+        owner: UserId,
+        from: &[BroadcastStatus],
+        to: BroadcastStatus,
+    ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
+        let from: Vec<&str> = from.iter().map(|status| status.as_str()).collect();
+        let row: Option<BroadcastRow> = sqlx::query_as(sql)
+            .bind(id.as_i64())
+            .bind(owner.as_i64())
+            .bind(&from)
+            .bind(to.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(port_error)?;
+        if let Some(row) = row {
+            return Ok(Ok(to_broadcast(row)?));
+        }
+        let stored: Option<(i64, String)> = sqlx::query_as(
+            "SELECT owner_id, status FROM broadcasts WHERE id = $1 AND deleted_at IS NULL",
+        )
+        .bind(id.as_i64())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(port_error)?;
+        Ok(Err(match stored {
+            None => TransitionRejection::NotFound,
+            Some((stored, _)) if stored != owner.as_i64() => TransitionRejection::NotOwner,
+            Some((_, status)) => {
+                TransitionRejection::InStatus(BroadcastStatus::parse(&status).ok_or_else(|| {
+                    PortError(format!("invalid stored status for broadcast {id}"))
+                })?)
+            }
+        }))
     }
 }
 
@@ -155,6 +199,50 @@ impl BroadcastRepository for PgBroadcastRepository {
         Ok(Err(self
             .rejection(id, owner, WriteRejection::NotDeletable)
             .await?))
+    }
+
+    async fn start(
+        &self,
+        id: BroadcastId,
+        owner: UserId,
+    ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
+        let sql = concat!(
+            "UPDATE broadcasts AS b \
+             SET status = $4, started_at = now(), version = version + 1, updated_at = now() \
+             WHERE id = $1 AND owner_id = $2 AND status = ANY($3) AND deleted_at IS NULL \
+             RETURNING ",
+            columns!()
+        );
+        self.transition(
+            sql,
+            id,
+            owner,
+            &BroadcastStatus::STARTABLE,
+            BroadcastStatus::Live,
+        )
+        .await
+    }
+
+    async fn stop(
+        &self,
+        id: BroadcastId,
+        owner: UserId,
+    ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
+        let sql = concat!(
+            "UPDATE broadcasts AS b \
+             SET status = $4, ended_at = now(), version = version + 1, updated_at = now() \
+             WHERE id = $1 AND owner_id = $2 AND status = ANY($3) AND deleted_at IS NULL \
+             RETURNING ",
+            columns!()
+        );
+        self.transition(
+            sql,
+            id,
+            owner,
+            &BroadcastStatus::STOPPABLE,
+            BroadcastStatus::Ended,
+        )
+        .await
     }
 }
 

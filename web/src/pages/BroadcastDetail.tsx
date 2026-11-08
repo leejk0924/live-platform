@@ -5,19 +5,20 @@ import { errorMessage } from '../api/client.ts'
 import type { Broadcast } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
 import LoadFailed from '../broadcasts/LoadFailed.tsx'
+import Publisher from '../broadcasts/publish/Publisher.tsx'
 import { statusLabel } from '../broadcasts/status.ts'
 import { useBroadcast } from '../broadcasts/useBroadcast.ts'
 
 export default function BroadcastDetail() {
   const { id = '' } = useParams()
-  const { state } = useBroadcast(id)
+  const { state, reload } = useBroadcast(id)
 
   if (state.status === 'loading') return <p>불러오는 중…</p>
   if (state.status === 'failed') return <LoadFailed error={state.error} />
-  return <BroadcastView broadcast={state.broadcast} />
+  return <BroadcastView broadcast={state.broadcast} onChanged={reload} />
 }
 
-function BroadcastView({ broadcast }: { broadcast: Broadcast }) {
+function BroadcastView({ broadcast, onChanged }: { broadcast: Broadcast; onChanged: () => void }) {
   const { auth } = useAuth()
   const navigate = useNavigate()
   const [pending, setPending] = useState(false)
@@ -46,6 +47,7 @@ function BroadcastView({ broadcast }: { broadcast: Broadcast }) {
         <time dateTime={broadcast.createdAt}>{new Date(broadcast.createdAt).toLocaleString('ko-KR')}</time>
       </p>
       {broadcast.description && <p className="description">{broadcast.description}</p>}
+      {isOwner && <Publisher broadcast={broadcast} onChanged={onChanged} />}
       {isOwner && (
         <div className="actions">
           <Link to={`/broadcasts/${broadcast.id}/edit`} className="button">

@@ -66,6 +66,8 @@ const MESSAGES: Record<string, string> = {
   NOT_BROADCAST_OWNER: '방송을 만든 사람만 바꿀 수 있습니다.',
   VERSION_CONFLICT: '다른 곳에서 방송이 수정되었습니다. 새로고침한 뒤 다시 시도하세요.',
   BROADCAST_NOT_DELETABLE: '방송 중이거나 중단된 방송은 삭제할 수 없습니다.',
+  BROADCAST_NOT_STARTABLE: '종료되었거나 연결이 끊긴 방송은 시작할 수 없습니다.',
+  BROADCAST_NOT_LIVE: '방송 중이 아닙니다.',
   INVALID_TITLE: '제목은 1~100자여야 합니다.',
   INVALID_DESCRIPTION: '설명은 2000자 이하여야 합니다.',
   IF_MATCH_REQUIRED: '방송 버전 정보가 없습니다. 새로고침한 뒤 다시 시도하세요.',

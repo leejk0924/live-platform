@@ -20,8 +20,8 @@ pub const DESCRIPTION_MAX_CHARS: usize = 2000;
 pub const PAGE_SIZE_DEFAULT: u32 = 20;
 pub const PAGE_SIZE_MAX: u32 = 50;
 
-/// `READY -> LIVE <-> INTERRUPTED -> ENDED`. Transitions other than creation
-/// and deletion belong to the streaming work and are not modelled yet.
+/// `READY -> LIVE <-> INTERRUPTED -> ENDED`. Interruption and resumption
+/// are not modelled yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BroadcastStatus {
     Ready,
@@ -36,6 +36,12 @@ impl BroadcastStatus {
     /// The only statuses a broadcast may be deleted in. Adapters bind this
     /// set into their conditional writes instead of restating it.
     pub const DELETABLE: [Self; 2] = [Self::Ready, Self::Ended];
+
+    /// Statuses a broadcast may go live from.
+    pub const STARTABLE: [Self; 1] = [Self::Ready];
+
+    /// Statuses a broadcast may be ended from.
+    pub const STOPPABLE: [Self; 2] = [Self::Live, Self::Interrupted];
 
     pub fn is_deletable(self) -> bool {
         Self::DELETABLE.contains(&self)
@@ -136,6 +142,10 @@ pub enum BroadcastError {
     VersionConflict,
     #[error("a broadcast that is live or interrupted cannot be deleted")]
     NotDeletable,
+    #[error("only a ready broadcast can start; an ended one cannot go live again")]
+    NotStartable,
+    #[error("the broadcast is not live")]
+    NotLive,
 }
 
 impl DomainError for BroadcastError {
@@ -146,7 +156,9 @@ impl DomainError for BroadcastError {
             }
             Self::NotFound => ErrorKind::NotFound,
             Self::NotOwner => ErrorKind::Forbidden,
-            Self::VersionConflict | Self::NotDeletable => ErrorKind::Conflict,
+            Self::VersionConflict | Self::NotDeletable | Self::NotStartable | Self::NotLive => {
+                ErrorKind::Conflict
+            }
         }
     }
 
@@ -159,6 +171,8 @@ impl DomainError for BroadcastError {
             Self::NotOwner => "NOT_BROADCAST_OWNER",
             Self::VersionConflict => "VERSION_CONFLICT",
             Self::NotDeletable => "BROADCAST_NOT_DELETABLE",
+            Self::NotStartable => "BROADCAST_NOT_STARTABLE",
+            Self::NotLive => "BROADCAST_NOT_LIVE",
         }
     }
 }
@@ -216,6 +230,21 @@ mod tests {
             .filter(|s| s.is_deletable())
             .collect();
         assert_eq!(deletable, [BroadcastStatus::Ready, BroadcastStatus::Ended]);
+    }
+
+    #[test]
+    fn only_ready_starts_and_only_live_or_interrupted_stops() {
+        assert_eq!(BroadcastStatus::STARTABLE, [BroadcastStatus::Ready]);
+        assert_eq!(
+            BroadcastStatus::STOPPABLE,
+            [BroadcastStatus::Live, BroadcastStatus::Interrupted]
+        );
+        assert_eq!(BroadcastError::NotStartable.kind(), ErrorKind::Conflict);
+        assert_eq!(
+            BroadcastError::NotStartable.code(),
+            "BROADCAST_NOT_STARTABLE"
+        );
+        assert_eq!(BroadcastError::NotLive.code(), "BROADCAST_NOT_LIVE");
     }
 
     #[test]

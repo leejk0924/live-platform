@@ -7,6 +7,7 @@ pub mod config;
 pub mod csrf;
 pub mod error;
 pub mod json;
+pub mod live;
 pub mod openapi;
 pub mod rate_limit;
 #[cfg(test)]
@@ -16,6 +17,7 @@ use std::sync::Arc;
 
 use application::ports::id::IdGenerator;
 use axum::{Router, middleware, routing::get};
+use infrastructure::media::PublicJwk;
 use tower_http::catch_panic::CatchPanicLayer;
 
 use crate::{
@@ -34,6 +36,8 @@ pub struct AppState {
     pub broadcasts: Arc<BroadcastUseCases>,
     pub allowed_origins: Arc<[Origin]>,
     pub limits: Arc<RateLimits>,
+    /// Served as the JWKS MediaMTX verifies publish tokens with.
+    pub publish_jwk: Arc<PublicJwk>,
 }
 
 impl AppState {
@@ -42,6 +46,7 @@ impl AppState {
         broadcast_ports: BroadcastPorts,
         allowed_origins: Vec<Origin>,
         demo_login_enabled: bool,
+        publish_jwk: PublicJwk,
     ) -> Self {
         let broadcasts =
             BroadcastUseCases::new(broadcast_ports, ports.ids.clone(), ports.users.clone());
@@ -51,6 +56,7 @@ impl AppState {
             broadcasts: Arc::new(broadcasts),
             allowed_origins: allowed_origins.into(),
             limits: Arc::new(RateLimits::default()),
+            publish_jwk: Arc::new(publish_jwk),
         }
     }
 }
@@ -61,6 +67,7 @@ pub fn app(state: AppState) -> Router {
         .route("/openapi.json", get(openapi::spec))
         .nest("/auth", auth::routes())
         .merge(broadcast::routes())
+        .merge(live::routes())
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state.allowed_origins),
             csrf::guard,

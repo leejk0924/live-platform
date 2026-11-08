@@ -80,3 +80,7 @@ PC는 Windows의 Chrome 156.0.8078.8, 휴대폰은 iPhone 15 Pro(iOS 26.6.2) Saf
 - (unverified) iOS 17.1 이상의 `ManagedMediaSource`로 hls.js를 iOS에서 돌리는 길은 확인하지 않았다. iOS를 LL-HLS로 되돌리려면 위 A/B 실험과 함께 이것부터 본다.
 - 6번은 상한이 걸려 있다는 것만 확인했다. 실제 상한에 닿았을 때의 동작은 움직임이 많은 화면으로 다시 재야 한다.
 - Android 송출(2번)은 확인하지 않았다. #9(모바일 송출) 전에 확인한다.
+
+## Follow-up (2026-11-08, #7 송출 구현)
+
+"재연결 시 토큰 재발급 거부"만으로는 재송출을 막지 못한다. 송출 토큰이 12시간 유효하고, MediaMTX는 DB 상태를 보지 않기 때문이다. kick 직후에도 같은 토큰으로 다시 송출할 수 있다. 이 공백은 #10의 publish hook으로 막는다. 결정과 이유는 [media/7-whip-publish-jwt](7-whip-publish-jwt.md).

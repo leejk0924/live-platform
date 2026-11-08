@@ -58,6 +58,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
       ALLOWED_ORIGINS: https://localhost
       DEMO_LOGIN_ENABLED: ${DEMO_LOGIN_ENABLED:-false}
+      PUBLISH_JWT_PRIVATE_KEY: ${PUBLISH_JWT_PRIVATE_KEY:?set PUBLISH_JWT_PRIVATE_KEY in .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,7 +86,8 @@ services:
       - "8189:8189/udp"
       - "8189:8189/tcp"
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9997/v3/info"]
+      # The Control API now needs a JWT; the WebRTC listener's bundled script answers without one.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8889/publisher.js"]
       interval: 10s
       timeout: 3s
       retries: 3

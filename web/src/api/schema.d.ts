@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/.well-known/jwks.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Public key that verifies publish tokens; read by the media server */
+        get: operations["getJwks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/demo": {
         parameters: {
             query?: never;
@@ -143,6 +160,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/broadcasts/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Go live, or get a fresh publish token for a live broadcast; owner only */
+        post: operations["startBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/broadcasts/{id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** End a live or interrupted broadcast and disconnect its publisher; owner only */
+        post: operations["stopBroadcast"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -206,6 +257,42 @@ export interface components {
             /** @description Also in the `x-trace-id` header; quote it when reporting a problem. */
             traceId: string;
         };
+        /** @description An Ed25519 public key (RFC 8037). */
+        Jwk: {
+            /** @example EdDSA */
+            alg: string;
+            /** @example Ed25519 */
+            crv: string;
+            /** @description RFC 7638 thumbprint; matches the `kid` header of every token. */
+            kid: string;
+            /** @example OKP */
+            kty: string;
+            /** @example sig */
+            use: string;
+            /** @description The public key, base64url. */
+            x: string;
+        };
+        Jwks: {
+            keys: components["schemas"]["Jwk"][];
+        };
+        PublishGrant: {
+            /**
+             * Format: int64
+             * @description Seconds until the token expires. The media server also ends the
+             *     publish session then.
+             */
+            expiresIn: number;
+            /**
+             * @description Send as `Authorization: Bearer <token>` on the WHIP request. Allows
+             *     publishing to this broadcast only.
+             */
+            token: string;
+            /**
+             * @description Same-origin WHIP endpoint to POST the SDP offer to.
+             * @example /media/webrtc/live/112007303372210176/whip
+             */
+            whipUrl: string;
+        };
         User: {
             /**
              * @description Snowflake id as a decimal string.
@@ -223,6 +310,28 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getJwks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The current signing key. */
+            200: {
+                headers: {
+                    /** @description `public, max-age=300` */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Jwks"];
+                };
+            };
+        };
+    };
     getDemoStatus: {
         parameters: {
             query?: never;
@@ -742,6 +851,128 @@ export interface operations {
                 };
             };
             /** @description `BROADCAST_NOT_DELETABLE`: live or interrupted */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    startBroadcast: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Broadcast id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description `READY` became `LIVE`, or the broadcast was already `LIVE` and only a new token was issued. */
+            200: {
+                headers: {
+                    /** @description `no-store` */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishGrant"];
+                };
+            };
+            /** @description `UNAUTHENTICATED` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `NOT_BROADCAST_OWNER` or `CSRF_REJECTED` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `BROADCAST_NOT_FOUND` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `BROADCAST_NOT_STARTABLE`: interrupted or ended */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    stopBroadcast: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Broadcast id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Now `ENDED`. */
+            200: {
+                headers: {
+                    /** @description The new version */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Broadcast"];
+                };
+            };
+            /** @description `UNAUTHENTICATED` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `NOT_BROADCAST_OWNER` or `CSRF_REJECTED` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `BROADCAST_NOT_FOUND` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `BROADCAST_NOT_LIVE`: ready or already ended */
             409: {
                 headers: {
                     [name: string]: unknown;
