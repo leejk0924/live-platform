@@ -62,6 +62,16 @@ services:
       DEMO_LOGIN_ENABLED: ${DEMO_LOGIN_ENABLED:-false}
       PUBLISH_JWT_PRIVATE_KEY: ${PUBLISH_JWT_PRIVATE_KEY:?set PUBLISH_JWT_PRIVATE_KEY in .env}
       MEDIA_HOOK_SECRET: ${MEDIA_HOOK_SECRET:?set MEDIA_HOOK_SECRET in .env}
+      # Empty means local storage; s3 needs every S3_* and CLOUDFRONT_* value.
+      RECORDING_STORAGE: ${RECORDING_STORAGE:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      CLOUDFRONT_DOMAIN: ${CLOUDFRONT_DOMAIN:-}
+      CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID:-}
+      CLOUDFRONT_PRIVATE_KEY: ${CLOUDFRONT_PRIVATE_KEY:-}
     volumes:
       # MediaMTX writes finished segments to the spool; the API copies them to the store.
       - recording_spool:/recordings

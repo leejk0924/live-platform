@@ -251,6 +251,7 @@ fn recording_config(
     let spool_dir = dir_or(lookup, "RECORDING_SPOOL_DIR", DEFAULT_RECORDING_SPOOL_DIR)?;
     let storage = match lookup("RECORDING_STORAGE") {
         Err(VarError::NotPresent) => "local".to_owned(),
+        Ok(raw) if raw.is_empty() => "local".to_owned(),
         Ok(raw) => raw,
         Err(err) => return Err(ConfigError::RecordingStorage(err.to_string())),
     };
@@ -404,10 +405,32 @@ mod tests {
             ("RECORDING_SPOOL_DIR", ""),
             ("RECORDING_STORE_DIR", ""),
             ("RECORDING_STORAGE", "S3"),
-            ("RECORDING_STORAGE", ""),
         ] {
             assert!(from(&[(var, value)]).is_err(), "{var}={value:?}");
         }
+    }
+
+    /// Compose passes every recording setting as `${VAR:-}`, so one left out
+    /// of `.env` arrives empty.
+    #[test]
+    fn empty_recording_settings_mean_local_storage() {
+        let empty = [
+            "RECORDING_STORAGE",
+            "S3_ENDPOINT",
+            "S3_REGION",
+            "S3_BUCKET",
+            "S3_ACCESS_KEY_ID",
+            "S3_SECRET_ACCESS_KEY",
+            "CLOUDFRONT_DOMAIN",
+            "CLOUDFRONT_KEY_PAIR_ID",
+            "CLOUDFRONT_PRIVATE_KEY",
+        ]
+        .map(|var| (var, ""));
+        let config = from(&empty).unwrap();
+        assert!(matches!(
+            config.recordings.storage,
+            RecordingStorageConfig::Local { ref store_dir } if store_dir == &PathBuf::from("/recording-store")
+        ));
     }
 
     const S3_SECRET: &str = "s3-secret-access-key-value";
