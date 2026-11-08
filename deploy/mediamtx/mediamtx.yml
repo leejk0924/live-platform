@@ -37,6 +37,17 @@ paths:
   all_others:
     # A second publisher with a valid token is refused instead of replacing the live one.
     overridePublisher: false
+    # Every broadcast is recorded for replay. fMP4 plays in a plain <video> with seeking, so
+    # a replay needs no packaging step. A segment closes when the publisher leaves or after
+    # 30 minutes, which bounds one file to about 0.6 GB at 2.5 Mbps. The API copies each
+    # finished segment to storage and deletes it here; recordDeleteAfter only cleans up
+    # segments the API never took. The image has no time zone data, so names are in UTC and
+    # MediaMTX's warning about daylight saving time without %z does not apply.
+    record: yes
+    recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+    recordFormat: fmp4
+    recordSegmentDuration: 30m
+    recordDeleteAfter: 7d
     # Tell the API when a stream comes and goes, so a dropped publisher becomes INTERRUPTED
     # and a returning one LIVE again. The image has no shell: MediaMTX splits the command
     # itself and expands $MTX_PATH and $MEDIA_HOOK_SECRET (from the container environment)
@@ -46,4 +57,10 @@ paths:
       http://mediamtx:$MEDIA_HOOK_SECRET@api:8080/internal/media/hooks
     runOnUnavailable: >-
       /bin/wget -q -O /dev/null --post-data '{"event":"unavailable","path":"$MTX_PATH"}'
+      http://mediamtx:$MEDIA_HOOK_SECRET@api:8080/internal/media/hooks
+    # Tell the API a segment file is finished so it can store it. A report that gets lost
+    # leaves the segment unrecorded until recordDeleteAfter removes it.
+    runOnRecordSegmentComplete: >-
+      /bin/wget -q -O /dev/null
+      --post-data '{"event":"segment_complete","path":"$MTX_PATH","segment":"$MTX_SEGMENT_PATH","duration":"$MTX_SEGMENT_DURATION"}'
       http://mediamtx:$MEDIA_HOOK_SECRET@api:8080/internal/media/hooks
