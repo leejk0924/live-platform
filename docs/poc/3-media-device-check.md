@@ -1,5 +1,7 @@
 # 미디어 PoC 실기기 확인 (#3)
 
+
+> 이 문서의 PoC 페이지와 `compose.poc.yml`은 #7에서 MediaMTX 송출 인증을 JWT로 바꾸면서 지웠다. 결과는 ADR Follow-up에 남아 있다. 다시 보려면 `git show 40c6e29:web/public/poc/publish.html`처럼 #19 머지 커밋에서 꺼낸다.
 PC 한 대에 스택을 띄우고, 같은 Wi-Fi의 휴대폰에서 송출·시청을 확인한다.
 결과는 [`docs/adr/media/1-mediamtx-whip-llhls.md`](../adr/media/1-mediamtx-whip-llhls.md)의 Follow-up 표에 적는다.
 
