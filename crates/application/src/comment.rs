@@ -285,9 +285,15 @@ impl FollowComments {
         // Subscribe before reading the store, so nothing written in between
         // falls through the gap.
         let subscription = self.events.subscribe(broadcast);
-        let (cursor, behind) = match after {
-            Some(after) => (after, true),
-            None => (self.query.latest_revision(broadcast).await?, false),
+        let latest = self.query.latest_revision(broadcast).await?;
+        // A resume point the store never reached (another database, or a
+        // forged header) would wait for revisions that already exist.
+        let (cursor, behind, queued) = match after {
+            Some(after) if after > latest => {
+                (latest, false, Some(FeedItem::Reset { cursor: latest }))
+            }
+            Some(after) => (after, true, None),
+            None => (latest, false, None),
         };
         Ok(CommentFeed {
             broadcast,
@@ -295,6 +301,7 @@ impl FollowComments {
             subscription,
             cursor,
             behind,
+            queued,
             caught_up: HashSet::new(),
         })
     }
@@ -310,6 +317,8 @@ pub struct CommentFeed {
     cursor: Revision,
     /// Events may be missing after `cursor`; the next call catches up first.
     behind: bool,
+    /// Delivered before anything else.
+    queued: Option<FeedItem>,
     /// Revisions the last catch-up delivered, whose live events are still
     /// to come and must not be delivered twice. A set rather than "at most
     /// the cursor": each write publishes after its own commit, so a lower
@@ -321,6 +330,9 @@ impl CommentFeed {
     /// The next item, or `None` once the bus has shut down. Dropping the
     /// future before it completes loses nothing.
     pub async fn next(&mut self) -> Result<Option<FeedItem>, PortError> {
+        if let Some(item) = self.queued.take() {
+            return Ok(Some(item));
+        }
         loop {
             if self.behind {
                 let item = self.catch_up().await?;
@@ -663,6 +675,27 @@ mod tests {
             FeedItem::Reset {
                 cursor: Revision::new(limit + 1).unwrap()
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_resume_point_past_the_newest_revision_is_a_reset_to_it() {
+        let store = Store::with(5);
+        let (bus, tx) = Bus::new();
+        let mut feed = open(&store, &bus, Some(9)).await.unwrap();
+        assert_eq!(
+            next(&mut feed).await,
+            FeedItem::Reset {
+                cursor: Revision::new(5).unwrap()
+            }
+        );
+
+        *store.stored.lock().unwrap() = 6;
+        tx.send(Delivery::Missed).unwrap();
+        assert_eq!(
+            revisions(&next(&mut feed).await),
+            [6],
+            "followed from there"
         );
     }
 
