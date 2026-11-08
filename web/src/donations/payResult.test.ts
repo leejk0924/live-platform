@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { failNotice, readPayment } from './payResult.ts'
+import { failNotice, paymentStartError, readPayment } from './payResult.ts'
 
 test('the success URL holds a payment only with its key, order and a valid amount', () => {
   assert.deepEqual(readPayment(new URLSearchParams('paymentKey=tgen_1&orderId=42&amount=5000')), {
@@ -35,4 +35,20 @@ test('only a code shaped like Toss codes is shown', () => {
     assert.deepEqual(failNotice(new URLSearchParams({ code })), { text: '결제를 완료하지 못했습니다.', code: null }, code)
   }
   assert.deepEqual(failNotice(new URLSearchParams()), { text: '결제를 완료하지 못했습니다.', code: null })
+})
+
+test('a payment window that would not start says why', () => {
+  assert.equal(paymentStartError({ code: 'USER_CANCEL', message: 'x' }), '결제를 취소했습니다.')
+  assert.equal(paymentStartError({ code: 'NEED_CARD_PAYMENT_DETAIL', message: 'x' }), '카드사를 선택하세요.')
+  assert.equal(
+    paymentStartError({ code: 'NEED_AGREEMENT_WITH_REQUIRED_TERMS', message: 'x' }),
+    '필수 약관에 동의하세요.',
+  )
+  assert.equal(
+    paymentStartError({ code: 'SOMETHING_NEW', message: '결제수단을 선택해 주세요.' }),
+    '결제를 시작하지 못했습니다. 결제수단을 선택해 주세요.',
+  )
+  for (const error of [new Error(''), null, 'boom', { code: 'SOMETHING_NEW' }]) {
+    assert.equal(paymentStartError(error), '결제를 시작하지 못했습니다. 다시 시도하세요.', String(error))
+  }
 })

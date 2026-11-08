@@ -5,7 +5,8 @@ import type { DonationOrder } from '../api/types.ts'
 import { formatWon, parseAmount } from '../donations/amount.ts'
 import PayPage from '../donations/PayPage.tsx'
 import { failUrl, successUrl } from '../donations/payUrls.ts'
-import { loadTossPayments, tossErrorCode, type TossWidgets } from '../donations/toss.ts'
+import { paymentStartError } from '../donations/payResult.ts'
+import { loadTossPayments, type TossWidgets } from '../donations/toss.ts'
 
 const METHODS_ID = 'payment-methods'
 const AGREEMENT_ID = 'payment-agreement'
@@ -76,7 +77,7 @@ function Checkout({ broadcastId, amount }: { broadcastId: string; amount: number
         failUrl: failUrl(window.location.origin, broadcastId),
       })
     } catch (e) {
-      setPayError(tossErrorCode(e) === 'USER_CANCEL' ? '결제를 취소했습니다.' : '결제를 시작하지 못했습니다. 다시 시도하세요.')
+      setPayError(paymentStartError(e))
     } finally {
       setPaying(false)
     }
