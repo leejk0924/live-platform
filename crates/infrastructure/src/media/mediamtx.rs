@@ -47,67 +47,77 @@ impl MediaMtxStreamTerminator {
 }
 
 #[derive(Deserialize)]
-struct PathInfo {
-    source: Option<PathSource>,
+#[serde(rename_all = "camelCase")]
+struct SessionPage {
+    page_count: u32,
+    items: Vec<Session>,
 }
 
 #[derive(Deserialize)]
-struct PathSource {
-    #[serde(rename = "type")]
-    kind: String,
+struct Session {
     id: String,
+    path: String,
 }
 
 fn port_error(err: reqwest::Error) -> PortError {
     PortError(format!("mediamtx api: {err}"))
 }
 
+impl MediaMtxStreamTerminator {
+    /// Every WebRTC session on `path`. A WHIP session joins this list as soon
+    /// as its offer is answered, while the path itself names it as the source
+    /// only once ICE connects.
+    async fn sessions_on(&self, path: &StreamPath, token: &str) -> Result<Vec<String>, PortError> {
+        let mut ids = Vec::new();
+        let mut page = 0;
+        loop {
+            let sessions: SessionPage = self
+                .http
+                .get(format!(
+                    "{}/v3/webrtc/sessions/list?page={page}",
+                    self.api_url
+                ))
+                .bearer_auth(token)
+                .send()
+                .await
+                .and_then(reqwest::Response::error_for_status)
+                .map_err(port_error)?
+                .json()
+                .await
+                .map_err(port_error)?;
+            ids.extend(
+                sessions
+                    .items
+                    .into_iter()
+                    .filter(|session| session.path == path.as_str())
+                    .map(|session| session.id),
+            );
+            page += 1;
+            if page >= sessions.page_count {
+                return Ok(ids);
+            }
+        }
+    }
+}
+
 #[async_trait]
 impl StreamTerminator for MediaMtxStreamTerminator {
+    /// WHIP is the only way in; every other protocol is off in mediamtx.yml.
     async fn kick(&self, path: &StreamPath) -> Result<(), PortError> {
         let token = self.key.api_token()?;
-        let response = self
-            .http
-            .get(format!("{}/v3/paths/get/{}", self.api_url, path.as_str()))
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(port_error)?;
-        if response.status() == StatusCode::NOT_FOUND {
-            return Ok(());
+        for id in self.sessions_on(path, &token).await? {
+            let response = self
+                .http
+                .post(format!("{}/v3/webrtc/sessions/kick/{id}", self.api_url))
+                .bearer_auth(&token)
+                .send()
+                .await
+                .map_err(port_error)?;
+            // Not found: the session closed after the list was read.
+            if response.status() != StatusCode::NOT_FOUND {
+                response.error_for_status().map_err(port_error)?;
+            }
         }
-        let info: PathInfo = response
-            .error_for_status()
-            .map_err(port_error)?
-            .json()
-            .await
-            .map_err(port_error)?;
-        let Some(source) = info.source else {
-            return Ok(());
-        };
-        // WHIP is the only way in; every other protocol is off in mediamtx.yml.
-        if source.kind != "webRTCSession" {
-            return Err(PortError(format!(
-                "cannot kick a {} publisher on {}",
-                source.kind,
-                path.as_str()
-            )));
-        }
-        let response = self
-            .http
-            .post(format!(
-                "{}/v3/webrtc/sessions/kick/{}",
-                self.api_url, source.id
-            ))
-            .bearer_auth(&token)
-            .send()
-            .await
-            .map_err(port_error)?;
-        // Not found: the publisher left between the two calls.
-        if response.status() == StatusCode::NOT_FOUND {
-            return Ok(());
-        }
-        response.error_for_status().map_err(port_error)?;
         Ok(())
     }
 }
