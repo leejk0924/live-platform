@@ -15,7 +15,9 @@ use tokio::{
 
 /// How long stopping waits for the pass in progress before dropping it, so
 /// a slow media server cannot hold up the rest of the shutdown past the
-/// container's stop timeout. A dropped pass's writes are rolled back.
+/// container's stop timeout. A pass dropped before its commit is rolled
+/// back; one dropped while kicking after the commit leaves streams that the
+/// next pass finds and kicks again.
 pub const SHUTDOWN_WAIT: Duration = Duration::from_secs(3);
 
 pub struct ReaperHandle {
