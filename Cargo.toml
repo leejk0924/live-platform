@@ -27,7 +27,7 @@ ed25519-dalek = "3"
 p256 = { version = "0.14", default-features = false, features = ["ecdsa", "pem", "std"] }
 rusty-s3 = { version = "0.11", default-features = false, features = ["rustcrypto"] }
 zeroize = "1"
-reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "native-tls"] }
 subtle = "2"
 
 axum = "0.8"
