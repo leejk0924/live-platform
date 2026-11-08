@@ -359,11 +359,12 @@ impl CommentFeed {
     }
 
     async fn catch_up(&mut self) -> Result<Option<FeedItem>, PortError> {
+        // One more than fits tells "exactly the limit" from "too many".
         let changes = self
             .query
-            .changes_since(self.broadcast, self.cursor, FEED_CATCH_UP_LIMIT)
+            .changes_since(self.broadcast, self.cursor, FEED_CATCH_UP_LIMIT + 1)
             .await?;
-        if changes.len() >= FEED_CATCH_UP_LIMIT as usize {
+        if changes.len() > FEED_CATCH_UP_LIMIT as usize {
             let cursor = self.query.latest_revision(self.broadcast).await?;
             self.cursor = cursor;
             self.caught_up.clear();
@@ -642,6 +643,26 @@ mod tests {
             revisions(&next(&mut feed).await),
             [limit + 11, limit + 12],
             "catches up from the reset point"
+        );
+    }
+
+    #[tokio::test]
+    async fn exactly_the_limit_is_caught_up_and_one_more_is_a_reset() {
+        let limit = i64::from(FEED_CATCH_UP_LIMIT);
+        let (bus, _tx) = Bus::new();
+        let mut feed = open(&Store::with(limit), &bus, Some(0)).await.unwrap();
+        assert_eq!(
+            revisions(&next(&mut feed).await).len(),
+            FEED_CATCH_UP_LIMIT as usize
+        );
+
+        let (bus, _tx) = Bus::new();
+        let mut feed = open(&Store::with(limit + 1), &bus, Some(0)).await.unwrap();
+        assert_eq!(
+            next(&mut feed).await,
+            FeedItem::Reset {
+                cursor: Revision::new(limit + 1).unwrap()
+            }
         );
     }
 
