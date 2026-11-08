@@ -19,6 +19,16 @@ WHERE b.status IN ('LIVE', 'INTERRUPTED') AND b.deleted_at IS NULL
         AND newer.status IN ('LIVE', 'INTERRUPTED') AND newer.deleted_at IS NULL
   );
 
+-- When the broadcast last went LIVE, kept only while LIVE. The reaper
+-- interrupts a LIVE broadcast with no stream once this is older than the
+-- grace; an edit to the title does not move it.
+ALTER TABLE broadcasts ADD COLUMN live_since TIMESTAMPTZ NULL;
+
+UPDATE broadcasts SET live_since = updated_at WHERE status = 'LIVE';
+
+ALTER TABLE broadcasts ADD CONSTRAINT broadcasts_live_since_check
+    CHECK ((status = 'LIVE') = (live_since IS NOT NULL));
+
 -- One broadcast on air per owner. The status list is
 -- domain::broadcast::BroadcastStatus::ACTIVE; a test keeps them equal, and the
 -- adapter maps a violation of this index by name.

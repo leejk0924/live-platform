@@ -58,7 +58,7 @@ async fn broadcast_in(router: &Router, pool: &PgPool, owner: &str, status: &str)
     .await;
     let id = reply.body["id"].as_str().unwrap().to_owned();
     sqlx::query(
-        "UPDATE broadcasts SET status = 'ENDED', interrupted_at = NULL \
+        "UPDATE broadcasts SET status = 'ENDED', interrupted_at = NULL, live_since = NULL \
          WHERE status IN ('LIVE', 'INTERRUPTED')",
     )
     .execute(pool)
@@ -66,7 +66,9 @@ async fn broadcast_in(router: &Router, pool: &PgPool, owner: &str, status: &str)
     .unwrap();
     sqlx::query(
         "UPDATE broadcasts SET status = $2, \
-         interrupted_at = CASE WHEN $2 = 'INTERRUPTED' THEN now() END WHERE id = $1",
+         interrupted_at = CASE WHEN $2 = 'INTERRUPTED' THEN now() END, \
+         live_since = CASE WHEN $2 = 'LIVE' THEN now() END \
+         WHERE id = $1",
     )
     .bind(id.parse::<i64>().unwrap())
     .bind(status)

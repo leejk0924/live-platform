@@ -79,7 +79,8 @@ impl ReapPass for PgReapPass {
         // began is newer than what the media server was asked.
         let resumed: Vec<i64> = sqlx::query_scalar(
             "UPDATE broadcasts \
-             SET status = $2, interrupted_at = NULL, version = version + 1, updated_at = now() \
+             SET status = $2, interrupted_at = NULL, live_since = now(), \
+                 version = version + 1, updated_at = now() \
              WHERE status = ANY($1) AND id = ANY($3) AND interrupted_at < now() \
                AND deleted_at IS NULL \
              RETURNING id",
@@ -93,9 +94,10 @@ impl ReapPass for PgReapPass {
         let interrupt = BroadcastEvent::Interrupt.transition();
         let interrupted: Vec<i64> = sqlx::query_scalar(
             "UPDATE broadcasts \
-             SET status = $2, interrupted_at = now(), version = version + 1, updated_at = now() \
+             SET status = $2, interrupted_at = now(), live_since = NULL, \
+                 version = version + 1, updated_at = now() \
              WHERE status = ANY($1) AND NOT (id = ANY($3)) \
-               AND updated_at < now() - make_interval(secs => $4) AND deleted_at IS NULL \
+               AND live_since < now() - make_interval(secs => $4) AND deleted_at IS NULL \
              RETURNING id",
         )
         .bind(status_names(interrupt.from))

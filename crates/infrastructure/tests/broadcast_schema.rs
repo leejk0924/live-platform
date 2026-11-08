@@ -75,8 +75,9 @@ async fn the_table_accepts_exactly_what_the_domain_accepts(pool: PgPool) {
 async fn second_one_is_refused(pool: &PgPool, status: BroadcastStatus, first_id: i64) -> bool {
     let insert = |id: i64| {
         sqlx::query(
-            "INSERT INTO broadcasts (id, owner_id, title, status, interrupted_at) \
-             VALUES ($1, 1, 't', $2, CASE WHEN $2 = 'INTERRUPTED' THEN now() END)",
+            "INSERT INTO broadcasts (id, owner_id, title, status, interrupted_at, live_since) \
+             VALUES ($1, 1, 't', $2, CASE WHEN $2 = 'INTERRUPTED' THEN now() END, \
+                     CASE WHEN $2 = 'LIVE' THEN now() END)",
         )
         .bind(id)
         .bind(status.as_str())
@@ -116,25 +117,32 @@ async fn an_owner_holds_at_most_one_broadcast_in_the_active_statuses(pool: PgPoo
 
 #[sqlx::test(migrations = "./migrations")]
 #[ignore = "requires DATABASE_URL (Postgres)"]
-async fn interrupted_at_is_set_exactly_while_interrupted(pool: PgPool) {
+async fn status_times_are_set_exactly_while_in_their_status(pool: PgPool) {
     sqlx::query("INSERT INTO users (id, username, is_demo) VALUES (1, 'owner', true)")
         .execute(&pool)
         .await
         .unwrap();
-    for (i, status) in BroadcastStatus::ALL.into_iter().enumerate() {
-        for (j, with_time) in [false, true].into_iter().enumerate() {
+    let mut id = 0;
+    for status in BroadcastStatus::ALL {
+        for (interrupted_at, live_since) in [(false, false), (true, false), (false, true)] {
+            id += 1;
             let stored = sqlx::query(
-                "INSERT INTO broadcasts (id, owner_id, title, status, interrupted_at) \
-                 VALUES ($1, 1, 't', $2, CASE WHEN $3 THEN now() END)",
+                "INSERT INTO broadcasts (id, owner_id, title, status, interrupted_at, live_since) \
+                 VALUES ($1, 1, 't', $2, CASE WHEN $3 THEN now() END, CASE WHEN $4 THEN now() END)",
             )
-            .bind((10 * i + j) as i64 + 1)
+            .bind(id)
             .bind(status.as_str())
-            .bind(with_time)
+            .bind(interrupted_at)
+            .bind(live_since)
             .execute(&pool)
             .await
             .is_ok();
-            let expected = with_time == (status == BroadcastStatus::Interrupted);
-            assert_eq!(stored, expected, "{status:?} with time {with_time}");
+            let expected = interrupted_at == (status == BroadcastStatus::Interrupted)
+                && live_since == (status == BroadcastStatus::Live);
+            assert_eq!(
+                stored, expected,
+                "{status:?} with interrupted_at {interrupted_at}, live_since {live_since}"
+            );
             sqlx::query("DELETE FROM broadcasts")
                 .execute(&pool)
                 .await

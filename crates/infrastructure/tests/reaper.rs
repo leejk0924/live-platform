@@ -90,12 +90,14 @@ async fn owners(pool: &PgPool, count: i64) {
 }
 
 /// A broadcast of its own owner in `status`, last changed `changed_secs_ago`
-/// and, when interrupted, interrupted that long ago.
+/// and, when live or interrupted, in that status since then.
 async fn broadcast(pool: &PgPool, id: i64, status: &str, changed_secs_ago: f64) {
     sqlx::query(
-        "INSERT INTO broadcasts (id, owner_id, title, status, updated_at, interrupted_at) \
+        "INSERT INTO broadcasts \
+         (id, owner_id, title, status, updated_at, interrupted_at, live_since) \
          VALUES ($1, $1, 't', $2, now() - make_interval(secs => $3), \
-                 CASE WHEN $2 = 'INTERRUPTED' THEN now() - make_interval(secs => $3) END)",
+                 CASE WHEN $2 = 'INTERRUPTED' THEN now() - make_interval(secs => $3) END, \
+                 CASE WHEN $2 = 'LIVE' THEN now() - make_interval(secs => $3) END)",
     )
     .bind(id)
     .bind(status)
@@ -281,4 +283,25 @@ async fn two_reapers_never_run_a_pass_at_the_same_time(pool: PgPool) {
 
     let after = other.tick().await.unwrap();
     assert_eq!(after, Some(Reaped::default()), "the lock was released");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn an_edit_does_not_postpone_the_interrupt_of_a_live_broadcast_without_a_stream(
+    pool: PgPool,
+) {
+    owners(&pool, 1).await;
+    broadcast(&pool, 1, "LIVE", 60.0).await;
+    sqlx::query("UPDATE broadcasts SET title = 'edited', updated_at = now() - interval '1 second'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let reaped = reaper(&pool, Probe::on_air(&[]), Arc::default())
+        .tick()
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(reaped.reconciled.interrupted, ids(&[1]));
 }

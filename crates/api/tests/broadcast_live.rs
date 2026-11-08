@@ -61,7 +61,8 @@ impl World {
     /// have only one.
     async fn broadcast_in(&self, status: &str) -> String {
         sqlx::query(
-            "UPDATE broadcasts SET status = 'ENDED', interrupted_at = NULL              WHERE status IN ('LIVE', 'INTERRUPTED')",
+            "UPDATE broadcasts SET status = 'ENDED', interrupted_at = NULL, live_since = NULL \
+             WHERE status IN ('LIVE', 'INTERRUPTED')",
         )
         .execute(&self.pool)
         .await
@@ -79,13 +80,16 @@ impl World {
         assert_eq!(reply.status, StatusCode::CREATED, "{}", reply.body);
         let id = reply.body["id"].as_str().unwrap().to_owned();
         sqlx::query(
-            "UPDATE broadcasts SET status = $2,              interrupted_at = CASE WHEN $2 = 'INTERRUPTED' THEN now() END WHERE id = $1",
+            "UPDATE broadcasts SET status = $2, \
+             interrupted_at = CASE WHEN $2 = 'INTERRUPTED' THEN now() END, \
+             live_since = CASE WHEN $2 = 'LIVE' THEN now() END \
+             WHERE id = $1",
         )
-            .bind(id.parse::<i64>().unwrap())
-            .bind(status)
-            .execute(&self.pool)
-            .await
-            .unwrap();
+        .bind(id.parse::<i64>().unwrap())
+        .bind(status)
+        .execute(&self.pool)
+        .await
+        .unwrap();
         id
     }
 
@@ -392,12 +396,17 @@ async fn an_owner_cannot_start_a_second_broadcast_while_one_is_on_air(pool: PgPo
     for active in ["LIVE", "INTERRUPTED"] {
         let on_air = world.broadcast_in(active).await;
         let second = world.broadcast_in("READY").await;
-        sqlx::query("UPDATE broadcasts SET status = $2, interrupted_at = CASE WHEN $2 = 'INTERRUPTED' THEN now() END WHERE id = $1")
-            .bind(on_air.parse::<i64>().unwrap())
-            .bind(active)
-            .execute(&world.pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE broadcasts SET status = $2, \
+             interrupted_at = CASE WHEN $2 = 'INTERRUPTED' THEN now() END, \
+             live_since = CASE WHEN $2 = 'LIVE' THEN now() END \
+             WHERE id = $1",
+        )
+        .bind(on_air.parse::<i64>().unwrap())
+        .bind(active)
+        .execute(&world.pool)
+        .await
+        .unwrap();
         let before = world.stored(&second).await;
 
         let reply = call(&world.router, Op::Start, &second, Some(&world.owner)).await;

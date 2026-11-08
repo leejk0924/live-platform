@@ -115,7 +115,8 @@ async fn a_publish_token_admits_once_and_only_while_on_air(pool: PgPool) {
     );
 
     sqlx::query(
-        "UPDATE broadcasts SET status = 'INTERRUPTED', interrupted_at = now() WHERE id = $1",
+        "UPDATE broadcasts SET status = 'INTERRUPTED', interrupted_at = now(), live_since = NULL \
+         WHERE id = $1",
     )
     .bind(id.parse::<i64>().unwrap())
     .execute(&world.pool)

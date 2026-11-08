@@ -219,7 +219,8 @@ impl BroadcastRepository for PgBroadcastRepository {
     ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
         let sql = concat!(
             "UPDATE broadcasts AS b \
-             SET status = $4, started_at = now(), version = version + 1, updated_at = now() \
+             SET status = $4, started_at = now(), live_since = now(), \
+                 version = version + 1, updated_at = now() \
              WHERE id = $1 AND owner_id = $2 AND status = ANY($3) AND deleted_at IS NULL \
              RETURNING ",
             columns!()
@@ -234,7 +235,7 @@ impl BroadcastRepository for PgBroadcastRepository {
     ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
         let sql = concat!(
             "UPDATE broadcasts AS b \
-             SET status = $4, ended_at = now(), interrupted_at = NULL, \
+             SET status = $4, ended_at = now(), interrupted_at = NULL, live_since = NULL, \
                  version = version + 1, updated_at = now() \
              WHERE id = $1 AND owner_id = $2 AND status = ANY($3) AND deleted_at IS NULL \
              RETURNING ",
@@ -246,14 +247,15 @@ impl BroadcastRepository for PgBroadcastRepository {
 
 impl PgBroadcastRepository {
     /// Moves the broadcast between `LIVE` and `INTERRUPTED` as `event` says,
-    /// whoever owns it. `interrupted_at` is set on entering `INTERRUPTED` and
-    /// cleared on leaving it.
+    /// whoever owns it. `interrupted_at` and `live_since` are set on entering
+    /// their status and cleared on leaving it.
     async fn presence(&self, id: BroadcastId, event: BroadcastEvent) -> Result<bool, PortError> {
         let transition = event.transition();
         let result = sqlx::query(
             "UPDATE broadcasts \
              SET status = $3, \
                  interrupted_at = CASE WHEN $3 = 'INTERRUPTED' THEN now() END, \
+                 live_since = CASE WHEN $3 = 'LIVE' THEN now() END, \
                  version = version + 1, updated_at = now() \
              WHERE id = $1 AND status = ANY($2) AND deleted_at IS NULL",
         )

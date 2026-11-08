@@ -115,8 +115,8 @@ pub trait ReapPass: Send {
     /// Applies [`domain::broadcast::BroadcastEvent::Resume`] to the
     /// interrupted broadcasts in `on_air` that were interrupted before the
     /// pass began, and [`domain::broadcast::BroadcastEvent::Interrupt`] to the
-    /// live broadcasts not in `on_air` whose last change is older than
-    /// `grace`, so one that just started has time to connect.
+    /// live broadcasts not in `on_air` that went live longer than `grace`
+    /// ago, so one that just started or resumed has time to connect.
     async fn reconcile(
         &mut self,
         on_air: &[BroadcastId],
