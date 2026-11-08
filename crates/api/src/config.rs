@@ -141,6 +141,8 @@ pub enum ConfigError {
     InvalidMediaSecret,
     #[error("{0} must not be empty")]
     EmptyPath(&'static str),
+    #[error("{0} must be valid UTF-8")]
+    PathNotUnicode(&'static str),
     #[error("RECORDING_STORAGE must be local or s3, got {0:?}")]
     RecordingStorage(String),
     /// Leaves the value out: it may be a secret.
@@ -241,7 +243,8 @@ fn dir_or(
     match lookup(var) {
         Err(VarError::NotPresent) => Ok(PathBuf::from(default)),
         Ok(raw) if !raw.is_empty() => Ok(PathBuf::from(raw)),
-        Ok(_) | Err(VarError::NotUnicode(_)) => Err(ConfigError::EmptyPath(var)),
+        Ok(_) => Err(ConfigError::EmptyPath(var)),
+        Err(VarError::NotUnicode(_)) => Err(ConfigError::PathNotUnicode(var)),
     }
 }
 
@@ -407,6 +410,23 @@ mod tests {
             ("RECORDING_STORAGE", "S3"),
         ] {
             assert!(from(&[(var, value)]).is_err(), "{var}={value:?}");
+        }
+    }
+
+    #[test]
+    fn a_recording_directory_that_is_not_utf8_says_so() {
+        for var in ["RECORDING_SPOOL_DIR", "RECORDING_STORE_DIR"] {
+            let error = Config::from_lookup(|key| match key {
+                "DATABASE_URL" => Ok(URL.into()),
+                "ALLOWED_ORIGINS" => Ok(ORIGIN.into()),
+                "PUBLISH_JWT_PRIVATE_KEY" => Ok(KEY.into()),
+                "MEDIA_HOOK_SECRET" => Ok(MEDIA_SECRET.into()),
+                _ if key == var => Err(VarError::NotUnicode("\u{fffd}".into())),
+                _ => Err(VarError::NotPresent),
+            })
+            .unwrap_err()
+            .to_string();
+            assert_eq!(error, format!("{var} must be valid UTF-8"));
         }
     }
 
