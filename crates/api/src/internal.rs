@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use application::{
-    media::{Admitted, Denied, MediaAccess},
+    media::{Admitted, Denied, MediaAccess, Observed, PublisherSignal},
     ports::media::StreamPath,
 };
 use axum::{
@@ -28,6 +28,7 @@ use crate::{AppState, error::ApiError};
 pub fn routes(secret: Arc<Secret<String>>) -> Router<AppState> {
     Router::new()
         .route("/media/auth", post(auth))
+        .route("/media/hooks", post(hook))
         .layer(middleware::from_fn_with_state(secret, require_secret))
 }
 
@@ -107,4 +108,46 @@ async fn auth(State(state): State<AppState>, body: Bytes) -> Result<StatusCode, 
             Err(ApiError::unauthenticated())
         }
     }
+}
+
+/// What MediaMTX's `runOnAvailable` / `runOnUnavailable` commands post.
+#[derive(Deserialize)]
+struct HookRequest {
+    event: HookEvent,
+    path: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum HookEvent {
+    Available,
+    Unavailable,
+}
+
+/// Always 204 once the request is understood: a report that changes nothing
+/// is normal, not an error for MediaMTX to retry or log.
+async fn hook(State(state): State<AppState>, body: Bytes) -> Result<StatusCode, ApiError> {
+    let request: HookRequest =
+        serde_json::from_slice(&body).map_err(|_| ApiError::invalid_request())?;
+    let signal = match request.event {
+        HookEvent::Available => PublisherSignal::Arrived,
+        HookEvent::Unavailable => PublisherSignal::Left,
+    };
+    let observed = state
+        .broadcasts
+        .track
+        .run(&StreamPath::new(request.path.clone()), signal)
+        .await
+        .map_err(ApiError::internal)?;
+    let (event, path) = (request.event, request.path.as_str());
+    match observed {
+        Observed::UnknownPath => tracing::warn!(?event, path, "hook for an unknown path"),
+        Observed::Changed(id) => {
+            tracing::info!(?event, path, broadcast = %id, "status changed by hook")
+        }
+        Observed::Unchanged(id) => {
+            tracing::info!(?event, path, broadcast = %id, "hook changed nothing")
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
 }

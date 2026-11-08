@@ -10,10 +10,10 @@ use application::{
         UpdateBroadcast,
     },
     live::{StartBroadcast, StopBroadcast},
-    media::AdmitMediaAccess,
+    media::{AdmitMediaAccess, TrackPublisher},
     ports::{
         auth::UserRepository,
-        broadcast::{BroadcastQuery, BroadcastRepository, BroadcastView},
+        broadcast::{BroadcastQuery, BroadcastRepository, BroadcastView, PublisherPresence},
         id::IdGenerator,
         media::{
             IngestRouter, MediaCredentialVerifier, PublishAuthorizer, PublishTicketLedger,
@@ -59,6 +59,8 @@ pub struct BroadcastUseCases {
     pub stop: StopBroadcast,
     /// Answers MediaMTX's question whether to let a publisher in.
     pub admit: AdmitMediaAccess,
+    /// Follows MediaMTX's reports that a publisher arrived or left.
+    pub track: TrackPublisher,
 }
 
 /// The ports the broadcast use cases need beyond the auth ones.
@@ -70,6 +72,7 @@ pub struct BroadcastPorts {
     pub terminator: Arc<dyn StreamTerminator>,
     pub verifier: Arc<dyn MediaCredentialVerifier>,
     pub tickets: Arc<dyn PublishTicketLedger>,
+    pub presence: Arc<dyn PublisherPresence>,
 }
 
 impl BroadcastUseCases {
@@ -86,6 +89,7 @@ impl BroadcastUseCases {
             terminator,
             verifier,
             tickets,
+            presence,
         } = ports;
         Self {
             create: CreateBroadcast {
@@ -109,6 +113,10 @@ impl BroadcastUseCases {
                 verifier,
                 ingest: ingest.clone(),
                 tickets,
+            },
+            track: TrackPublisher {
+                presence,
+                ingest: ingest.clone(),
             },
             stop: StopBroadcast {
                 broadcasts: repository,

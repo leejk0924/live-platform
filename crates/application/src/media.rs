@@ -11,6 +11,7 @@ use domain::{
 
 use crate::ports::{
     PortError,
+    broadcast::PublisherPresence,
     media::{
         IngestRouter, MediaCredentialVerifier, PublishTicketLedger, RedeemRejection, StreamPath,
         TicketId,
@@ -127,6 +128,55 @@ impl AdmitMediaAccess {
                 RedeemRejection::InStatus(status) => Denial::NotPublishable(status),
             }),
         }
+    }
+}
+
+/// What the media server reports about a stream path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublisherSignal {
+    /// A publisher is sending and the stream can be watched.
+    Arrived,
+    /// The stream is gone: the publisher left, dropped or was kicked.
+    Left,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Observed {
+    /// The path names no broadcast.
+    UnknownPath,
+    /// The broadcast's status changed.
+    Changed(BroadcastId),
+    /// The signal did not apply in the broadcast's status, such as a late
+    /// report about an ended broadcast.
+    Unchanged(BroadcastId),
+}
+
+/// Follows the media server's reports. They are hints that can arrive late,
+/// twice or out of order; each becomes a conditional write that applies only
+/// in the status it is meant for, so none can move an ended broadcast.
+pub struct TrackPublisher {
+    pub presence: Arc<dyn PublisherPresence>,
+    pub ingest: Arc<dyn IngestRouter>,
+}
+
+impl TrackPublisher {
+    pub async fn run(
+        &self,
+        path: &StreamPath,
+        signal: PublisherSignal,
+    ) -> Result<Observed, PortError> {
+        let Some(broadcast) = self.ingest.broadcast_of(path) else {
+            return Ok(Observed::UnknownPath);
+        };
+        let changed = match signal {
+            PublisherSignal::Arrived => self.presence.resume(broadcast).await?,
+            PublisherSignal::Left => self.presence.interrupt(broadcast).await?,
+        };
+        Ok(if changed {
+            Observed::Changed(broadcast)
+        } else {
+            Observed::Unchanged(broadcast)
+        })
     }
 }
 
@@ -318,5 +368,50 @@ mod tests {
         .await;
         assert_eq!(result, Ok(Admitted { ticket: None }));
         assert_eq!(redeemed, 0);
+    }
+
+    #[derive(Default)]
+    struct Presence(Mutex<Vec<(&'static str, BroadcastId)>>);
+
+    #[async_trait]
+    impl PublisherPresence for Presence {
+        async fn interrupt(&self, id: BroadcastId) -> Result<bool, PortError> {
+            self.0.lock().unwrap().push(("interrupt", id));
+            Ok(true)
+        }
+
+        async fn resume(&self, id: BroadcastId) -> Result<bool, PortError> {
+            self.0.lock().unwrap().push(("resume", id));
+            Ok(false)
+        }
+    }
+
+    #[tokio::test]
+    async fn arrivals_resume_departures_interrupt_and_unknown_paths_do_nothing() {
+        let presence = Arc::new(Presence::default());
+        let track = TrackPublisher {
+            presence: presence.clone(),
+            ingest: Arc::new(Live),
+        };
+        let live = path(&format!("live/{BROADCAST}"));
+        assert_eq!(
+            track.run(&live, PublisherSignal::Left).await.unwrap(),
+            Observed::Changed(id(BROADCAST))
+        );
+        assert_eq!(
+            track.run(&live, PublisherSignal::Arrived).await.unwrap(),
+            Observed::Unchanged(id(BROADCAST))
+        );
+        assert_eq!(
+            track
+                .run(&path("other/7"), PublisherSignal::Left)
+                .await
+                .unwrap(),
+            Observed::UnknownPath
+        );
+        assert_eq!(
+            *presence.0.lock().unwrap(),
+            [("interrupt", id(BROADCAST)), ("resume", id(BROADCAST))]
+        );
     }
 }

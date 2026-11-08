@@ -111,14 +111,16 @@ pub async fn live_state_with(
     };
     let key = Arc::new(publish_key());
     let tokens = Arc::new(JwtPublishAuthorizer::new(key.clone()));
+    let broadcasts = Arc::new(PgBroadcastRepository::new(pool.clone()));
     let broadcast_ports = BroadcastPorts {
-        repository: Arc::new(PgBroadcastRepository::new(pool.clone())),
+        repository: broadcasts.clone(),
         query: Arc::new(PgBroadcastQuery::new(pool.clone())),
         ingest: Arc::new(MediaMtxIngestRouter),
         authorizer: tokens.clone(),
         terminator,
         verifier: tokens,
         tickets: Arc::new(PgPublishTicketLedger::new(pool.clone())),
+        presence: broadcasts,
     };
     let state = AppState::new(
         ports,

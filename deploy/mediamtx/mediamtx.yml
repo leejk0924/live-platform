@@ -37,3 +37,13 @@ paths:
   all_others:
     # A second publisher with a valid token is refused instead of replacing the live one.
     overridePublisher: false
+    # Tell the API when a stream comes and goes, so a dropped publisher becomes INTERRUPTED
+    # and a returning one LIVE again. The image has no shell: MediaMTX splits the command
+    # itself and expands $MTX_PATH and $MEDIA_HOOK_SECRET (from the container environment)
+    # in each argument. The API's reaper reconciles any report that gets lost.
+    runOnAvailable: >-
+      /bin/wget -q -O /dev/null --post-data '{"event":"available","path":"$MTX_PATH"}'
+      http://mediamtx:$MEDIA_HOOK_SECRET@api:8080/internal/media/hooks
+    runOnUnavailable: >-
+      /bin/wget -q -O /dev/null --post-data '{"event":"unavailable","path":"$MTX_PATH"}'
+      http://mediamtx:$MEDIA_HOOK_SECRET@api:8080/internal/media/hooks

@@ -7,8 +7,8 @@ use application::ports::{
     PortError,
     auth::{Inserted, PasswordHasher, SessionStore, UserRepository},
     broadcast::{
-        BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, TransitionRejection,
-        WriteRejection,
+        BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, PublisherPresence,
+        TransitionRejection, WriteRejection,
     },
     id::{IdGenerationError, IdGenerator},
     media::{
@@ -127,6 +127,17 @@ impl BroadcastRepository for Unavailable {
 }
 
 #[async_trait]
+impl PublisherPresence for Unavailable {
+    async fn interrupt(&self, _: BroadcastId) -> Result<bool, PortError> {
+        unavailable()
+    }
+
+    async fn resume(&self, _: BroadcastId) -> Result<bool, PortError> {
+        unavailable()
+    }
+}
+
+#[async_trait]
 impl BroadcastQuery for Unavailable {
     async fn list(&self, _: Option<BroadcastId>, _: u32) -> Result<Vec<BroadcastView>, PortError> {
         unavailable()
@@ -201,6 +212,7 @@ pub fn test_state() -> AppState {
         terminator: Arc::new(Unavailable),
         verifier: Arc::new(Unavailable),
         tickets: Arc::new(Unavailable),
+        presence: Arc::new(Unavailable),
     };
     AppState::new(
         ports,

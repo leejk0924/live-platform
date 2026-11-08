@@ -3,8 +3,8 @@ use std::time::SystemTime;
 use application::ports::{
     PortError,
     broadcast::{
-        BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, TransitionRejection,
-        WriteRejection,
+        BroadcastQuery, BroadcastRepository, BroadcastView, NewBroadcast, PublisherPresence,
+        TransitionRejection, WriteRejection,
     },
 };
 use async_trait::async_trait;
@@ -240,6 +240,36 @@ impl BroadcastRepository for PgBroadcastRepository {
             columns!()
         );
         self.transition(sql, id, owner, BroadcastEvent::Stop).await
+    }
+}
+
+impl PgBroadcastRepository {
+    /// Moves the broadcast between `LIVE` and `INTERRUPTED` as `event` says,
+    /// whoever owns it. `interrupted_at` is set on entering `INTERRUPTED` and
+    /// cleared on leaving it.
+    async fn presence(&self, id: BroadcastId, event: BroadcastEvent) -> Result<bool, PortError> {
+        let transition = event.transition();
+        let result = sqlx::query(
+            "UPDATE broadcasts              SET status = $3,                  interrupted_at = CASE WHEN $3 = 'INTERRUPTED' THEN now() END,                  version = version + 1, updated_at = now()              WHERE id = $1 AND status = ANY($2) AND deleted_at IS NULL",
+        )
+        .bind(id.as_i64())
+        .bind(status_names(transition.from))
+        .bind(transition.to.as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(port_error)?;
+        Ok(result.rows_affected() == 1)
+    }
+}
+
+#[async_trait]
+impl PublisherPresence for PgBroadcastRepository {
+    async fn interrupt(&self, id: BroadcastId) -> Result<bool, PortError> {
+        self.presence(id, BroadcastEvent::Interrupt).await
+    }
+
+    async fn resume(&self, id: BroadcastId) -> Result<bool, PortError> {
+        self.presence(id, BroadcastEvent::Resume).await
     }
 }
 

@@ -100,14 +100,16 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
     let publish_key = Arc::new(config.publish_key);
     let terminator = MediaMtxStreamTerminator::new(config.mediamtx_api_url, publish_key.clone())?;
     let tokens = Arc::new(JwtPublishAuthorizer::new(publish_key));
+    let broadcasts = Arc::new(PgBroadcastRepository::new(pool.clone()));
     let broadcast_ports = BroadcastPorts {
-        repository: Arc::new(PgBroadcastRepository::new(pool.clone())),
+        repository: broadcasts.clone(),
         query: Arc::new(PgBroadcastQuery::new(pool.clone())),
         ingest: Arc::new(MediaMtxIngestRouter),
         authorizer: tokens.clone(),
         terminator: Arc::new(terminator),
         verifier: tokens,
         tickets: Arc::new(PgPublishTicketLedger::new(pool.clone())),
+        presence: broadcasts,
     };
     let state = AppState::new(
         ports,

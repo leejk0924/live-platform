@@ -83,6 +83,20 @@ pub trait BroadcastRepository: Send + Sync {
     ) -> Result<Result<Broadcast, TransitionRejection>, PortError>;
 }
 
+/// Status changes that follow the publisher's connection rather than the
+/// owner, so no owner is checked. Each is one conditional write; one that
+/// does not apply in the current status changes nothing.
+#[async_trait]
+pub trait PublisherPresence: Send + Sync {
+    /// Applies [`domain::broadcast::BroadcastEvent::Interrupt`], starting the
+    /// grace period. Whether the status changed.
+    async fn interrupt(&self, id: BroadcastId) -> Result<bool, PortError>;
+
+    /// Applies [`domain::broadcast::BroadcastEvent::Resume`]. Whether the
+    /// status changed.
+    async fn resume(&self, id: BroadcastId) -> Result<bool, PortError>;
+}
+
 /// A broadcast as viewers see it, with its owner's name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BroadcastView {

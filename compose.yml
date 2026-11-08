@@ -85,6 +85,8 @@ services:
     user: "65532:65532"
     environment:
       MTX_AUTHHTTPADDRESS: http://mediamtx:${MEDIA_HOOK_SECRET:?set MEDIA_HOOK_SECRET in .env}@api:8080/internal/media/auth
+      # Expanded by MediaMTX in the runOnAvailable / runOnUnavailable commands.
+      MEDIA_HOOK_SECRET: ${MEDIA_HOOK_SECRET:?set MEDIA_HOOK_SECRET in .env}
     ports:
       - "8189:8189/udp"
       - "8189:8189/tcp"
