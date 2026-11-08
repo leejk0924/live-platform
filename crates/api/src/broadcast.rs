@@ -366,7 +366,7 @@ pub(crate) async fn create(
     AuthUser(actor): AuthUser,
     body: Result<Json<BroadcastInput>, JsonRejection>,
 ) -> Result<Response, ApiError> {
-    let Json(body) = body.map_err(|_| ApiError::invalid_request())?;
+    let Json(body) = body.map_err(|rejection| ApiError::rejected_body(rejection.status()))?;
     let view = state
         .broadcasts
         .create
@@ -411,7 +411,7 @@ pub(crate) async fn update(
 ) -> Result<Response, ApiError> {
     let id = broadcast_id(&id)?;
     let expected = expected_version(&headers)?;
-    let Json(body) = body.map_err(|_| ApiError::invalid_request())?;
+    let Json(body) = body.map_err(|rejection| ApiError::rejected_body(rejection.status()))?;
     let view = state
         .broadcasts
         .update

@@ -66,6 +66,29 @@ impl ApiError {
         )
     }
 
+    /// A body extractor refused the body: 413 when it was over the limit,
+    /// [`ApiError::invalid_request`] otherwise.
+    pub fn rejected_body(status: StatusCode) -> Self {
+        if status == StatusCode::PAYLOAD_TOO_LARGE {
+            Self::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "PAYLOAD_TOO_LARGE",
+                "request body is too large",
+            )
+        } else {
+            Self::invalid_request()
+        }
+    }
+
+    /// 503 rather than 408, which browsers may retry on their own.
+    pub fn timed_out() -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "REQUEST_TIMEOUT",
+            "request took too long",
+        )
+    }
+
     pub fn invalid_query() -> Self {
         Self::new(
             StatusCode::BAD_REQUEST,

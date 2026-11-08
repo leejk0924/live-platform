@@ -21,6 +21,8 @@ use crate::{auth, broadcast, live};
         description = "Errors are always `{code, message, traceId}` (`ErrorBody`). \
             Every POST, PUT, PATCH and DELETE must send an allowed `Origin` and \
             `X-Requested-With: live-platform`, or it is rejected with 403 `CSRF_REJECTED`. \
+            A body over 64 KiB is rejected with 413 `PAYLOAD_TOO_LARGE`, and a request \
+            that takes over 10 seconds with 503 `REQUEST_TIMEOUT`. \
             Ids are decimal strings.",
     ),
     paths(
