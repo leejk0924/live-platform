@@ -116,7 +116,10 @@ pub enum RecordingFilter {
 }
 
 /// The read side. Recordings of a deleted broadcast are never returned, so
-/// deleting a broadcast cuts off access to its recordings at once.
+/// no new replay URL is issued for them. Local file URLs are re-checked on
+/// every request, so deletion cuts them off at once; CDN-signed URLs stop
+/// being issued at once and expire within
+/// [`REPLAY_URL_TTL`](crate::recording::REPLAY_URL_TTL).
 #[async_trait]
 pub trait RecordingQuery: Send + Sync {
     /// Newest first, only those `filter` admits, only ids below `before`

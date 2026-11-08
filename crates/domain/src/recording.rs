@@ -24,6 +24,10 @@ pub const PAGE_SIZE_MAX: u32 = 50;
 pub const MAX_STORE_ATTEMPTS: u32 = 5;
 const STORE_RETRY_BASE: Duration = Duration::from_secs(30);
 
+/// The longest segment a report may claim. The media server cuts segments
+/// far shorter, so anything above this is a broken report.
+pub const MAX_SEGMENT_DURATION: Duration = Duration::from_secs(12 * 60 * 60);
+
 /// `PENDING -> READY`, or `PENDING -> FAILED` after [`MAX_STORE_ATTEMPTS`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RecordingStatus {

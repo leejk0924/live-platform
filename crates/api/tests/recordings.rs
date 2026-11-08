@@ -136,6 +136,9 @@ async fn segments_that_name_nothing_known_are_accepted_and_ignored(pool: PgPool)
         let reply = segment_complete(&router, &stream, &segment, "1.0").await;
         assert_eq!(reply.status, StatusCode::NO_CONTENT, "{stream} {segment}");
     }
+    let real = harness.spool_segment(&stream, SEGMENT_NAME, b"x");
+    let too_long = segment_complete(&router, &stream, &real, "10000000000").await;
+    assert_eq!(too_long.status, StatusCode::NO_CONTENT, "too long");
     assert!(recordings(&pool).await.is_empty());
 }
 

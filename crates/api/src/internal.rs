@@ -252,6 +252,12 @@ async fn segment_complete(
         Registration::NotInSpool => {
             tracing::warn!(path, segment, "segment outside its spool directory ignored")
         }
+        Registration::TooLong => tracing::warn!(
+            path,
+            segment,
+            duration_secs = duration.as_secs(),
+            "segment longer than any real one ignored"
+        ),
         Registration::Ignored(broadcast) => tracing::info!(
             path,
             segment,

@@ -2335,7 +2335,7 @@
           "expiresAt": {
             "type": "string",
             "format": "date-time",
-            "description": "When `url` stops working: the recording's length plus five minutes\nfrom now."
+            "description": "When `url` stops working: five minutes from now, whatever the\nrecording's length."
           },
           "url": {
             "type": "string",

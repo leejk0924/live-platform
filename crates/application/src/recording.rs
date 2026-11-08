@@ -10,8 +10,8 @@ use std::{
 use domain::{
     broadcast::BroadcastId,
     recording::{
-        PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, RecordingError, RecordingId, RecordingKey,
-        RecordingStatus, StoreRetry,
+        MAX_SEGMENT_DURATION, PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, RecordingError, RecordingId,
+        RecordingKey, RecordingStatus, StoreRetry,
     },
 };
 use thiserror::Error;
@@ -30,9 +30,10 @@ use crate::ports::{
 /// longer than copying a 30-minute segment should ever take.
 pub const STORE_LEASE: Duration = Duration::from_secs(10 * 60);
 
-/// How long a replay URL outlives the recording's own length, so a viewer
-/// who starts at once can watch to the end.
-pub const REPLAY_URL_SLACK: Duration = Duration::from_secs(5 * 60);
+/// How long a replay URL works, whatever the recording's length. The player
+/// asks for a new one when playback fails, so a URL that expires mid-replay
+/// costs one request, and a deleted broadcast's CDN URLs die soon.
+pub const REPLAY_URL_TTL: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -52,6 +53,8 @@ pub enum Registration {
     UnknownPath,
     /// The reported file is not a segment in that path's spool directory.
     NotInSpool,
+    /// The reported duration is above [`MAX_SEGMENT_DURATION`].
+    TooLong,
     /// Its broadcast is unknown or deleted, or the segment was registered
     /// before.
     Ignored(BroadcastId),
@@ -80,6 +83,9 @@ impl RegisterSegment {
         let Some(source) = self.spool.segment(path, reported) else {
             return Ok(Registration::NotInSpool);
         };
+        if duration > MAX_SEGMENT_DURATION {
+            return Ok(Registration::TooLong);
+        }
         let recording = self
             .ids
             .next_id()
@@ -230,14 +236,14 @@ pub struct ResolveReplay {
 }
 
 impl ResolveReplay {
-    /// A URL to a ready recording that stays valid for its length plus
-    /// [`REPLAY_URL_SLACK`] from `now`.
+    /// A URL to a ready recording that stays valid for [`REPLAY_URL_TTL`]
+    /// from `now`.
     pub async fn run(&self, id: RecordingId, now: SystemTime) -> Result<Replay, Error> {
         let view = self.query.get(id).await?.ok_or(RecordingError::NotFound)?;
         if view.status != RecordingStatus::Ready {
             return Err(RecordingError::NotReady.into());
         }
-        let expires_at = now + REPLAY_URL_SLACK + view.duration;
+        let expires_at = now + REPLAY_URL_TTL;
         Ok(Replay {
             url: self.signer.sign(id, &view.key, expires_at),
             expires_at,
@@ -426,6 +432,24 @@ mod tests {
                 .unwrap();
             assert_eq!(outcome, expected, "{stream} {reported}");
         }
+        assert!(recordings.inserted.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_segment_longer_than_any_real_one_is_refused() {
+        let recordings = Arc::new(Recordings {
+            accepts: true,
+            ..Recordings::default()
+        });
+        let outcome = register(recordings.clone())
+            .run(
+                &path("live/7"),
+                SEGMENT,
+                Duration::from_secs(10_000_000_000),
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome, Registration::TooLong);
         assert!(recordings.inserted.lock().unwrap().is_empty());
     }
 
@@ -662,16 +686,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_ready_recording_gets_a_url_valid_for_its_length_and_some() {
+    async fn a_replay_url_lasts_five_minutes_whatever_the_recording_length() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
         let replay = replay(RecordingStatus::Ready)
             .run(id(2), now)
             .await
             .unwrap();
 
-        let expires_at = now + Duration::from_secs(600) + REPLAY_URL_SLACK;
-        assert_eq!(replay.expires_at, expires_at);
-        assert_eq!(replay.url, "2:recordings/7/2.mp4:1900");
+        assert_eq!(replay.expires_at, now + Duration::from_secs(5 * 60));
+        assert_eq!(replay.url, "2:recordings/7/2.mp4:1300");
     }
 
     #[tokio::test]

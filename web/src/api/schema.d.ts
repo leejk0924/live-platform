@@ -560,8 +560,8 @@ export interface components {
         Replay: {
             /**
              * Format: date-time
-             * @description When `url` stops working: the recording's length plus five minutes
-             *     from now.
+             * @description When `url` stops working: five minutes from now, whatever the
+             *     recording's length.
              */
             expiresAt: string;
             /**

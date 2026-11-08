@@ -301,8 +301,8 @@ pub struct ReplayDto {
     /// so seeking works. Ask again for a new one when playback fails.
     #[schema(example = "/api/recordings/112007303372210177/file?expires=1794200000&signature=...")]
     url: String,
-    /// When `url` stops working: the recording's length plus five minutes
-    /// from now.
+    /// When `url` stops working: five minutes from now, whatever the
+    /// recording's length.
     #[schema(format = DateTime)]
     expires_at: String,
 }
