@@ -193,8 +193,9 @@ async fn a_viewer_orders_pays_once_and_everyone_sees_it(pool: PgPool) {
     assert_eq!(again.body, json!({"donation": donation, "credited": false}));
     assert_eq!(shop.gateway.confirmations().len(), 1);
 
-    let second = shop.ordered(20_000).await;
-    shop.confirm(&shop.viewer, &second, "tgen_second", 20_000)
+    let second = shop.order(Some(&shop.other), json!(20_000)).await;
+    let second = second.body["orderId"].as_str().unwrap().to_owned();
+    shop.confirm(&shop.other, &second, "tgen_second", 20_000)
         .await;
     let listed = shop.list("?size=1").await;
     assert_eq!(listed.status, StatusCode::OK);
@@ -287,6 +288,30 @@ async fn orders_are_refused_to_the_owner_off_air_and_out_of_range(pool: PgPool) 
         .await
         .unwrap();
     assert_eq!(stored, 0);
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_donor_orders_again_only_after_a_pause(pool: PgPool) {
+    let shop = shop(&pool).await;
+    shop.ordered(5000).await;
+    let again = shop.order(Some(&shop.viewer), json!(5000)).await;
+    assert_eq!(
+        (again.status, again.code()),
+        (StatusCode::TOO_MANY_REQUESTS, "RATE_LIMITED")
+    );
+    assert!(again.headers.contains_key(header::RETRY_AFTER));
+    let other = shop.order(Some(&shop.other), json!(5000)).await;
+    assert_eq!(
+        other.status,
+        StatusCode::CREATED,
+        "other donors are not held up"
+    );
+    let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM donations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 2);
 }
 
 #[sqlx::test(migrations = "../infrastructure/migrations")]

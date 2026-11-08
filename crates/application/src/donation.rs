@@ -2,14 +2,17 @@
 //! authenticated actor, and nothing the client or the payment provider says
 //! about an amount is believed until it matches the stored order.
 
-use std::{sync::Arc, time::SystemTime};
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use domain::{
     auth::UserId,
     broadcast::BroadcastId,
     donation::{
-        DonationAmount, DonationError, DonationId, PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, PaymentKey,
-        accepts_donations,
+        DONATION_ORDER_INTERVAL, DonationAmount, DonationError, DonationId, PAGE_SIZE_DEFAULT,
+        PAGE_SIZE_MAX, PaymentKey, accepts_donations,
     },
 };
 use thiserror::Error;
@@ -23,6 +26,7 @@ use crate::ports::{
     },
     id::{IdGenerationError, IdGenerator},
     payment::{GatewayError, GatewayPayment, PaymentConfirmation, PaymentGateway, PaymentStatus},
+    rate_limit::{RateKey, RateLimiter},
 };
 
 /// Which side disagreed with the stored order's amount.
@@ -56,6 +60,9 @@ pub enum Error {
     PaymentRejected { code: String },
     #[error("payment gateway unavailable: {0}")]
     GatewayUnavailable(String),
+    /// Ordering again too soon; retry after the wait.
+    #[error("ordering too fast, retry in {0:?}")]
+    RateLimited(Duration),
     #[error(transparent)]
     Internal(#[from] PortError),
 }
@@ -84,6 +91,7 @@ pub struct CreateDonation {
     pub ids: Arc<dyn IdGenerator>,
     pub broadcasts: Arc<dyn BroadcastQuery>,
     pub donations: Arc<dyn DonationRepository>,
+    pub limiter: Arc<dyn RateLimiter>,
 }
 
 impl CreateDonation {
@@ -107,6 +115,9 @@ impl CreateDonation {
         if !accepts_donations(target.status) {
             return Err(DonationError::Closed.into());
         }
+        self.limiter
+            .acquire(&[(RateKey::DonationOrder(actor), DONATION_ORDER_INTERVAL)])
+            .map_err(Error::RateLimited)?;
         let new = NewDonation {
             id: self.ids.next_id()?,
             broadcast_id: broadcast,
@@ -619,14 +630,68 @@ mod tests {
         }
     }
 
-    async fn create(store: &Arc<Store>, actor: i64, amount: i64) -> Result<NewDonation, Error> {
+    /// Remembers which slots were asked for and refuses when told to.
+    #[derive(Default)]
+    struct Limiter {
+        asked: Mutex<Vec<Vec<(RateKey, Duration)>>>,
+        refuse: Option<Duration>,
+    }
+
+    impl RateLimiter for Limiter {
+        fn acquire(&self, slots: &[(RateKey, Duration)]) -> Result<(), Duration> {
+            self.asked.lock().unwrap().push(slots.to_vec());
+            self.refuse.map_or(Ok(()), Err)
+        }
+    }
+
+    fn create_with(store: &Arc<Store>, limiter: Arc<Limiter>) -> CreateDonation {
         CreateDonation {
             ids: Arc::new(Ids),
             broadcasts: store.clone(),
             donations: store.clone(),
+            limiter,
         }
-        .run(id(actor), id(BROADCAST), amount)
-        .await
+    }
+
+    async fn create(store: &Arc<Store>, actor: i64, amount: i64) -> Result<NewDonation, Error> {
+        create_with(store, Arc::default())
+            .run(id(actor), id(BROADCAST), amount)
+            .await
+    }
+
+    #[tokio::test]
+    async fn orders_are_spaced_out_per_donor() {
+        let store = Store::new(BroadcastStatus::Live);
+        let limiter = Arc::new(Limiter::default());
+        create_with(&store, limiter.clone())
+            .run(id(DONOR), id(BROADCAST), AMOUNT)
+            .await
+            .unwrap();
+        assert_eq!(
+            *limiter.asked.lock().unwrap(),
+            [vec![(
+                RateKey::DonationOrder(id(DONOR)),
+                DONATION_ORDER_INTERVAL
+            )]]
+        );
+
+        let wait = Duration::from_secs(2);
+        let store = Store::new(BroadcastStatus::Live);
+        let refusing = Arc::new(Limiter {
+            refuse: Some(wait),
+            ..Limiter::default()
+        });
+        let result = create_with(&store, refusing)
+            .run(id(DONOR), id(BROADCAST), AMOUNT)
+            .await;
+        assert!(
+            matches!(result, Err(Error::RateLimited(w)) if w == wait),
+            "{result:?}"
+        );
+        assert!(
+            store.orders.lock().unwrap().is_empty(),
+            "nothing is ordered"
+        );
     }
 
     #[tokio::test]
@@ -666,13 +731,9 @@ mod tests {
             );
             assert!(store.orders.lock().unwrap().is_empty());
         }
-        let unknown = CreateDonation {
-            ids: Arc::new(Ids),
-            broadcasts: live.clone(),
-            donations: live.clone(),
-        }
-        .run(id(DONOR), id(404), AMOUNT)
-        .await;
+        let unknown = create_with(&live, Arc::default())
+            .run(id(DONOR), id(404), AMOUNT)
+            .await;
         assert!(matches!(
             unknown,
             Err(Error::Rejected(DonationError::BroadcastNotFound))

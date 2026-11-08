@@ -1722,6 +1722,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
+            /** @description `RATE_LIMITED`: ordered too soon after the last order; see `Retry-After` */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
             /** @description `PAYMENTS_DISABLED` */
             503: {
                 headers: {

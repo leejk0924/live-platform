@@ -1,6 +1,8 @@
 //! Donations to a broadcast: what a viewer may give, and what a payment must
 //! look like before it is credited.
 
+use std::time::Duration;
+
 use thiserror::Error;
 
 use crate::{
@@ -22,6 +24,10 @@ pub const PAYMENT_KEY_MAX_CHARS: usize = 200;
 /// may ask for.
 pub const PAGE_SIZE_DEFAULT: u32 = 20;
 pub const PAGE_SIZE_MAX: u32 = 50;
+
+/// The least time between two orders by one donor, so unpaid orders cannot
+/// pile up.
+pub const DONATION_ORDER_INTERVAL: Duration = Duration::from_secs(3);
 
 /// Whether a broadcast in `status` takes new donations: only while it is on
 /// air, a short interruption included.

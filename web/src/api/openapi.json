@@ -1440,6 +1440,16 @@
               }
             }
           },
+          "429": {
+            "description": "`RATE_LIMITED`: ordered too soon after the last order; see `Retry-After`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "503": {
             "description": "`PAYMENTS_DISABLED`",
             "content": {

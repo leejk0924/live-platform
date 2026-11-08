@@ -173,18 +173,19 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         }),
         None => None,
     };
+    let limiter = Arc::new(InMemoryRateLimiter::default());
     let donation_query = Arc::new(PgDonationQuery::new(pool.clone()));
     let donation_ports = DonationPorts {
         repository: Arc::new(PgDonationRepository::new(pool.clone())),
         query: donation_query.clone(),
+        limiter: limiter.clone(),
         payments,
     };
-    let comment_limiter = Arc::new(InMemoryRateLimiter::default());
     let comment_ports = CommentPorts {
         repository: Arc::new(PgCommentRepository::new(pool.clone())),
         query: Arc::new(PgCommentQuery::new(pool.clone())),
         policies: Arc::new(PgChatPolicyStore::new(pool.clone())),
-        limiter: comment_limiter.clone(),
+        limiter: limiter.clone(),
         donations: donation_query,
         events,
     };
@@ -234,7 +235,7 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         loop {
             ticks.tick().await;
             limits.forget_idle();
-            comment_limiter.forget_idle();
+            limiter.forget_idle();
         }
     });
 

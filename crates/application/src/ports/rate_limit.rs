@@ -9,6 +9,8 @@ pub enum RateKey {
     User(UserId),
     /// One user's posts to one broadcast in slow mode.
     SlowMode(UserId, BroadcastId),
+    /// One user's donation orders anywhere.
+    DonationOrder(UserId),
 }
 
 pub trait RateLimiter: Send + Sync {

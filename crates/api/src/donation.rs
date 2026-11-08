@@ -14,6 +14,7 @@ use application::{
         donation::{DonationQuery, DonationRepository, DonationSummary, DonationView},
         id::IdGenerator,
         payment::PaymentGateway,
+        rate_limit::RateLimiter,
     },
 };
 use axum::{
@@ -50,6 +51,8 @@ const PAYMENT_STATUS_CHANGED: &str = "PAYMENT_STATUS_CHANGED";
 pub struct DonationPorts {
     pub repository: Arc<dyn DonationRepository>,
     pub query: Arc<dyn DonationQuery>,
+    /// Spaces out one donor's orders.
+    pub limiter: Arc<dyn RateLimiter>,
     /// `None` turns ordering and paying off; the list still works.
     pub payments: Option<PaymentPorts>,
 }
@@ -81,6 +84,7 @@ impl DonationUseCases {
         let DonationPorts {
             repository,
             query,
+            limiter,
             payments,
         } = ports;
         let payments = payments.map(
@@ -92,6 +96,7 @@ impl DonationUseCases {
                     ids,
                     broadcasts: broadcasts.clone(),
                     donations: repository.clone(),
+                    limiter,
                 },
                 confirm: ConfirmDonation {
                     donations: repository.clone(),
@@ -142,6 +147,7 @@ pub(crate) fn api_error(err: Error) -> ApiError {
             tracing::warn!(%reason, "payment gateway unavailable");
             ApiError::payment_gateway_unavailable()
         }
+        Error::RateLimited(wait) => ApiError::rate_limited(wait),
         Error::Internal(err) => ApiError::internal(err),
     }
 }
@@ -322,6 +328,7 @@ pub(crate) async fn list(
         (status = 403, body = ErrorBody, description = "`SELF_DONATION` or `CSRF_REJECTED`"),
         (status = 404, body = ErrorBody, description = "`BROADCAST_NOT_FOUND`"),
         (status = 409, body = ErrorBody, description = "`DONATIONS_CLOSED`: the broadcast is not on air"),
+        (status = 429, body = ErrorBody, description = "`RATE_LIMITED`: ordered too soon after the last order; see `Retry-After`"),
         (status = 503, body = ErrorBody, description = "`PAYMENTS_DISABLED`"),
     ),
 )]
@@ -438,7 +445,7 @@ fn audit_refused_confirm(order_id: &str, err: &Error) {
             gateway_code = "gateway_unavailable",
             "payment not confirmed: no answer from the gateway"
         ),
-        Error::Rejected(_) | Error::Internal(_) => {}
+        Error::Rejected(_) | Error::RateLimited(_) | Error::Internal(_) => {}
     }
 }
 

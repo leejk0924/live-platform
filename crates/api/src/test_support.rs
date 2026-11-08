@@ -613,6 +613,7 @@ fn state_with(comment_ports: CommentPorts, payments: Option<PaymentPorts>) -> Ap
     let donation_ports = DonationPorts {
         repository: Arc::new(Unavailable),
         query: Arc::new(Unavailable),
+        limiter: Arc::new(Unavailable),
         payments,
     };
     AppState::new(

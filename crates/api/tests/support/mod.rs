@@ -251,17 +251,19 @@ async fn build_state(
     // the end of the test stops it instead.
     let (events, listener) = PgEventBus::start(pool.clone()).await.unwrap();
     std::mem::forget(listener);
+    let limiter = Arc::new(InMemoryRateLimiter::default());
     let comment_ports = CommentPorts {
         repository: Arc::new(PgCommentRepository::new(pool.clone())),
         query: Arc::new(PgCommentQuery::new(pool.clone())),
         policies: Arc::new(PgChatPolicyStore::new(pool.clone())),
-        limiter: Arc::new(InMemoryRateLimiter::default()),
+        limiter: limiter.clone(),
         donations: Arc::new(PgDonationQuery::new(pool.clone())),
         events,
     };
     let donation_ports = DonationPorts {
         repository: Arc::new(PgDonationRepository::new(pool.clone())),
         query: Arc::new(PgDonationQuery::new(pool.clone())),
+        limiter,
         payments,
     };
     let state = AppState::new(

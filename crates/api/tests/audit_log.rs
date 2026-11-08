@@ -296,6 +296,7 @@ async fn payments_are_audited_without_the_payment_key(pool: PgPool) {
     let router = app(donation_state(&pool, gateway.clone()).await);
     let owner = sign_up(&router, "owner", PASSWORD).await.token();
     let viewer = sign_up(&router, "viewer", PASSWORD).await.token();
+    let other = sign_up(&router, "other", PASSWORD).await.token();
     let id = create_broadcast(&router, &owner).await;
     send(
         &router,
@@ -307,36 +308,36 @@ async fn payments_are_audited_without_the_payment_key(pool: PgPool) {
         ),
     )
     .await;
-    let order = |amount: i64| {
+    let order = |donor: &str, amount: i64| {
         request(
             Method::POST,
             &format!("/api/broadcasts/{id}/donations"),
             Some(json!({"amount": amount})),
-            Some(&viewer),
+            Some(donor),
         )
     };
-    let confirm = |order: &str, amount: i64| {
+    let confirm = |donor: &str, order: &str, amount: i64| {
         request(
             Method::POST,
             "/api/donations/confirm",
             Some(json!({"paymentKey": KEY, "orderId": order, "amount": amount})),
-            Some(&viewer),
+            Some(donor),
         )
     };
-    let first = send(&router, order(5000)).await.body["orderId"]
+    let first = send(&router, order(&viewer, 5000)).await.body["orderId"]
         .as_str()
         .unwrap()
         .to_owned();
-    send(&router, confirm(&first, 1)).await;
-    send(&router, confirm(&first, 5000)).await;
-    let second = send(&router, order(7000)).await.body["orderId"]
+    send(&router, confirm(&viewer, &first, 1)).await;
+    send(&router, confirm(&viewer, &first, 5000)).await;
+    let second = send(&router, order(&other, 7000)).await.body["orderId"]
         .as_str()
         .unwrap()
         .to_owned();
     gateway.answer_confirm(Err(GatewayError::Rejected {
         code: "REJECT_CARD_PAYMENT".into(),
     }));
-    send(&router, confirm(&second, 7000)).await;
+    send(&router, confirm(&other, &second, 7000)).await;
 
     let one = |event: &str| {
         let audits = logs.audits(event);
