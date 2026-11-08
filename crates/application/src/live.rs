@@ -73,9 +73,10 @@ pub struct StopBroadcast {
 }
 
 impl StopBroadcast {
-    /// Ends the broadcast, then disconnects its publisher. The kick runs only
-    /// after the status change is stored, so a publisher that reconnects in
-    /// between finds the broadcast already ended.
+    /// Ends the broadcast, then disconnects its publisher once the status
+    /// change is stored. This does not stop a reconnect: the media server
+    /// never reads the status, so the publish credential still works on the
+    /// ended broadcast until it expires.
     pub async fn run(&self, actor: UserId, id: BroadcastId) -> Result<Stopped, Error> {
         // The write only matches the actor's own broadcast, so the actor is
         // the owner the view names. Reading it first leaves nothing fallible
