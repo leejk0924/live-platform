@@ -26,7 +26,9 @@ use application::ports::{
 use async_trait::async_trait;
 use domain::{
     auth::{Password, PasswordHash, SessionToken, User, UserId, Username},
-    broadcast::{Broadcast, BroadcastDescription, BroadcastId, BroadcastTitle, Version},
+    broadcast::{
+        Broadcast, BroadcastDescription, BroadcastId, BroadcastStatus, BroadcastTitle, Version,
+    },
     comment::{ChatPolicy, CommentBody, CommentId, Revision},
     id::SnowflakeId,
     secret::Secret,
@@ -304,6 +306,143 @@ pub const TEST_ORIGIN: &str = "https://app.test";
 pub const TEST_MEDIA_SECRET: &str = "0123456789abcdef0123456789abcdef";
 
 pub fn test_state() -> AppState {
+    state_with(CommentPorts {
+        repository: Arc::new(Unavailable),
+        query: Arc::new(Unavailable),
+        policies: Arc::new(Unavailable),
+        limiter: Arc::new(Unavailable),
+        events: Arc::new(Unavailable),
+    })
+}
+
+/// Every broadcast but 404 is live with no comments, and events travel over
+/// `bus`.
+pub fn chat_state(bus: Arc<dyn EventBus>) -> AppState {
+    state_with(CommentPorts {
+        repository: Arc::new(Unavailable),
+        query: Arc::new(EmptyChat),
+        policies: Arc::new(EmptyChat),
+        limiter: Arc::new(Unavailable),
+        events: bus,
+    })
+}
+
+struct EmptyChat;
+
+#[async_trait]
+impl CommentQuery for EmptyChat {
+    async fn list(
+        &self,
+        _: BroadcastId,
+        _: Option<CommentId>,
+        _: u32,
+    ) -> Result<Vec<CommentView>, PortError> {
+        Ok(Vec::new())
+    }
+
+    async fn changes_since(
+        &self,
+        _: BroadcastId,
+        _: Option<Revision>,
+        _: u32,
+    ) -> Result<Vec<CommentView>, PortError> {
+        Ok(Vec::new())
+    }
+
+    async fn latest_revision(&self, _: BroadcastId) -> Result<Option<Revision>, PortError> {
+        Ok(None)
+    }
+}
+
+#[async_trait]
+impl ChatPolicyStore for EmptyChat {
+    async fn target(&self, broadcast: BroadcastId) -> Result<Option<ChatTarget>, PortError> {
+        Ok((broadcast.as_i64() != 404).then_some(ChatTarget {
+            owner: SnowflakeId::try_from(1).unwrap(),
+            status: BroadcastStatus::Live,
+            policy: ChatPolicy::OFF,
+        }))
+    }
+
+    async fn set(
+        &self,
+        _: BroadcastId,
+        _: UserId,
+        _: ChatPolicy,
+    ) -> Result<Result<(), PolicyRejection>, PortError> {
+        unavailable()
+    }
+}
+
+/// One Server-Sent Event as a client parses it.
+#[derive(Debug)]
+pub struct SseEvent {
+    pub event: String,
+    pub id: Option<String>,
+    pub data: String,
+}
+
+impl SseEvent {
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::from_str(&self.data).unwrap()
+    }
+}
+
+/// Reads an event stream response the way `EventSource` does, skipping
+/// keep-alive comments.
+pub struct SseReader {
+    body: axum::body::BodyDataStream,
+    buffer: String,
+}
+
+impl SseReader {
+    pub fn new(response: axum::response::Response) -> Self {
+        Self {
+            body: response.into_body().into_data_stream(),
+            buffer: String::new(),
+        }
+    }
+
+    /// The next event, or `None` when the stream ends.
+    pub async fn next(&mut self) -> Option<SseEvent> {
+        use futures_util::StreamExt;
+        loop {
+            while let Some(end) = self.buffer.find(
+                "
+
+",
+            ) {
+                let block: String = self.buffer.drain(..end + 2).collect();
+                let mut event = SseEvent {
+                    event: "message".into(),
+                    id: None,
+                    data: String::new(),
+                };
+                let mut fields = 0;
+                for line in block.lines() {
+                    let Some((name, value)) = line.split_once(':') else {
+                        continue;
+                    };
+                    let value = value.strip_prefix(' ').unwrap_or(value).to_owned();
+                    fields += 1;
+                    match name {
+                        "event" => event.event = value,
+                        "id" => event.id = Some(value),
+                        "data" => event.data.push_str(&value),
+                        _ => fields -= 1,
+                    }
+                }
+                if fields > 0 {
+                    return Some(event);
+                }
+            }
+            let chunk = self.body.next().await?.unwrap();
+            self.buffer.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+    }
+}
+
+fn state_with(comment_ports: CommentPorts) -> AppState {
     let ports = AuthPorts {
         ids: Arc::new(Unavailable),
         users: Arc::new(Unavailable),
@@ -321,13 +460,6 @@ pub fn test_state() -> AppState {
         verifier: Arc::new(Unavailable),
         tickets: Arc::new(Unavailable),
         presence: Arc::new(Unavailable),
-    };
-    let comment_ports = CommentPorts {
-        repository: Arc::new(Unavailable),
-        query: Arc::new(Unavailable),
-        policies: Arc::new(Unavailable),
-        limiter: Arc::new(Unavailable),
-        events: Arc::new(Unavailable),
     };
     AppState::new(
         ports,

@@ -1279,6 +1279,90 @@
         ]
       }
     },
+    "/api/broadcasts/{id}/events": {
+      "get": {
+        "tags": [
+          "comments"
+        ],
+        "summary": "Follow a broadcast's comments live (Server-Sent Events)",
+        "description": "A `text/event-stream` with these events:\n\n- `comments`: `data` is a JSON array of `Comment`, every change (post, edit, delete) within about 200 ms, oldest first; `id` is the newest `revision` in it. Upsert by `id`, keeping the higher `revision`; a deleted comment arrives with `body: null`.\n- `policy`: `data` is a `ChatPolicy`.\n- `reset`: too much was missed to replay; reload the list. `data` is `{\"revision\": string|null}`, also the event's `id`.\n\nNot subject to the 10 second request limit. A reconnecting `EventSource` sends `Last-Event-ID` and receives what it missed.",
+        "operationId": "followBroadcastEvents",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "description": "The last `id` received; sent by `EventSource` on reconnect",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Receive every change after this revision first: the `revision` of\nthe comment list. `Last-Event-ID` takes precedence.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The event stream.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_QUERY`: `after` or `Last-Event-ID` is not a revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`BROADCAST_NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`TOO_MANY_STREAMS`: 20 streams are already open from this client",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/broadcasts/{id}/playback": {
       "get": {
         "tags": [

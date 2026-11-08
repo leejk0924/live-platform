@@ -11,7 +11,7 @@ use utoipa::{
     },
 };
 
-use crate::{auth, broadcast, comment, live};
+use crate::{auth, broadcast, comment, comment_stream, live};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -47,6 +47,7 @@ use crate::{auth, broadcast, comment, live};
         comment::delete,
         comment::get_policy,
         comment::set_policy,
+        comment_stream::follow,
     ),
     modifiers(&SessionCookie),
     tags(

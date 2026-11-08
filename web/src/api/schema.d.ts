@@ -217,6 +217,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/broadcasts/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Follow a broadcast's comments live (Server-Sent Events)
+         * @description A `text/event-stream` with these events:
+         *
+         *     - `comments`: `data` is a JSON array of `Comment`, every change (post, edit, delete) within about 200 ms, oldest first; `id` is the newest `revision` in it. Upsert by `id`, keeping the higher `revision`; a deleted comment arrives with `body: null`.
+         *     - `policy`: `data` is a `ChatPolicy`.
+         *     - `reset`: too much was missed to replay; reload the list. `data` is `{"revision": string|null}`, also the event's `id`.
+         *
+         *     Not subject to the 10 second request limit. A reconnecting `EventSource` sends `Last-Event-ID` and receives what it missed.
+         */
+        get: operations["followBroadcastEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/broadcasts/{id}/playback": {
         parameters: {
             query?: never;
@@ -1347,6 +1373,65 @@ export interface operations {
             };
             /** @description `COMMENT_NOT_FOUND` */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    followBroadcastEvents: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Receive every change after this revision first: the `revision` of
+                 *     the comment list. `Last-Event-ID` takes precedence.
+                 */
+                after?: string;
+            };
+            header?: {
+                /** @description The last `id` received; sent by `EventSource` on reconnect */
+                "Last-Event-ID"?: string | null;
+            };
+            path: {
+                /** @description Broadcast id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The event stream. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description `INVALID_QUERY`: `after` or `Last-Event-ID` is not a revision */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `BROADCAST_NOT_FOUND` */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description `TOO_MANY_STREAMS`: 20 streams are already open from this client */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

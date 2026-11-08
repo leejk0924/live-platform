@@ -11,7 +11,8 @@ use axum::{
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
-use support::{PASSWORD, Reply, request, router, send, sign_up};
+use support::{PASSWORD, Reply, SseReader, request, router, send, sign_up};
+use tower::ServiceExt;
 
 struct Chat {
     router: Router,
@@ -108,6 +109,23 @@ impl Chat {
             ),
         )
         .await
+    }
+
+    async fn follow(&self, last_event_id: Option<&str>) -> SseReader {
+        let mut request = request(
+            Method::GET,
+            &format!("/api/broadcasts/{}/events", self.broadcast),
+            None,
+            None,
+        );
+        if let Some(last) = last_event_id {
+            request
+                .headers_mut()
+                .insert("last-event-id", HeaderValue::from_str(last).unwrap());
+        }
+        let response = self.router.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        SseReader::new(response)
     }
 
     async fn set_slow_mode(&self, token: &str, secs: u32) -> Reply {
@@ -423,4 +441,75 @@ async fn the_list_pages_newest_first(pool: PgPool) {
             "{bad}"
         );
     }
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn reconnecting_replays_exactly_the_changes_after_the_last_event(pool: PgPool) {
+    let chat = chat(&pool).await;
+    let first = chat.post(&chat.viewer, "a").await;
+    let a = first.body["id"].as_str().unwrap().to_owned();
+    let seen = first.body["revision"].as_str().unwrap().to_owned();
+    let b = chat.posted(&chat.other, "b").await;
+    assert_eq!(
+        chat.edit(&chat.viewer, &a, "\"1\"", "a2").await.status,
+        StatusCode::OK
+    );
+    assert_eq!(
+        chat.delete(&chat.other, &b).await.status,
+        StatusCode::NO_CONTENT
+    );
+    let newest = chat.list("").await.body["revision"].clone();
+
+    let mut events = chat.follow(Some(&seen)).await;
+    let replay = events.next().await.unwrap();
+    assert_eq!(replay.event, "comments");
+    assert_eq!(json!(replay.id), newest);
+    let changes: Vec<_> = replay
+        .json()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| (c["id"].clone(), c["body"].clone(), c["deleted"].clone()))
+        .collect();
+    assert_eq!(
+        changes,
+        [
+            (json!(a), json!("a2"), json!(false)),
+            (json!(b), Value::Null, json!(true)),
+        ]
+    );
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn an_open_stream_receives_new_comments_and_policy_changes(pool: PgPool) {
+    let chat = chat(&pool).await;
+    let mut events = chat.follow(None).await;
+
+    let posted = chat.post(&chat.viewer, "실시간").await;
+    let live = events.next().await.unwrap();
+    assert_eq!(live.event, "comments");
+    assert_eq!(live.json(), json!([posted.body]));
+    assert_eq!(live.id.as_deref(), posted.body["revision"].as_str());
+
+    chat.set_slow_mode(&chat.owner, 10).await;
+    let policy = events.next().await.unwrap();
+    assert_eq!(
+        (policy.event.as_str(), policy.json()),
+        ("policy", json!({"slowModeSeconds": 10}))
+    );
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn following_an_unknown_broadcast_is_not_found(pool: PgPool) {
+    let chat = chat(&pool).await;
+    let reply = send(
+        &chat.router,
+        request(Method::GET, "/api/broadcasts/123/events", None, None),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    assert_eq!(reply.code(), "BROADCAST_NOT_FOUND");
 }

@@ -173,6 +173,7 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
     });
 
     tracing::info!(addr = %config.listen_addr, "listening");
+    let streams = Arc::clone(&state.streams);
     let lease_lost = heartbeat.lease_lost();
     let (lost_tx, mut lost_rx) = oneshot::channel();
     let served = axum::serve(
@@ -187,6 +188,9 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
                 let _ = lost_tx.send(());
             }
         }
+        // Open event streams never end on their own, and the drain waits
+        // for every connection.
+        streams.close_all();
     })
     .await;
 

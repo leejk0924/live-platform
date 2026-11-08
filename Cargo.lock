@@ -27,6 +27,7 @@ dependencies = [
  "base64ct",
  "domain",
  "ed25519-dalek",
+ "futures-util",
  "governor",
  "infrastructure",
  "serde",
