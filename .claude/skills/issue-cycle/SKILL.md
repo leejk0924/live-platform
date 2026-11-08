@@ -111,10 +111,20 @@ Obsidian 쪽은 모두 저장소 밖이라 커밋하지 않는다.
 
 사용자에게 짧게 알린다: draft PR 링크, 리뷰 처리 집계(수용 n / 거부 n / 확인 필요 n)와 확인 필요 행 목록, ADR 경로(저장소와 Obsidian), 후속 이슈 후보, 끝내 확인하지 못한 완료 조건. 머지는 하지 않는다.
 
-## 9. 머지 후 (사용자가 머지를 요청했을 때만)
+## 9. 머지와 정리 (사용자가 머지를 요청했을 때만)
 
-1. PR의 CI가 모두 통과했는지 확인한다. 코드와 무관한 실패(다운로드 실패 등)는 실패한 job만 다시 돌린다.
-2. draft를 ready로 바꾸고 squash 머지한다. 본문은 이 PR의 커밋만 넣는다: `git log --no-merges --reverse --format='* %B' origin/main..origin/<type>/<N>`.
-3. Obsidian을 PR의 최종 상태로 맞춘다.
+1. PR 본문 `수정 사항` 표에서 `확인 필요`로 표시한 행을 사용자에게 보여 주고, 사용자가 다시 확인한 뒤에만 머지한다. 이 목록을 보기 전에 받은 "머지해줘"는 확인이 아니다. 해당 행이 없으면 바로 다음으로 간다.
+2. PR의 CI가 모두 통과했는지 확인한다. 코드와 무관한 실패(다운로드 실패 등)는 실패한 job만 다시 돌린다.
+3. draft를 ready로 바꾸고 squash 머지한다. 본문은 이 PR의 커밋만 넣는다: `git log --no-merges --reverse --format='* %B' origin/main..origin/<type>/<N>`.
+4. worktree와 브랜치를 지우고 메인 체크아웃을 최신으로 맞춘다. 메인 체크아웃에서 실행한다. squash 머지는 브랜치를 merged로 보지 않으므로 `-D`를 쓴다.
+
+   ```bash
+   git worktree remove ../<repo>-<type>-<N>
+   git branch -D <type>/<N>
+   git push origin --delete <type>/<N>
+   git checkout main && git pull --ff-only
+   ```
+
+5. Obsidian을 PR의 최종 상태로 맞춘다.
    - `Devlog/`: 리뷰 수치를 PR 본문 `수정 사항` 표의 최종 행 수로 고치고, 섹션 제목에 머지 시각(KST)을 적는다.
    - `00-Overview/Timeline.md`: 이 이슈 줄의 `(draft)`를 머지 시각으로 바꾸고, 줄을 머지 순서에 맞는 자리로 옮긴다.

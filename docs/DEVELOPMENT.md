@@ -6,13 +6,13 @@
 ## 1. 작업 흐름
 
 ```text
-이슈 생성 → 브랜치(worktree) 생성 → 최소 단위로 커밋 → PR → 문서 갱신 → 리뷰 → squash merge → 브랜치 삭제 → 문서 마무리
+이슈 생성 → 브랜치(worktree) 생성 → 최소 단위로 커밋 → PR → 문서 갱신 → 리뷰 → squash merge → worktree·브랜치 삭제 → 문서 마무리
 ```
 
 - 모든 작업은 GitHub 이슈에서 시작한다. 이슈 없는 작업은 하지 않는다.
 - 이슈 하나에 PR 여러 개가 붙을 수 있다. PR 하나는 한 가지 목적만 담는다.
 - `main`에 직접 커밋하거나 push하지 않는다.
-- Claude Code로 작업할 때는 `/issue-cycle <이슈 번호>` 한 번으로 구현 → 리뷰 → 리뷰 처리(수용/거부) → ADR → draft PR까지 진행한다. 절차는 [`.claude/skills/issue-cycle/SKILL.md`](../.claude/skills/issue-cycle/SKILL.md). 머지는 사람이 한다. 이 프로젝트 전용이며 Claude Code에 pstack과 jk(0.4.0 이상) 플러그인이 설치되어 있어야 한다. 구현과 리뷰 수정은 `pstack:poteto-agent` 서브에이전트가 하고, 메인 대화가 diff를 검토하고 검증을 다시 돌린다.
+- Claude Code로 작업할 때는 `/issue-cycle <이슈 번호>` 한 번으로 구현 → 리뷰 → 리뷰 처리(수용/거부) → ADR → draft PR까지 진행한다. 절차는 [`.claude/skills/issue-cycle/SKILL.md`](../.claude/skills/issue-cycle/SKILL.md). 머지는 사람이 요청할 때만 하고, `확인 필요` 행을 사람이 다시 확인한 뒤에 한다. 이 프로젝트 전용이며 Claude Code에 pstack과 jk(0.4.0 이상) 플러그인이 설치되어 있어야 한다. 구현과 리뷰 수정은 `pstack:poteto-agent` 서브에이전트가 하고, 메인 대화가 diff를 검토하고 검증을 다시 돌린다.
 
 ## 2. 이슈
 
@@ -53,7 +53,7 @@ git worktree add ../<repo>-<type>-<N> -b <type>/<N> origin/main
 
 - 한 이슈에서 성격이 다른 PR을 내면 type으로 브랜치를 나눈다 (예: `feat/6`, `test/6`).
 - 같은 이슈·같은 type의 PR을 또 내야 하면 앞 PR을 merge하고 브랜치를 지운 뒤 같은 이름으로 다시 만든다.
-- merge 후 원격·로컬 브랜치를 지운다.
+- merge 후 worktree와 원격·로컬 브랜치를 지운다(`git worktree remove`, `git branch -D`, `git push origin --delete`). 메인 체크아웃은 `git pull --ff-only`로 맞춘다.
 
 ## 4. 커밋
 
@@ -94,7 +94,7 @@ bash scripts/check-commit-msg.sh origin/main..HEAD
 - 본문: [PR 템플릿](../.github/PULL_REQUEST_TEMPLATE.md)을 채운다.
   - 관련 이슈: 이슈의 마지막 PR이면 `Closes #N`, 아니면 `Refs #N`.
   - 설계 결정이 있었으면 같은 PR에 ADR 파일을 넣고, `설계 기록(ADR)`에 그 파일 경로(`docs/adr/<area>/<issue>-<slug>.md`)를 적는다.
-- CI가 모두 통과하고 리뷰를 마친 뒤 **squash merge**한다.
+- CI가 모두 통과하고 리뷰를 마친 뒤 **squash merge**한다. `수정 사항`에 `확인 필요` 행이 있으면 머지 전에 사람이 그 행을 확인한다.
 - 리뷰 지적을 반영한 커밋은 같은 브랜치에 추가하고, PR 본문 `수정 사항`에 적는다. force push는 리뷰 전까지만.
 
 ## 6. 검증
