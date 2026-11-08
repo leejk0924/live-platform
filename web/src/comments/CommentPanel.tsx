@@ -98,7 +98,7 @@ export default function CommentPanel({ broadcast }: { broadcast: Broadcast }) {
       )}
       {feed.status === 'closed' && (
         <p className="notice" role="status">
-          실시간 댓글 연결이 끊겼습니다.{' '}
+          실시간 댓글 연결이 끊겼습니다. 방송 창을 너무 많이 열어 두었다면 다른 창을 닫고 다시 연결하세요.{' '}
           <button type="button" onClick={retry}>
             다시 연결
           </button>
