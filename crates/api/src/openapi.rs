@@ -95,6 +95,11 @@ mod tests {
 
     #[test]
     fn description_states_the_request_limits_in_force() {
+        assert_eq!(
+            crate::BODY_LIMIT % 1024,
+            0,
+            "the limit is stated in whole KiB"
+        );
         let description = ApiDoc::openapi().info.description.unwrap();
         for limit in [
             format!("{} KiB", crate::BODY_LIMIT / 1024),
