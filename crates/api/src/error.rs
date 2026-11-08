@@ -147,6 +147,16 @@ impl ApiError {
         }
     }
 
+    /// Answers 429 without `Retry-After`: a slot frees only when one of the
+    /// client's open streams closes.
+    pub fn too_many_streams() -> Self {
+        Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "TOO_MANY_STREAMS",
+            "too many event streams open from this client",
+        )
+    }
+
     pub(crate) fn code(&self) -> &'static str {
         self.code
     }

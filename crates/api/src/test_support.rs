@@ -10,17 +10,26 @@ use application::ports::{
         BroadcastQuery, BroadcastRepository, BroadcastView, ListFilter, NewBroadcast,
         PublisherPresence, TransitionRejection, WriteRejection,
     },
+    comment::{
+        ChatPolicyStore, ChatTarget, CommentQuery, CommentRepository, CommentView,
+        CommentWriteRejection, NewComment, PolicyRejection,
+    },
+    event_bus::{EventBus, EventSubscription, RealtimeEvent},
     id::{IdGenerationError, IdGenerator},
     media::{
         IngestEndpoint, IngestRouter, MediaCredentialVerifier, PlaybackResolver, PlaybackSource,
         PublishAuthorizer, PublishCredential, PublishTicket, PublishTicketLedger, RedeemRejection,
         StreamPath, StreamTerminator,
     },
+    rate_limit::{RateKey, RateLimiter},
 };
 use async_trait::async_trait;
 use domain::{
     auth::{Password, PasswordHash, SessionToken, User, UserId, Username},
-    broadcast::{Broadcast, BroadcastDescription, BroadcastId, BroadcastTitle, Version},
+    broadcast::{
+        Broadcast, BroadcastDescription, BroadcastId, BroadcastStatus, BroadcastTitle, Version,
+    },
+    comment::{ChatPolicy, CommentBody, CommentId, Revision},
     id::SnowflakeId,
     secret::Secret,
 };
@@ -28,7 +37,9 @@ use infrastructure::{auth::BreachedPasswordList, media::PublishKey};
 use tracing::Subscriber;
 use tracing_subscriber::fmt::MakeWriter;
 
-use crate::{AppState, auth::AuthPorts, broadcast::BroadcastPorts, config::Origin};
+use crate::{
+    AppState, auth::AuthPorts, broadcast::BroadcastPorts, comment::CommentPorts, config::Origin,
+};
 
 /// Stands in for every port a test does not exercise; each call fails.
 struct Unavailable;
@@ -208,10 +219,230 @@ impl StreamTerminator for Unavailable {
     }
 }
 
+#[async_trait]
+impl CommentRepository for Unavailable {
+    async fn insert(&self, _: &NewComment, _: bool) -> Result<Option<CommentView>, PortError> {
+        unavailable()
+    }
+
+    async fn edit(
+        &self,
+        _: BroadcastId,
+        _: CommentId,
+        _: UserId,
+        _: Version,
+        _: &CommentBody,
+    ) -> Result<Result<CommentView, CommentWriteRejection>, PortError> {
+        unavailable()
+    }
+
+    async fn soft_delete(
+        &self,
+        _: BroadcastId,
+        _: CommentId,
+        _: UserId,
+    ) -> Result<Result<CommentView, CommentWriteRejection>, PortError> {
+        unavailable()
+    }
+}
+
+#[async_trait]
+impl CommentQuery for Unavailable {
+    async fn list(
+        &self,
+        _: BroadcastId,
+        _: Option<CommentId>,
+        _: u32,
+    ) -> Result<Vec<CommentView>, PortError> {
+        unavailable()
+    }
+
+    async fn changes_since(
+        &self,
+        _: BroadcastId,
+        _: Revision,
+        _: u32,
+    ) -> Result<Vec<CommentView>, PortError> {
+        unavailable()
+    }
+
+    async fn latest_revision(&self, _: BroadcastId) -> Result<Revision, PortError> {
+        unavailable()
+    }
+}
+
+#[async_trait]
+impl ChatPolicyStore for Unavailable {
+    async fn target(&self, _: BroadcastId) -> Result<Option<ChatTarget>, PortError> {
+        unavailable()
+    }
+
+    async fn set(
+        &self,
+        _: BroadcastId,
+        _: UserId,
+        _: ChatPolicy,
+    ) -> Result<Result<(), PolicyRejection>, PortError> {
+        unavailable()
+    }
+}
+
+impl RateLimiter for Unavailable {
+    fn acquire(&self, _: &[(RateKey, std::time::Duration)]) -> Result<(), std::time::Duration> {
+        unreachable!("not available in this test")
+    }
+}
+
+#[async_trait]
+impl EventBus for Unavailable {
+    async fn publish(&self, _: RealtimeEvent) {}
+
+    fn subscribe(&self, _: BroadcastId) -> Box<dyn EventSubscription> {
+        unreachable!("not available in this test")
+    }
+}
+
 pub const TEST_ORIGIN: &str = "https://app.test";
 pub const TEST_MEDIA_SECRET: &str = "0123456789abcdef0123456789abcdef";
 
 pub fn test_state() -> AppState {
+    state_with(CommentPorts {
+        repository: Arc::new(Unavailable),
+        query: Arc::new(Unavailable),
+        policies: Arc::new(Unavailable),
+        limiter: Arc::new(Unavailable),
+        events: Arc::new(Unavailable),
+    })
+}
+
+/// Every broadcast but 404 is live with no comments, and events travel over
+/// `bus`.
+pub fn chat_state(bus: Arc<dyn EventBus>) -> AppState {
+    state_with(CommentPorts {
+        repository: Arc::new(Unavailable),
+        query: Arc::new(EmptyChat),
+        policies: Arc::new(EmptyChat),
+        limiter: Arc::new(Unavailable),
+        events: bus,
+    })
+}
+
+struct EmptyChat;
+
+#[async_trait]
+impl CommentQuery for EmptyChat {
+    async fn list(
+        &self,
+        _: BroadcastId,
+        _: Option<CommentId>,
+        _: u32,
+    ) -> Result<Vec<CommentView>, PortError> {
+        Ok(Vec::new())
+    }
+
+    async fn changes_since(
+        &self,
+        _: BroadcastId,
+        _: Revision,
+        _: u32,
+    ) -> Result<Vec<CommentView>, PortError> {
+        Ok(Vec::new())
+    }
+
+    async fn latest_revision(&self, _: BroadcastId) -> Result<Revision, PortError> {
+        Ok(Revision::START)
+    }
+}
+
+#[async_trait]
+impl ChatPolicyStore for EmptyChat {
+    async fn target(&self, broadcast: BroadcastId) -> Result<Option<ChatTarget>, PortError> {
+        Ok((broadcast.as_i64() != 404).then_some(ChatTarget {
+            owner: SnowflakeId::try_from(1).unwrap(),
+            status: BroadcastStatus::Live,
+            policy: ChatPolicy::OFF,
+        }))
+    }
+
+    async fn set(
+        &self,
+        _: BroadcastId,
+        _: UserId,
+        _: ChatPolicy,
+    ) -> Result<Result<(), PolicyRejection>, PortError> {
+        unavailable()
+    }
+}
+
+/// One Server-Sent Event as a client parses it.
+#[derive(Debug)]
+pub struct SseEvent {
+    pub event: String,
+    pub id: Option<String>,
+    pub data: String,
+}
+
+impl SseEvent {
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::from_str(&self.data).unwrap()
+    }
+}
+
+/// Reads an event stream response the way `EventSource` does, skipping
+/// keep-alive comments.
+pub struct SseReader {
+    body: axum::body::BodyDataStream,
+    buffer: String,
+}
+
+impl SseReader {
+    pub fn new(response: axum::response::Response) -> Self {
+        Self {
+            body: response.into_body().into_data_stream(),
+            buffer: String::new(),
+        }
+    }
+
+    /// The next event, or `None` when the stream ends.
+    pub async fn next(&mut self) -> Option<SseEvent> {
+        use futures_util::StreamExt;
+        loop {
+            while let Some(end) = self.buffer.find(
+                "
+
+",
+            ) {
+                let block: String = self.buffer.drain(..end + 2).collect();
+                let mut event = SseEvent {
+                    event: "message".into(),
+                    id: None,
+                    data: String::new(),
+                };
+                let mut fields = 0;
+                for line in block.lines() {
+                    let Some((name, value)) = line.split_once(':') else {
+                        continue;
+                    };
+                    let value = value.strip_prefix(' ').unwrap_or(value).to_owned();
+                    fields += 1;
+                    match name {
+                        "event" => event.event = value,
+                        "id" => event.id = Some(value),
+                        "data" => event.data.push_str(&value),
+                        _ => fields -= 1,
+                    }
+                }
+                if fields > 0 {
+                    return Some(event);
+                }
+            }
+            let chunk = self.body.next().await?.unwrap();
+            self.buffer.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+    }
+}
+
+fn state_with(comment_ports: CommentPorts) -> AppState {
     let ports = AuthPorts {
         ids: Arc::new(Unavailable),
         users: Arc::new(Unavailable),
@@ -233,6 +464,7 @@ pub fn test_state() -> AppState {
     AppState::new(
         ports,
         broadcast_ports,
+        comment_ports,
         vec![Origin::parse(TEST_ORIGIN).unwrap()],
         false,
         PublishKey::generate().public_jwk(),

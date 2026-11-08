@@ -5,13 +5,16 @@ export class ApiError extends Error {
   readonly status: number
   readonly code: string
   readonly traceId: string | undefined
+  /** Seconds from `Retry-After`, when a 429 carried one. */
+  readonly retryAfter: number | undefined
 
-  constructor(status: number, code: string, message: string, traceId?: string) {
+  constructor(status: number, code: string, message: string, traceId?: string, retryAfter?: number) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.traceId = traceId
+    this.retryAfter = retryAfter
   }
 }
 
@@ -31,12 +34,16 @@ type Outcome<T> = { data?: T; error?: unknown; response: Response }
 
 export async function unwrap<T>(pending: Promise<Outcome<T>>): Promise<T> {
   const { data, error, response } = await pending
-  if (!response.ok) throw toApiError(response.status, error)
+  if (!response.ok) throw toApiError(response, error)
   return data as T
 }
 
-function toApiError(status: number, body: unknown): ApiError {
-  if (isErrorBody(body)) return new ApiError(status, body.code, body.message, body.traceId)
+function toApiError(response: Response, body: unknown): ApiError {
+  const { status } = response
+  if (isErrorBody(body)) {
+    const retryAfter = Number.parseInt(response.headers.get('Retry-After') ?? '', 10)
+    return new ApiError(status, body.code, body.message, body.traceId, Number.isNaN(retryAfter) ? undefined : retryAfter)
+  }
   // A proxy error page (e.g. Caddy 502) has no envelope.
   return new ApiError(status, 'UNEXPECTED_RESPONSE', `요청에 실패했습니다. (${status})`)
 }
@@ -75,6 +82,14 @@ const MESSAGES: Record<string, string> = {
   INVALID_IF_MATCH: '방송 버전 정보가 올바르지 않습니다. 새로고침한 뒤 다시 시도하세요.',
   INVALID_QUERY: '목록 요청 값이 올바르지 않습니다.',
   INVALID_PAGE_SIZE: '한 번에 1~50개까지 불러올 수 있습니다.',
+  INVALID_COMMENT: '댓글은 줄바꿈 없이 1~500자여야 합니다.',
+  COMMENT_NOT_FOUND: '댓글을 찾을 수 없습니다. 이미 삭제되었을 수 있습니다.',
+  NOT_COMMENT_AUTHOR: '댓글을 쓴 사람만 바꿀 수 있습니다.',
+  COMMENTS_CLOSED: '종료된 방송은 댓글을 쓸 수 없습니다.',
+  INVALID_SLOW_MODE: '슬로우 모드는 0~300초여야 합니다.',
+  TOO_MANY_STREAMS: '열린 방송 창이 너무 많습니다. 다른 창을 닫고 다시 시도하세요.',
+  REQUEST_TIMEOUT: '요청 시간이 초과되었습니다. 잠시 후 다시 시도하세요.',
+  PAYLOAD_TOO_LARGE: '요청이 너무 큽니다.',
   INTERNAL: '서버 오류가 발생했습니다. 잠시 후 다시 시도하세요.',
   METHOD_NOT_ALLOWED: '허용되지 않는 요청입니다.',
 }

@@ -5,6 +5,7 @@ import { errorMessage } from '../api/client.ts'
 import type { Broadcast } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
 import LoadFailed from '../broadcasts/LoadFailed.tsx'
+import CommentPanel from '../comments/CommentPanel.tsx'
 import Publisher from '../broadcasts/publish/Publisher.tsx'
 import { statusLabel } from '../broadcasts/status.ts'
 import { useBroadcast } from '../broadcasts/useBroadcast.ts'
@@ -86,6 +87,7 @@ function BroadcastView({ broadcast, onChanged }: { broadcast: Broadcast; onChang
           {error}
         </p>
       )}
+      <CommentPanel key={broadcast.id} broadcast={broadcast} />
     </article>
   )
 }

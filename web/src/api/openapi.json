@@ -767,6 +767,602 @@
         ]
       }
     },
+    "/api/broadcasts/{id}/chat-policy": {
+      "get": {
+        "tags": [
+          "comments"
+        ],
+        "summary": "Get a broadcast's chat policy",
+        "operationId": "getChatPolicy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The policy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatPolicy"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`BROADCAST_NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "comments"
+        ],
+        "summary": "Set a broadcast's chat policy; owner only",
+        "description": "Does not change the broadcast's version, so an open edit of its title is unaffected.",
+        "operationId": "setChatPolicy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Set; followers receive it as a `policy` event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_SLOW_MODE` or `INVALID_REQUEST`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`NOT_BROADCAST_OWNER` or `CSRF_REJECTED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`BROADCAST_NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/broadcasts/{id}/comments": {
+      "get": {
+        "tags": [
+          "comments"
+        ],
+        "summary": "List a broadcast's comments, newest first",
+        "operationId": "listComments",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Only comments older than this id: the previous page's `nextBefore`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 100. Defaults to 50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted comments are left out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_QUERY` or `INVALID_PAGE_SIZE`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`BROADCAST_NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "comments"
+        ],
+        "summary": "Post a comment as the signed-in user",
+        "operationId": "postComment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Posted at version 1.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`\"1\"`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_COMMENT` or `INVALID_REQUEST`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`CSRF_REJECTED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`BROADCAST_NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`COMMENTS_CLOSED`: the broadcast has ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`RATE_LIMITED`: one comment per second per user, and the broadcast's slow mode for viewers",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds until posting is allowed"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/broadcasts/{id}/comments/{commentId}": {
+      "put": {
+        "tags": [
+          "comments"
+        ],
+        "summary": "Replace a comment's body; author only",
+        "operationId": "editComment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commentId",
+            "in": "path",
+            "description": "Comment id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "description": "The version being edited, as returned in `ETag`: `\"3\"`",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommentInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Edited.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "The new version"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`IF_MATCH_REQUIRED`, `INVALID_IF_MATCH`, `INVALID_COMMENT` or `INVALID_REQUEST`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`NOT_COMMENT_AUTHOR` or `CSRF_REJECTED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`COMMENT_NOT_FOUND`, also for deleted comments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`VERSION_CONFLICT`: changed since it was loaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "comments"
+        ],
+        "summary": "Delete a comment; author only",
+        "operationId": "deleteComment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commentId",
+            "in": "path",
+            "description": "Comment id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted; followers receive it with `body: null`"
+          },
+          "401": {
+            "description": "`UNAUTHENTICATED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`NOT_COMMENT_AUTHOR` or `CSRF_REJECTED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`COMMENT_NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/broadcasts/{id}/events": {
+      "get": {
+        "tags": [
+          "comments"
+        ],
+        "summary": "Follow a broadcast's comments live (Server-Sent Events)",
+        "description": "A `text/event-stream` with these events:\n\n- `comments`: `data` is a JSON array of `Comment`, every change (post, edit, delete) within about 200 ms, oldest first; `id` is the newest `revision` in it. Upsert by `id`, keeping the higher `revision`; a deleted comment arrives with `body: null`.\n- `policy`: `data` is a `ChatPolicy`; sent when the stream opens, after catching up what it missed, and on every change.\n- `reset`: too much was missed to replay; reload the list. `data` is `{\"revision\": string}`, also the event's `id`.\n\nNot subject to the 10 second request limit. A reconnecting `EventSource` sends `Last-Event-ID` and receives what it missed.",
+        "operationId": "followBroadcastEvents",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Broadcast id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "description": "The last `id` received; sent by `EventSource` on reconnect. `0` replays from the first comment",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Receive every change after this revision first: the `revision` of\nthe comment list. `Last-Event-ID` takes precedence.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The event stream.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_QUERY`: `after` or `Last-Event-ID` is not a revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`BROADCAST_NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`TOO_MANY_STREAMS`: 20 streams are already open from this client",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/broadcasts/{id}/playback": {
       "get": {
         "tags": [
@@ -1097,6 +1693,121 @@
           "ENDED"
         ]
       },
+      "ChatPolicy": {
+        "type": "object",
+        "required": [
+          "slowModeSeconds"
+        ],
+        "properties": {
+          "slowModeSeconds": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds a viewer waits between comments to this broadcast, 0 to 300;\n0 is off. The broadcaster is never slowed down.",
+            "maximum": 300,
+            "minimum": 0
+          }
+        }
+      },
+      "Comment": {
+        "type": "object",
+        "required": [
+          "id",
+          "broadcastId",
+          "authorId",
+          "authorName",
+          "body",
+          "deleted",
+          "edited",
+          "version",
+          "revision",
+          "createdAt"
+        ],
+        "properties": {
+          "authorId": {
+            "type": "string",
+            "example": "112007302751453184"
+          },
+          "authorName": {
+            "type": "string"
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`null` once deleted. Plain text: escape it when rendering."
+          },
+          "broadcastId": {
+            "type": "string",
+            "example": "112007302751453184"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "edited": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "example": "112007303372210176"
+          },
+          "revision": {
+            "type": "string",
+            "description": "Position of this comment's latest change in the broadcast's change\nfeed, as a decimal string. Of two copies of one comment, keep the one\nwith the higher revision.",
+            "example": "1042"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Send back as `If-Match: \"<version>\"` to edit.",
+            "minimum": 1
+          }
+        }
+      },
+      "CommentInput": {
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "Trimmed, then 1 to 500 characters on one line."
+          }
+        }
+      },
+      "CommentPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "nextBefore",
+          "revision"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Comment"
+            },
+            "description": "Newest first."
+          },
+          "nextBefore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `before` for the next page; `null` on the last page."
+          },
+          "revision": {
+            "type": "string",
+            "description": "The newest revision when the page was read, `\"0\"` before the first\ncomment. Open the event stream with `?after=<revision>` to receive\nevery change since."
+          }
+        }
+      },
       "Credentials": {
         "type": "object",
         "required": [
@@ -1303,6 +2014,10 @@
     {
       "name": "broadcasts",
       "description": "Broadcast registration, browsing, going live, ending and watching"
+    },
+    {
+      "name": "comments",
+      "description": "Comments on a broadcast, its chat policy and its live event stream"
     }
   ]
 }

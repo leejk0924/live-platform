@@ -12,7 +12,10 @@ use std::{
     time::Duration,
 };
 
-use api::{AppState, app, auth::AuthPorts, broadcast::BroadcastPorts, config::Origin};
+use api::{
+    AppState, app, auth::AuthPorts, broadcast::BroadcastPorts, comment::CommentPorts,
+    config::Origin,
+};
 use application::ports::{
     PortError,
     media::{StreamPath, StreamTerminator},
@@ -29,9 +32,12 @@ use infrastructure::{
     id::SnowflakeIdGenerator,
     media::{JwtPublishAuthorizer, MediaMtxIngestRouter, MediaMtxPlaybackResolver, PublishKey},
     persistence::{
-        PgBroadcastQuery, PgBroadcastRepository, PgPublishTicketLedger, PgSessionStore,
-        PgUserRepository, PgWorkerIdAllocator,
+        PgBroadcastQuery, PgBroadcastRepository, PgChatPolicyStore, PgCommentQuery,
+        PgCommentRepository, PgPublishTicketLedger, PgSessionStore, PgUserRepository,
+        PgWorkerIdAllocator,
     },
+    rate_limit::InMemoryRateLimiter,
+    realtime::PgEventBus,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -125,9 +131,21 @@ pub async fn live_state_with(
         tickets: Arc::new(PgPublishTicketLedger::new(pool.clone())),
         presence: broadcasts,
     };
+    // Dropping the handle would stop the listener; the test pool closing at
+    // the end of the test stops it instead.
+    let (events, listener) = PgEventBus::start(pool.clone()).await.unwrap();
+    std::mem::forget(listener);
+    let comment_ports = CommentPorts {
+        repository: Arc::new(PgCommentRepository::new(pool.clone())),
+        query: Arc::new(PgCommentQuery::new(pool.clone())),
+        policies: Arc::new(PgChatPolicyStore::new(pool.clone())),
+        limiter: Arc::new(InMemoryRateLimiter::default()),
+        events,
+    };
     let state = AppState::new(
         ports,
         broadcast_ports,
+        comment_ports,
         vec![Origin::parse(ORIGIN).unwrap()],
         demo_login_enabled,
         key.public_jwk(),
@@ -210,6 +228,80 @@ pub async fn sign_up(router: &Router, username: &str, password: &str) -> Reply {
         request(Method::POST, "/api/auth/signup", Some(body), None),
     )
     .await
+}
+
+/// One Server-Sent Event as a client parses it.
+#[derive(Debug)]
+pub struct SseEvent {
+    pub event: String,
+    pub id: Option<String>,
+    pub data: String,
+}
+
+impl SseEvent {
+    pub fn json(&self) -> Value {
+        serde_json::from_str(&self.data).unwrap()
+    }
+}
+
+/// Reads an event stream response the way `EventSource` does, skipping
+/// keep-alive comments.
+pub struct SseReader {
+    body: axum::body::BodyDataStream,
+    buffer: String,
+}
+
+impl SseReader {
+    pub fn new(response: axum::response::Response) -> Self {
+        Self {
+            body: response.into_body().into_data_stream(),
+            buffer: String::new(),
+        }
+    }
+
+    /// The next event within 5 seconds, or `None` when the stream ends.
+    pub async fn next(&mut self) -> Option<SseEvent> {
+        tokio::time::timeout(Duration::from_secs(5), self.read())
+            .await
+            .expect("an event within 5 s")
+    }
+
+    async fn read(&mut self) -> Option<SseEvent> {
+        use futures_util::StreamExt;
+        loop {
+            while let Some(end) = self.buffer.find(
+                "
+
+",
+            ) {
+                let block: String = self.buffer.drain(..end + 2).collect();
+                let mut event = SseEvent {
+                    event: "message".into(),
+                    id: None,
+                    data: String::new(),
+                };
+                let mut fields = 0;
+                for line in block.lines() {
+                    let Some((name, value)) = line.split_once(':') else {
+                        continue;
+                    };
+                    let value = value.strip_prefix(' ').unwrap_or(value).to_owned();
+                    fields += 1;
+                    match name {
+                        "event" => event.event = value,
+                        "id" => event.id = Some(value),
+                        "data" => event.data.push_str(&value),
+                        _ => fields -= 1,
+                    }
+                }
+                if fields > 0 {
+                    return Some(event);
+                }
+            }
+            let chunk = self.body.next().await?.unwrap();
+            self.buffer.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+    }
 }
 
 /// Captures JSON log lines, request span fields included, so tests can

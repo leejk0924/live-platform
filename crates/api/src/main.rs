@@ -13,6 +13,7 @@ use api::{
     AppState, app,
     auth::AuthPorts,
     broadcast::BroadcastPorts,
+    comment::CommentPorts,
     config::{Config, listen_addr},
     reaper,
 };
@@ -24,9 +25,12 @@ use infrastructure::{
         JwtPublishAuthorizer, MediaMtxControlApi, MediaMtxIngestRouter, MediaMtxPlaybackResolver,
     },
     persistence::{
-        self, PgBroadcastQuery, PgBroadcastRepository, PgPublishTicketLedger, PgReaperStore,
-        PgSessionStore, PgUserRepository, PgWorkerIdAllocator,
+        self, PgBroadcastQuery, PgBroadcastRepository, PgChatPolicyStore, PgCommentQuery,
+        PgCommentRepository, PgPublishTicketLedger, PgReaperStore, PgSessionStore,
+        PgUserRepository, PgWorkerIdAllocator,
     },
+    rate_limit::InMemoryRateLimiter,
+    realtime::PgEventBus,
 };
 use tokio::{net::TcpListener, sync::oneshot};
 use tracing_subscriber::EnvFilter;
@@ -119,15 +123,34 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         tickets: Arc::new(PgPublishTicketLedger::new(pool.clone())),
         presence: broadcasts,
     };
+    let (events, event_listener) = match PgEventBus::start(pool.clone()).await {
+        Ok(started) => started,
+        Err(err) => {
+            if let Err(release_err) = heartbeat.shutdown().await {
+                tracing::warn!(%release_err, "could not release worker id lease");
+            }
+            return Err(format!("event listener start failed: {err}").into());
+        }
+    };
+    let comment_limiter = Arc::new(InMemoryRateLimiter::default());
+    let comment_ports = CommentPorts {
+        repository: Arc::new(PgCommentRepository::new(pool.clone())),
+        query: Arc::new(PgCommentQuery::new(pool.clone())),
+        policies: Arc::new(PgChatPolicyStore::new(pool.clone())),
+        limiter: comment_limiter.clone(),
+        events,
+    };
     let state = AppState::new(
         ports,
         broadcast_ports,
+        comment_ports,
         config.allowed_origins,
         config.demo_login_enabled,
         publish_jwk,
         config.media_secret,
     );
     if let Err(err) = state.auth.demo_log_in.seed().await {
+        event_listener.shutdown().await;
         if let Err(release_err) = heartbeat.shutdown().await {
             tracing::warn!(%release_err, "could not release worker id lease");
         }
@@ -145,10 +168,12 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
         loop {
             ticks.tick().await;
             limits.forget_idle();
+            comment_limiter.forget_idle();
         }
     });
 
     tracing::info!(addr = %config.listen_addr, "listening");
+    let streams = Arc::clone(&state.streams);
     let lease_lost = heartbeat.lease_lost();
     let (lost_tx, mut lost_rx) = oneshot::channel();
     let served = axum::serve(
@@ -163,10 +188,14 @@ async fn serve(config: Config) -> Result<(), Box<dyn Error>> {
                 let _ = lost_tx.send(());
             }
         }
+        // Open event streams never end on their own, and the drain waits
+        // for every connection.
+        streams.close_all();
     })
     .await;
 
     reaper.shutdown().await;
+    event_listener.shutdown().await;
     match heartbeat.shutdown().await {
         Ok(()) => tracing::info!("worker id lease released"),
         Err(err) => tracing::warn!(%err, "could not release worker id lease"),

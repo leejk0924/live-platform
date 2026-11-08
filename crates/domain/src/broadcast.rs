@@ -167,8 +167,8 @@ impl BroadcastDescription {
     }
 }
 
-/// Optimistic-lock version of a broadcast; starts at 1 and grows by one per
-/// write.
+/// Optimistic-lock version of a broadcast or a comment; starts at 1 and
+/// grows by one per write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Version(i32);
 

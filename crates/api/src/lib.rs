@@ -4,9 +4,12 @@
 pub mod audit;
 pub mod auth;
 pub mod broadcast;
+pub mod comment;
+pub mod comment_stream;
 pub mod config;
 pub mod csrf;
 pub mod error;
+pub mod if_match;
 pub mod internal;
 pub mod json;
 pub mod live;
@@ -33,6 +36,8 @@ use tower_http::catch_panic::CatchPanicLayer;
 use crate::{
     auth::{AuthPorts, AuthUseCases},
     broadcast::{BroadcastPorts, BroadcastUseCases},
+    comment::{CommentPorts, CommentUseCases},
+    comment_stream::LiveStreams,
     config::Origin,
     error::ApiError,
     rate_limit::RateLimits,
@@ -52,6 +57,9 @@ pub struct AppState {
     pub ids: Arc<dyn IdGenerator>,
     pub auth: Arc<AuthUseCases>,
     pub broadcasts: Arc<BroadcastUseCases>,
+    pub comments: Arc<CommentUseCases>,
+    /// Open event streams; `main` closes them at shutdown.
+    pub streams: Arc<LiveStreams>,
     pub allowed_origins: Arc<[Origin]>,
     pub limits: Arc<RateLimits>,
     /// Served as the JWKS that verifies publish tokens.
@@ -64,6 +72,7 @@ impl AppState {
     pub fn new(
         ports: AuthPorts,
         broadcast_ports: BroadcastPorts,
+        comment_ports: CommentPorts,
         allowed_origins: Vec<Origin>,
         demo_login_enabled: bool,
         publish_jwk: PublicJwk,
@@ -71,10 +80,13 @@ impl AppState {
     ) -> Self {
         let broadcasts =
             BroadcastUseCases::new(broadcast_ports, ports.ids.clone(), ports.users.clone());
+        let comments = CommentUseCases::new(comment_ports, ports.ids.clone());
         Self {
             ids: ports.ids.clone(),
             auth: Arc::new(AuthUseCases::new(ports, demo_login_enabled)),
             broadcasts: Arc::new(broadcasts),
+            comments: Arc::new(comments),
+            streams: Arc::new(LiveStreams::default()),
             allowed_origins: allowed_origins.into(),
             limits: Arc::new(RateLimits::default()),
             publish_jwk: Arc::new(publish_jwk),
@@ -89,6 +101,7 @@ pub fn app(state: AppState) -> Router {
         .route("/openapi.json", get(openapi::spec))
         .nest("/auth", auth::routes())
         .merge(broadcast::routes())
+        .merge(comment::routes())
         .merge(live::routes())
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state.allowed_origins),
@@ -96,9 +109,12 @@ pub fn app(state: AppState) -> Router {
         ));
     let internal = internal::routes(Arc::clone(&state.media_secret));
     let bounded = Router::new().nest("/api", api).nest("/internal", internal);
-    // Routes that hold a connection open, such as SSE (#11), go in the
-    // second router: `bounded` cuts them off at `REQUEST_TIMEOUT`.
-    with_envelope(bounded, Router::new()).with_state(state)
+    // Routes that hold a connection open go in the second router: `bounded`
+    // cuts them off at `REQUEST_TIMEOUT`. They are GET only, so the CSRF
+    // guard has nothing to check.
+    let long_lived =
+        Router::new().route("/api/broadcasts/{id}/events", get(comment_stream::follow));
+    with_envelope(bounded, long_lived).with_state(state)
 }
 
 /// Joins the routes under [`REQUEST_TIMEOUT`] with the `long_lived` ones

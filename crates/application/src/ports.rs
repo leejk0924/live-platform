@@ -1,7 +1,10 @@
 pub mod auth;
 pub mod broadcast;
+pub mod comment;
+pub mod event_bus;
 pub mod id;
 pub mod media;
+pub mod rate_limit;
 
 use thiserror::Error;
 
