@@ -1,13 +1,22 @@
 //! Runs the reaper in the background of the server process.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use application::{
     ports::PortError,
     reaper::{REAP_INTERVAL, Reaped, Reaper},
 };
 use domain::broadcast::BroadcastId;
-use tokio::{sync::oneshot, task::JoinHandle, time::MissedTickBehavior};
+use tokio::{
+    sync::oneshot,
+    task::{JoinError, JoinHandle},
+    time::MissedTickBehavior,
+};
+
+/// How long stopping waits for the pass in progress before dropping it, so
+/// a slow media server cannot hold up the rest of the shutdown past the
+/// container's stop timeout. A dropped pass's writes are rolled back.
+pub const SHUTDOWN_WAIT: Duration = Duration::from_secs(3);
 
 pub struct ReaperHandle {
     stop: oneshot::Sender<()>,
@@ -15,7 +24,8 @@ pub struct ReaperHandle {
 }
 
 impl ReaperHandle {
-    /// Stops after the pass in progress, if any, has finished.
+    /// Stops after the pass in progress, if any, has finished, or after
+    /// [`SHUTDOWN_WAIT`].
     pub async fn shutdown(self) {
         let _ = self.stop.send(());
         if let Err(err) = self.task.await {
@@ -35,25 +45,41 @@ pub fn spawn(reaper: Reaper) -> ReaperHandle {
         ticks.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             tokio::select! {
+                biased;
                 _ = &mut stopped => return,
                 _ = ticks.tick() => {}
             }
             // Its own task, so a panic ends this pass and not the loop.
             let reaper = Arc::clone(&reaper);
-            match tokio::spawn(async move { reaper.tick().await }).await {
-                Ok(result) => report(result),
-                Err(err) => tracing::error!(%err, "reaper pass panicked"),
-            }
+            let mut pass = tokio::spawn(async move { reaper.tick().await });
+            let finished = tokio::select! {
+                finished = &mut pass => finished,
+                _ = &mut stopped => {
+                    match tokio::time::timeout(SHUTDOWN_WAIT, &mut pass).await {
+                        Ok(finished) => report_pass(finished),
+                        Err(_) => {
+                            pass.abort();
+                            tracing::warn!("reaper pass dropped at shutdown");
+                        }
+                    }
+                    return;
+                }
+            };
+            report_pass(finished);
         }
     });
     ReaperHandle { stop, task }
 }
 
-fn report(result: Result<Option<Reaped>, PortError>) {
-    let reaped = match result {
-        Ok(Some(reaped)) => reaped,
-        Ok(None) => return,
+fn report_pass(finished: Result<Result<Option<Reaped>, PortError>, JoinError>) {
+    let reaped = match finished {
+        Ok(Ok(Some(reaped))) => reaped,
+        Ok(Ok(None)) => return,
         Err(err) => {
+            tracing::error!(%err, "reaper pass panicked");
+            return;
+        }
+        Ok(Err(err)) => {
             tracing::error!(%err, "reaper pass failed");
             return;
         }

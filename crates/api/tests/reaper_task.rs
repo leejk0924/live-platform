@@ -148,3 +148,21 @@ async fn stopping_waits_for_the_pass_in_progress() {
         "no pass after stopping"
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn stopping_gives_up_on_a_pass_that_takes_too_long() {
+    let store = Store::new(Pass::Takes(Duration::from_secs(3600)));
+    let handle = spawn(store.clone());
+    tokio::time::sleep(Duration::from_millis(1)).await;
+
+    let stopping = Instant::now();
+    handle.shutdown().await;
+
+    assert_eq!(stopping.elapsed(), reaper::SHUTDOWN_WAIT);
+    tokio::time::sleep(Duration::from_secs(7200)).await;
+    assert_eq!(
+        store.finished.load(Ordering::SeqCst),
+        0,
+        "the pass was dropped"
+    );
+}
