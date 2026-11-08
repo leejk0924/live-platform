@@ -9,6 +9,7 @@
 | [ed25519-dalek](https://github.com/dalek-cryptography/curve25519-dalek) | 송출 JWT(EdDSA) 서명 | BSD-3-Clause |
 | [zeroize](https://github.com/RustCrypto/utils) | 송출 서명 키 seed를 쓴 뒤 메모리에서 지우기 | Apache-2.0 OR MIT |
 | [reqwest](https://github.com/seanmonstar/reqwest) | MediaMTX Control API 호출(송출 종료 kick) | MIT OR Apache-2.0 |
+| [rusty-s3](https://github.com/paolobarbolini/rusty-s3) | 녹화 업로드용 S3 presigned PUT URL(SigV4) 서명 | BSD-2-Clause |
 | [subtle](https://github.com/dalek-cryptography/subtle) | MediaMTX 공유 비밀값의 상수 시간 비교 | BSD-3-Clause |
 | [governor](https://github.com/boinkor-net/governor) | 가입·로그인 속도 제한 | MIT |
 | [time](https://github.com/time-rs/time) | 방송 생성 시각의 DB 변환(sqlx `time` 기능)과 RFC 3339 응답 형식 | MIT OR Apache-2.0 |
