@@ -20,15 +20,18 @@ thiserror = "2"
 
 argon2 = "0.6"
 sha2 = "0.11"
+hmac = "0.13"
 getrandom = "0.4"
 base64ct = { version = "1", features = ["alloc"] }
 ed25519-dalek = "3"
+p256 = { version = "0.14", default-features = false, features = ["ecdsa", "pem", "std"] }
+rusty-s3 = { version = "0.11", default-features = false, features = ["rustcrypto"] }
 zeroize = "1"
-reqwest = { version = "0.13", default-features = false, features = ["json"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
 subtle = "2"
 
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync", "fs", "io-util"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["catch-panic"] }
 tracing = "0.1"

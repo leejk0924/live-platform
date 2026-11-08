@@ -206,7 +206,7 @@ pub struct BroadcastDto {
     created_at: String,
 }
 
-fn rfc3339(at: SystemTime) -> String {
+pub(crate) fn rfc3339(at: SystemTime) -> String {
     OffsetDateTime::from(at)
         .format(&Rfc3339)
         .expect("a SystemTime from the database fits RFC 3339")

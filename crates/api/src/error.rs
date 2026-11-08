@@ -127,6 +127,15 @@ impl ApiError {
         )
     }
 
+    /// A signed link whose signature does not match or whose time ran out.
+    pub fn invalid_signature() -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "INVALID_SIGNATURE",
+            "the link is invalid or has expired",
+        )
+    }
+
     pub fn csrf_rejected() -> Self {
         Self::new(
             StatusCode::FORBIDDEN,

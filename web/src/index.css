@@ -29,6 +29,10 @@ main {
   text-decoration: none;
 }
 
+.site-nav {
+  margin-right: auto;
+}
+
 .account {
   display: flex;
   flex-wrap: wrap;
@@ -205,8 +209,13 @@ button,
   border-left: 4px solid crimson;
 }
 
-.broadcast-list .status-ENDED {
+.broadcast-list .status-ENDED,
+.broadcast-list .status-FAILED {
   opacity: 0.55;
+}
+
+.badge-FAILED {
+  color: crimson;
 }
 
 .player video {

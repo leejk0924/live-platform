@@ -16,6 +16,8 @@ pub mod live;
 pub mod openapi;
 pub mod rate_limit;
 pub mod reaper;
+pub mod recording;
+pub mod recording_store;
 #[cfg(test)]
 mod test_support;
 
@@ -41,6 +43,7 @@ use crate::{
     config::Origin,
     error::ApiError,
     rate_limit::RateLimits,
+    recording::{RecordingPorts, RecordingUseCases},
 };
 
 /// How long a request may take to produce its response head. Routes that
@@ -58,6 +61,7 @@ pub struct AppState {
     pub auth: Arc<AuthUseCases>,
     pub broadcasts: Arc<BroadcastUseCases>,
     pub comments: Arc<CommentUseCases>,
+    pub recordings: Arc<RecordingUseCases>,
     /// Open event streams; `main` closes them at shutdown.
     pub streams: Arc<LiveStreams>,
     pub allowed_origins: Arc<[Origin]>,
@@ -69,15 +73,25 @@ pub struct AppState {
 }
 
 impl AppState {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "one argument per port group or setting the composition root assembles"
+    )]
     pub fn new(
         ports: AuthPorts,
         broadcast_ports: BroadcastPorts,
         comment_ports: CommentPorts,
+        recording_ports: RecordingPorts,
         allowed_origins: Vec<Origin>,
         demo_login_enabled: bool,
         publish_jwk: PublicJwk,
         media_secret: Secret<String>,
     ) -> Self {
+        let recordings = RecordingUseCases::new(
+            recording_ports,
+            broadcast_ports.ingest.clone(),
+            ports.ids.clone(),
+        );
         let broadcasts =
             BroadcastUseCases::new(broadcast_ports, ports.ids.clone(), ports.users.clone());
         let comments = CommentUseCases::new(comment_ports, ports.ids.clone());
@@ -86,6 +100,7 @@ impl AppState {
             auth: Arc::new(AuthUseCases::new(ports, demo_login_enabled)),
             broadcasts: Arc::new(broadcasts),
             comments: Arc::new(comments),
+            recordings: Arc::new(recordings),
             streams: Arc::new(LiveStreams::default()),
             allowed_origins: allowed_origins.into(),
             limits: Arc::new(RateLimits::default()),
@@ -103,6 +118,7 @@ pub fn app(state: AppState) -> Router {
         .merge(broadcast::routes())
         .merge(comment::routes())
         .merge(live::routes())
+        .merge(recording::routes())
         .layer(middleware::from_fn_with_state(
             Arc::clone(&state.allowed_origins),
             csrf::guard,
@@ -112,8 +128,12 @@ pub fn app(state: AppState) -> Router {
     // Routes that hold a connection open go in the second router: `bounded`
     // cuts them off at `REQUEST_TIMEOUT`. They are GET only, so the CSRF
     // guard has nothing to check.
-    let long_lived =
+    let mut long_lived =
         Router::new().route("/api/broadcasts/{id}/events", get(comment_stream::follow));
+    // A file of hundreds of megabytes to a slow viewer outlasts the limit.
+    if state.recordings.local.is_some() {
+        long_lived = long_lived.route("/api/recordings/{id}/file", get(recording::file));
+    }
     with_envelope(bounded, long_lived).with_state(state)
 }
 
@@ -209,6 +229,17 @@ mod tests {
                 .unwrap_or_else(|err| panic!("{status} body is not JSON: {err}"));
         assert_eq!(body["traceId"], trace, "{body}");
         (status, body)
+    }
+
+    #[tokio::test]
+    async fn recording_files_are_not_served_unless_kept_on_this_host() {
+        let request = Request::get("/api/recordings/1/file?expires=1&signature=x")
+            .body(Body::empty())
+            .unwrap();
+        let (status, body) = envelope_of(app(test_state()), request).await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["code"], "NOT_FOUND");
     }
 
     #[tokio::test]

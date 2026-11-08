@@ -1595,6 +1595,270 @@
           }
         ]
       }
+    },
+    "/api/recordings": {
+      "get": {
+        "tags": [
+          "recordings"
+        ],
+        "summary": "List recordings, newest first",
+        "operationId": "listRecordings",
+        "parameters": [
+          {
+            "name": "broadcastId",
+            "in": "query",
+            "description": "Only this broadcast's recordings.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Only recordings older than this id: the previous page's `nextBefore`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 50. Defaults to 20.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 50,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The same for every viewer. Recordings of deleted broadcasts are left out.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`public, max-age=5`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_QUERY` or `INVALID_PAGE_SIZE`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/recordings/{id}": {
+      "get": {
+        "tags": [
+          "recordings"
+        ],
+        "summary": "Get one recording",
+        "operationId": "getRecording",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Recording id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The recording.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`public, max-age=5`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Recording"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`RECORDING_NOT_FOUND`, also when its broadcast was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/recordings/{id}/file": {
+      "get": {
+        "tags": [
+          "recordings"
+        ],
+        "summary": "The recording itself, through a URL from getReplay",
+        "description": "Served only when recordings are kept on the API host; otherwise getReplay points at the CDN. Exempt from the 10-second request limit.",
+        "operationId": "getRecordingFile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Recording id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expires",
+            "in": "query",
+            "description": "Unix seconds, from the replay URL.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "signature",
+            "in": "query",
+            "description": "From the replay URL.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The whole file.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`private, no-store`"
+              }
+            },
+            "content": {
+              "video/mp4": {}
+            }
+          },
+          "206": {
+            "description": "The requested `Range`.",
+            "content": {
+              "video/mp4": {}
+            }
+          },
+          "403": {
+            "description": "`INVALID_SIGNATURE`: the URL was altered or has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`RECORDING_NOT_FOUND`, also when its broadcast was deleted after the URL was issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/recordings/{id}/replay": {
+      "get": {
+        "tags": [
+          "recordings"
+        ],
+        "summary": "A short-lived URL to watch a ready recording",
+        "operationId": "getReplay",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Recording id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A URL signed for this request.",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`no-store`"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Replay"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`RECORDING_NOT_FOUND`, also when its broadcast was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`RECORDING_NOT_READY`: pending or failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1979,6 +2243,107 @@
           }
         }
       },
+      "Recording": {
+        "type": "object",
+        "description": "One recorded segment of a broadcast. A broadcast may have several: one\nper publisher connection, and one per 30 minutes of a long one.",
+        "required": [
+          "id",
+          "broadcastId",
+          "broadcastTitle",
+          "ownerName",
+          "status",
+          "durationMs",
+          "sizeBytes",
+          "recordedAt"
+        ],
+        "properties": {
+          "broadcastId": {
+            "type": "string",
+            "example": "112007303372210176"
+          },
+          "broadcastTitle": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "example": "112007303372210177"
+          },
+          "ownerName": {
+            "type": "string"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the segment finished."
+          },
+          "sizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Known once `READY`.",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecordingStatus"
+          }
+        }
+      },
+      "RecordingPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "nextBefore"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recording"
+            }
+          },
+          "nextBefore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `before` for the next page; `null` on the last page."
+          }
+        }
+      },
+      "RecordingStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "READY",
+          "FAILED"
+        ]
+      },
+      "Replay": {
+        "type": "object",
+        "required": [
+          "url",
+          "expiresAt"
+        ],
+        "properties": {
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When `url` stops working: five minutes from now, whatever the\nrecording's length."
+          },
+          "url": {
+            "type": "string",
+            "description": "An MP4 to play in a `<video>` element. It supports range requests,\nso seeking works. Ask again for a new one when playback fails.",
+            "example": "/api/recordings/112007303372210177/file?expires=1794200000&signature=..."
+          }
+        }
+      },
       "User": {
         "type": "object",
         "required": [
@@ -2018,6 +2383,10 @@
     {
       "name": "comments",
       "description": "Comments on a broadcast, its chat policy and its live event stream"
+    },
+    {
+      "name": "recordings",
+      "description": "Recorded segments of broadcasts and their replay"
     }
   ]
 }

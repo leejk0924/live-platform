@@ -86,6 +86,8 @@ const MESSAGES: Record<string, string> = {
   COMMENT_NOT_FOUND: '댓글을 찾을 수 없습니다. 이미 삭제되었을 수 있습니다.',
   NOT_COMMENT_AUTHOR: '댓글을 쓴 사람만 바꿀 수 있습니다.',
   COMMENTS_CLOSED: '종료된 방송은 댓글을 쓸 수 없습니다.',
+  RECORDING_NOT_FOUND: '녹화를 찾을 수 없습니다.',
+  RECORDING_NOT_READY: '녹화를 아직 저장하는 중이거나 저장하지 못했습니다.',
   INVALID_SLOW_MODE: '슬로우 모드는 0~300초여야 합니다.',
   TOO_MANY_STREAMS: '열린 방송 창이 너무 많습니다. 다른 창을 닫고 다시 시도하세요.',
   REQUEST_TIMEOUT: '요청 시간이 초과되었습니다. 잠시 후 다시 시도하세요.',

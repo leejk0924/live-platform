@@ -8,3 +8,4 @@ pub mod media;
 pub mod playback;
 pub mod ports;
 pub mod reaper;
+pub mod recording;

@@ -3,6 +3,10 @@ services:
     environment:
       SITE_ADDRESS: ${DOMAIN:?set DOMAIN in .env}
       HSTS_MAX_AGE: "31536000"
+      # The CloudFront origin replays come from when recordings live in S3; empty keeps them same-origin.
+      # Exactly one origin like https://d111111abcdef8.cloudfront.net: no path, spaces or `;`.
+      # Caddy pastes it into the CSP header as is, so anything else would add or break directives.
+      RECORDING_MEDIA_ORIGIN: ${RECORDING_MEDIA_ORIGIN:-}
 
   api:
     environment:
