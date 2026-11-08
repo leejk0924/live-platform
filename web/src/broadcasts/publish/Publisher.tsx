@@ -52,6 +52,15 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
 
   useEffect(() => release, [])
 
+  // A reconnect makes the broadcast LIVE again only once the media server reports the stream,
+  // a moment after the connection opens, so look again until that has happened.
+  const resuming = phase.kind === 'publishing' && broadcast.status === 'INTERRUPTED'
+  useEffect(() => {
+    if (!resuming) return
+    const timer = window.setTimeout(onChanged, 1000)
+    return () => window.clearTimeout(timer)
+  }, [resuming, broadcast, onChanged])
+
   async function stop() {
     setPhase({ kind: 'stopping' })
     setError(null)
@@ -106,7 +115,7 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
         if (session.current?.publication !== publication) return
         release()
         setNotice(null)
-        setError('송출 서버와의 연결이 끊겼습니다. 다른 곳에서 이미 송출 중이거나 네트워크가 끊겼을 수 있습니다.')
+        setError('송출 서버와의 연결이 끊겼습니다. 다른 곳에서 이미 송출 중이거나 네트워크가 끊겼을 수 있습니다. 30초 안에 다시 시작하면 방송이 이어집니다.')
         setPhase({ kind: 'idle' })
         onChanged()
       })
@@ -120,8 +129,10 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
 
   const busy = phase.kind !== 'idle' && phase.kind !== 'publishing'
   const publishing = phase.kind === 'publishing'
-  const canStart = supported && !publishing && (broadcast.status === 'READY' || broadcast.status === 'LIVE')
-  const canStop = publishing || broadcast.status === 'LIVE'
+  const onAir = broadcast.status === 'LIVE' || broadcast.status === 'INTERRUPTED'
+  const canStart = supported && !publishing && (broadcast.status === 'READY' || onAir)
+  const canStop = publishing || onAir
+  const interrupted = broadcast.status === 'INTERRUPTED' && phase.kind === 'idle'
 
   return (
     <section className="stack publisher" aria-label="송출">
@@ -144,6 +155,7 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
         {phase.kind === 'publishing' && `송출 중${phase.stats ? ` · ${formatStats(phase.stats)}` : ''}`}
         {phase.kind === 'stopping' && '방송을 종료하는 중…'}
       </p>
+      {interrupted && <p className="notice">연결 끊김, 30초 안에 다시 시작하면 이어집니다.</p>}
       {notice && <p className="notice">{notice}</p>}
       {error && (
         <p className="error" role="alert">
