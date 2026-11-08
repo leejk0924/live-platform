@@ -94,3 +94,7 @@ PC는 Windows의 Chrome 156.0.8078.8, 휴대폰은 iPhone 15 Pro(iOS 26.6.2) Saf
 ## Follow-up (2026-11-09, #8 시청)
 
 `PlaybackResolver`를 `MediaMtxPlaybackResolver`로 만들었다. 프론트 `Player`는 이 ADR의 결정대로 내장 HLS를 쓰지 않고 hls.js로 LL-HLS를 재생하며, iOS는 WHEP로 본다. 결정과 이유는 [media/8-playback-player](8-playback-player.md).
+
+## Follow-up (2026-11-09, #12 녹화)
+
+녹화는 MediaMTX fMP4 세그먼트를 API가 `RecordingStorage`(로컬·S3)로 옮기고, 다시보기는 5분짜리 서명 URL로 일반 `<video>`에서 재생한다. CloudFront 서명은 RSA가 아니라 ECDSA P-256이다. 결정과 이유는 [recording/12-recording-replay](../recording/12-recording-replay.md).
