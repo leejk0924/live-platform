@@ -8,7 +8,8 @@ ALTER TABLE broadcasts ADD CONSTRAINT broadcasts_interrupted_at_check
     CHECK ((status = 'INTERRUPTED') = (interrupted_at IS NOT NULL));
 
 -- Before the index below, an owner could hold several live broadcasts. Keep
--- the newest one on air and end the rest, so the index can be built.
+-- the newest one on air and end the rest, so the index can be built. The
+-- reaper disconnects any publisher still sending to one of those.
 UPDATE broadcasts b
 SET status = 'ENDED', ended_at = now(), interrupted_at = NULL,
     version = version + 1, updated_at = now()
