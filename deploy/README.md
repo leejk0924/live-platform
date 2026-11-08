@@ -21,6 +21,7 @@
 | `deploy/caddy/Caddyfile` | 라우팅, 보안 헤더 |
 | `deploy/mediamtx/mediamtx.yml` | 미디어 서버 설정 |
 | `deploy/deploy.sh` | `up --build --wait` 후 `/api/healthz` 확인 |
+| `deploy/check-hardening.sh` | 보안 헤더, slowloris 차단(10초), 컨테이너 non-root·read-only rootfs 확인. `local` 또는 `prod` |
 
 ## 2. 로컬 실행
 
