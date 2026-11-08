@@ -40,8 +40,9 @@ impl IngestRouter for MediaMtxIngestRouter {
 pub struct MediaMtxPlaybackResolver;
 
 impl PlaybackResolver for MediaMtxPlaybackResolver {
-    /// LL-HLS first: it is plain HTTP, so it plays wherever the page loads,
-    /// while WHEP needs a WebRTC connection to the media port.
+    /// LL-HLS first, so it is the default: only LL-HLS scales through a CDN,
+    /// while every WHEP viewer holds a WebRTC session on the media server
+    /// (ADR media/1).
     fn resolve(&self, path: &StreamPath) -> Vec<PlaybackSource> {
         let path = path.as_str();
         vec![
