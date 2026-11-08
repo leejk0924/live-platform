@@ -182,3 +182,17 @@ async fn no_miss_is_reported_until_listening_again(pool: PgPool) {
     assert_eq!(received(&mut subscription).await, event);
     listener.shutdown().await;
 }
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn subscriptions_end_when_the_listener_stops(pool: PgPool) {
+    let (bus, listener) = PgEventBus::start(pool).await.unwrap();
+    let mut open = bus.subscribe(id(1));
+    listener.shutdown().await;
+
+    let mut late = bus.subscribe(id(1));
+    for subscription in [&mut open, &mut late] {
+        let ended = tokio::time::timeout(Duration::from_secs(1), subscription.next()).await;
+        assert!(matches!(ended, Ok(None)), "got {ended:?}");
+    }
+}

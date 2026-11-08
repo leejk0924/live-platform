@@ -44,15 +44,24 @@ struct Topic {
 
 /// Fans each broadcast's events out to its subscriptions in this process.
 /// A broadcast's entry exists only while it has a subscription.
-#[derive(Default)]
 pub struct EventHub {
-    topics: Mutex<HashMap<BroadcastId, Topic>>,
+    /// `None` once closed: every subscription has ended and new ones end at
+    /// once.
+    topics: Mutex<Option<HashMap<BroadcastId, Topic>>>,
+}
+
+impl Default for EventHub {
+    fn default() -> Self {
+        Self {
+            topics: Mutex::new(Some(HashMap::new())),
+        }
+    }
 }
 
 impl EventHub {
     pub fn deliver(&self, event: RealtimeEvent) {
         let topics = self.topics.lock().expect("hub lock");
-        if let Some(topic) = topics.get(&event.broadcast) {
+        if let Some(topic) = topics.as_ref().and_then(|t| t.get(&event.broadcast)) {
             // An error only means every receiver has just gone.
             let _ = topic.sender.send(Delivery::Event(Arc::new(event)));
         }
@@ -61,26 +70,42 @@ impl EventHub {
     /// Tells every subscription it may have missed events.
     pub fn miss_all(&self) {
         let topics = self.topics.lock().expect("hub lock");
-        for topic in topics.values() {
+        for topic in topics.iter().flat_map(HashMap::values) {
             let _ = topic.sender.send(Delivery::Missed);
         }
     }
 
+    /// Ends every subscription, and every one taken from now on as it
+    /// starts: nothing will be delivered any more.
+    pub fn close(&self) {
+        self.topics.lock().expect("hub lock").take();
+    }
+
     pub fn subscribe(self: &Arc<Self>, broadcast: BroadcastId) -> Box<dyn EventSubscription> {
         let mut topics = self.topics.lock().expect("hub lock");
-        let topic = topics.entry(broadcast).or_insert_with(|| Topic {
-            sender: broadcast::channel(SUBSCRIPTION_BUFFER).0,
+        let receiver = topics.as_mut().map(|topics| {
+            topics
+                .entry(broadcast)
+                .or_insert_with(|| Topic {
+                    sender: broadcast::channel(SUBSCRIPTION_BUFFER).0,
+                })
+                .sender
+                .subscribe()
         });
         Box::new(HubSubscription {
             hub: Arc::clone(self),
             broadcast,
-            receiver: Some(topic.sender.subscribe()),
+            receiver,
         })
     }
 
     /// How many broadcasts have a subscription.
     pub fn topic_count(&self) -> usize {
-        self.topics.lock().expect("hub lock").len()
+        self.topics
+            .lock()
+            .expect("hub lock")
+            .as_ref()
+            .map_or(0, HashMap::len)
     }
 }
 
@@ -106,6 +131,9 @@ impl Drop for HubSubscription {
     fn drop(&mut self) {
         let mut topics = self.hub.topics.lock().expect("hub lock");
         drop(self.receiver.take());
+        let Some(topics) = topics.as_mut() else {
+            return;
+        };
         if topics
             .get(&self.broadcast)
             .is_some_and(|topic| topic.sender.receiver_count() == 0)
@@ -147,7 +175,7 @@ pub struct PgEventBus {
 }
 
 /// Stops the listener of a [`PgEventBus`]. Dropping it stops the listener
-/// too; so does closing the pool.
+/// too; so does closing the pool. Either way every subscription ends.
 pub struct EventListenerHandle {
     stop: oneshot::Sender<()>,
     task: JoinHandle<()>,
@@ -155,7 +183,7 @@ pub struct EventListenerHandle {
 
 impl EventListenerHandle {
     /// Stops listening and gives the connection back to the pool. Open
-    /// subscriptions then receive nothing more.
+    /// subscriptions then end, as do ones taken later.
     pub async fn shutdown(self) {
         let _ = self.stop.send(());
         if let Err(err) = self.task.await {
@@ -173,7 +201,13 @@ impl PgEventBus {
         listener.listen(CHANNEL).await?;
         let hub = Arc::new(EventHub::default());
         let (stop, stopped) = oneshot::channel();
-        let task = tokio::spawn(listen(pool.clone(), listener, Arc::clone(&hub), stopped));
+        let task = tokio::spawn({
+            let (pool, hub) = (pool.clone(), Arc::clone(&hub));
+            async move {
+                listen(pool, listener, &hub, stopped).await;
+                hub.close();
+            }
+        });
         Ok((
             Arc::new(Self { pool, hub }),
             EventListenerHandle { stop, task },
@@ -188,7 +222,7 @@ impl PgEventBus {
 async fn listen(
     pool: PgPool,
     mut listener: PgListener,
-    hub: Arc<EventHub>,
+    hub: &EventHub,
     mut stopped: oneshot::Receiver<()>,
 ) {
     loop {
