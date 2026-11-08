@@ -15,7 +15,7 @@ use domain::{
     id::SnowflakeId,
 };
 use infrastructure::realtime::PgEventBus;
-use sqlx::PgPool;
+use sqlx::{AssertSqlSafe, Connection, PgConnection, PgPool, postgres::PgPoolOptions};
 
 fn id(raw: i64) -> SnowflakeId {
     SnowflakeId::try_from(raw).unwrap()
@@ -94,12 +94,7 @@ async fn the_largest_comments_fit_a_notification(pool: PgPool) {
     listener.shutdown().await;
 }
 
-#[sqlx::test(migrations = "./migrations")]
-#[ignore = "requires DATABASE_URL (Postgres)"]
-async fn a_lost_listener_connection_is_a_miss_and_delivery_resumes(pool: PgPool) {
-    let (bus, listener) = PgEventBus::start(pool.clone()).await.unwrap();
-    let mut subscription = bus.subscribe(id(1));
-
+async fn terminate_listener(pool: &PgPool) {
     let terminated: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM ( \
              SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
@@ -107,26 +102,83 @@ async fn a_lost_listener_connection_is_a_miss_and_delivery_resumes(pool: PgPool)
                AND query ILIKE 'LISTEN%' \
          ) t",
     )
-    .fetch_one(&pool)
+    .fetch_one(pool)
     .await
     .unwrap();
     assert_eq!(terminated, 1, "the listener's connection");
+}
 
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_lost_listener_connection_is_a_miss_and_the_next_event_is_heard(pool: PgPool) {
+    let (bus, listener) = PgEventBus::start(pool.clone()).await.unwrap();
+    let mut subscription = bus.subscribe(id(1));
+
+    terminate_listener(&pool).await;
     assert!(matches!(next(&mut subscription).await, Delivery::Missed));
     let event = comment(1, 5, "again");
-    // The listener may still be reconnecting; publish until it hears.
-    let heard = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            bus.publish(event.clone()).await;
-            match tokio::time::timeout(Duration::from_millis(500), subscription.next()).await {
-                Ok(Some(Delivery::Event(heard))) => return (*heard).clone(),
-                Ok(Some(Delivery::Missed)) | Err(_) => continue,
-                Ok(None) => panic!("bus closed"),
-            }
-        }
-    })
-    .await
-    .expect("delivery resumes");
-    assert_eq!(heard, event);
+    bus.publish(event.clone()).await;
+    assert_eq!(received(&mut subscription).await, event);
+    listener.shutdown().await;
+}
+
+/// A connection to another database that lets new connections into the
+/// test database or turns them away; open ones stay.
+struct Gate {
+    admin: PgConnection,
+    database: String,
+}
+
+impl Gate {
+    async fn of(pool: &PgPool) -> Self {
+        let database = sqlx::query_scalar("SELECT current_database()")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        let options = pool.connect_options().as_ref().clone().database("postgres");
+        let admin = PgConnection::connect_with(&options).await.unwrap();
+        Self { admin, database }
+    }
+
+    async fn allow(&mut self, allow: bool) {
+        let statement: String = sqlx::query_scalar(
+            "SELECT format('ALTER DATABASE %I ALLOW_CONNECTIONS %s', $1, $2::BOOLEAN::TEXT)",
+        )
+        .bind(&self.database)
+        .bind(allow)
+        .fetch_one(&mut self.admin)
+        .await
+        .unwrap();
+        sqlx::raw_sql(AssertSqlSafe(statement))
+            .execute(&mut self.admin)
+            .await
+            .unwrap();
+    }
+}
+
+/// Reporting a miss before listening again would leave a window in which
+/// an event is neither heard nor yet in the store when the follower reads.
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn no_miss_is_reported_until_listening_again(pool: PgPool) {
+    // Nothing idle in it: listening again takes a new connection.
+    let lazy = PgPoolOptions::new().connect_lazy_with(pool.connect_options().as_ref().clone());
+    let (bus, listener) = PgEventBus::start(lazy).await.unwrap();
+    let mut subscription = bus.subscribe(id(1));
+
+    let mut gate = Gate::of(&pool).await;
+    gate.allow(false).await;
+    terminate_listener(&pool).await;
+    let early = tokio::time::timeout(Duration::from_secs(2), subscription.next()).await;
+    gate.allow(true).await;
+    assert!(
+        early.is_err(),
+        "nothing while the listener cannot connect, got {early:?}"
+    );
+
+    assert!(matches!(next(&mut subscription).await, Delivery::Missed));
+    let event = comment(1, 6, "heard");
+    bus.publish(event.clone()).await;
+    assert_eq!(received(&mut subscription).await, event);
     listener.shutdown().await;
 }

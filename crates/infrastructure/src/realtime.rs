@@ -34,7 +34,7 @@ pub const CHANNEL: &str = "broadcast_events";
 /// it missed some.
 const SUBSCRIPTION_BUFFER: usize = 1024;
 
-/// How long the listener waits before reconnecting after the database
+/// How long the listener waits before trying again after the database
 /// refused it.
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
@@ -173,7 +173,7 @@ impl PgEventBus {
         listener.listen(CHANNEL).await?;
         let hub = Arc::new(EventHub::default());
         let (stop, stopped) = oneshot::channel();
-        let task = tokio::spawn(listen(listener, Arc::clone(&hub), stopped));
+        let task = tokio::spawn(listen(pool.clone(), listener, Arc::clone(&hub), stopped));
         Ok((
             Arc::new(Self { pool, hub }),
             EventListenerHandle { stop, task },
@@ -185,7 +185,12 @@ impl PgEventBus {
     }
 }
 
-async fn listen(mut listener: PgListener, hub: Arc<EventHub>, mut stopped: oneshot::Receiver<()>) {
+async fn listen(
+    pool: PgPool,
+    mut listener: PgListener,
+    hub: Arc<EventHub>,
+    mut stopped: oneshot::Receiver<()>,
+) {
     loop {
         let received = tokio::select! {
             biased;
@@ -197,21 +202,50 @@ async fn listen(mut listener: PgListener, hub: Arc<EventHub>, mut stopped: onesh
                 Ok(event) => hub.deliver(event),
                 Err(err) => tracing::warn!(%err, "undecodable broadcast event dropped"),
             },
-            Ok(None) => {
-                tracing::warn!("event listener reconnected; followers catch up");
-                hub.miss_all();
-            }
             // The pool waits for the listener's connection before it can
             // close, so give it back.
             Err(sqlx::Error::PoolClosed) => return,
-            Err(err) => {
-                tracing::warn!(%err, "event listener lost the database; retrying");
-                hub.miss_all();
-                tokio::select! {
-                    _ = &mut stopped => return,
-                    () = tokio::time::sleep(RECONNECT_DELAY) => {}
+            lost => {
+                if let Err(err) = lost {
+                    tracing::warn!(%err, "event listener lost the database");
                 }
+                // Dropped first: a dead connection may linger in it.
+                drop(listener);
+                let Some(again) = listen_again(&pool, &mut stopped).await else {
+                    return;
+                };
+                listener = again;
+                // Only now: an event published before LISTEN took effect
+                // is in the store by the time a follower catches up.
+                tracing::warn!("event listener reconnected; followers catch up");
+                hub.miss_all();
             }
+        }
+    }
+}
+
+/// A fresh connection listening on [`CHANNEL`], retried every
+/// [`RECONNECT_DELAY`]; `None` once stopped or the pool closes.
+async fn listen_again(pool: &PgPool, stopped: &mut oneshot::Receiver<()>) -> Option<PgListener> {
+    loop {
+        let attempt = async {
+            let mut listener = PgListener::connect_with(pool).await?;
+            listener.listen(CHANNEL).await?;
+            Ok::<_, sqlx::Error>(listener)
+        };
+        let result = tokio::select! {
+            biased;
+            _ = &mut *stopped => return None,
+            result = attempt => result,
+        };
+        match result {
+            Ok(listener) => return Some(listener),
+            Err(sqlx::Error::PoolClosed) => return None,
+            Err(err) => tracing::warn!(%err, "event listener cannot listen again; retrying"),
+        }
+        tokio::select! {
+            _ = &mut *stopped => return None,
+            () = tokio::time::sleep(RECONNECT_DELAY) => {}
         }
     }
 }
