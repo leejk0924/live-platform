@@ -12,7 +12,7 @@
 - 모든 작업은 GitHub 이슈에서 시작한다. 이슈 없는 작업은 하지 않는다.
 - 이슈 하나에 PR 여러 개가 붙을 수 있다. PR 하나는 한 가지 목적만 담는다.
 - `main`에 직접 커밋하거나 push하지 않는다.
-- Claude Code로 작업할 때는 `/issue-cycle <이슈 번호>` 한 번으로 구현 → 리뷰 → 리뷰 처리(수용/거부) → ADR → draft PR까지 진행한다. 절차는 [`.claude/skills/issue-cycle/SKILL.md`](../.claude/skills/issue-cycle/SKILL.md). 머지는 사람이 요청할 때만 하고, `확인 필요` 행을 사람이 다시 확인한 뒤에 한다. 이 프로젝트 전용이며 Claude Code에 pstack과 jk(0.4.0 이상) 플러그인이 설치되어 있어야 한다. 구현과 리뷰 수정은 `pstack:poteto-agent` 서브에이전트가 하고, 메인 대화가 diff를 검토하고 검증을 다시 돌린다.
+- Claude Code로 작업할 때는 `/issue-cycle <이슈 번호> [끝나는 조건]` 한 번으로 정한 단계까지 묻지 않고 진행한다. 끝나는 조건은 `구현까지`, `리뷰까지`, `PR까지`, `머지까지`이고, 생략하면 `PR까지`(구현 → 리뷰 → 리뷰 처리(수용/거부) → ADR → draft PR)다. 절차는 [`.claude/skills/issue-cycle/SKILL.md`](../.claude/skills/issue-cycle/SKILL.md). 머지는 `머지까지`를 주거나 사람이 요청할 때만 하고, `확인 필요` 행이 있으면 머지 전에 멈춰 사람이 다시 확인한 뒤에 한다. 이 프로젝트 전용이며 Claude Code에 pstack과 jk(0.4.0 이상) 플러그인이 설치되어 있어야 한다. 구현과 리뷰 수정은 `pstack:poteto-agent` 서브에이전트가 하고, 메인 대화가 diff를 검토하고 검증을 다시 돌린다.
 
 ## 2. 이슈
 
