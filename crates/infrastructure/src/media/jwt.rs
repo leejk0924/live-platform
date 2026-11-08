@@ -18,6 +18,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use zeroize::Zeroizing;
 
 /// Must equal `authJWTIssuer` in `deploy/mediamtx/mediamtx.yml`.
 pub const ISSUER: &str = "live-platform";
@@ -55,21 +56,19 @@ impl PublishKey {
     /// `raw` is a 32-byte Ed25519 seed in standard base64, as printed by
     /// `openssl rand -base64 32`.
     pub fn from_base64_seed(raw: &Secret<String>) -> Result<Self, InvalidPublishKey> {
-        let mut seed = [0u8; 32];
+        let mut seed = Zeroizing::new([0u8; 32]);
         let decoded =
-            Base64::decode(raw.expose().trim(), &mut seed).map_err(|_| InvalidPublishKey)?;
+            Base64::decode(raw.expose().trim(), seed.as_mut()).map_err(|_| InvalidPublishKey)?;
         if decoded.len() != seed.len() {
             return Err(InvalidPublishKey);
         }
-        let key = Self::from_seed(&seed);
-        seed.fill(0);
-        Ok(key)
+        Ok(Self::from_seed(&seed))
     }
 
     /// A fresh random key, for tests.
     pub fn generate() -> Self {
-        let mut seed = [0u8; 32];
-        getrandom::fill(&mut seed).expect("os rng is available");
+        let mut seed = Zeroizing::new([0u8; 32]);
+        getrandom::fill(seed.as_mut()).expect("os rng is available");
         Self::from_seed(&seed)
     }
 
