@@ -318,11 +318,16 @@ impl RecordingRepository for Unavailable {
         unavailable()
     }
 
-    async fn mark_stored(&self, _: RecordingId, _: u64) -> Result<bool, PortError> {
+    async fn mark_stored(&self, _: RecordingId, _: u32, _: u64) -> Result<bool, PortError> {
         unavailable()
     }
 
-    async fn release_failed(&self, _: RecordingId, _: StoreRetry) -> Result<bool, PortError> {
+    async fn release_failed(
+        &self,
+        _: RecordingId,
+        _: u32,
+        _: StoreRetry,
+    ) -> Result<bool, PortError> {
         unavailable()
     }
 }

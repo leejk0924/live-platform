@@ -1,7 +1,7 @@
 //! The recording adapters against Postgres: registering is idempotent per
 //! segment, claims never hand one recording to two storers, every status
-//! change applies only to a pending recording, and a deleted broadcast's
-//! recordings cannot be read.
+//! change applies only to a pending recording under its latest claim, and a
+//! deleted broadcast's recordings cannot be read.
 
 use std::time::Duration;
 
@@ -19,6 +19,8 @@ const OWNER: i64 = 1;
 const BROADCAST: i64 = 10;
 const OTHER_BROADCAST: i64 = 11;
 const LEASE: Duration = Duration::from_secs(600);
+/// The attempt count of a recording no storer has claimed yet.
+const UNCLAIMED: u32 = 0;
 
 fn id(raw: i64) -> SnowflakeId {
     SnowflakeId::try_from(raw).unwrap()
@@ -180,20 +182,23 @@ async fn only_a_pending_recording_is_marked_stored(pool: PgPool) {
     repo.register(&segment(100, BROADCAST)).await.unwrap();
     repo.register(&segment(101, BROADCAST)).await.unwrap();
     assert!(
-        repo.release_failed(id(101), StoreRetry::GiveUp)
+        repo.release_failed(id(101), UNCLAIMED, StoreRetry::GiveUp)
             .await
             .unwrap()
     );
 
-    assert!(repo.mark_stored(id(100), 1_234).await.unwrap());
+    assert!(repo.mark_stored(id(100), UNCLAIMED, 1_234).await.unwrap());
     assert!(
-        !repo.mark_stored(id(100), 9).await.unwrap(),
+        !repo.mark_stored(id(100), UNCLAIMED, 9).await.unwrap(),
         "already ready"
     );
-    assert!(!repo.mark_stored(id(101), 9).await.unwrap(), "failed");
+    assert!(
+        !repo.mark_stored(id(101), UNCLAIMED, 9).await.unwrap(),
+        "failed"
+    );
     assert!(
         !repo
-            .release_failed(id(100), StoreRetry::GiveUp)
+            .release_failed(id(100), UNCLAIMED, StoreRetry::GiveUp)
             .await
             .unwrap(),
         "a ready recording stays ready"
@@ -204,6 +209,34 @@ async fn only_a_pending_recording_is_marked_stored(pool: PgPool) {
         ("READY".into(), Some(1_234), 0)
     );
     assert_eq!(status_of(&pool, 101).await, ("FAILED".into(), None, 0));
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_stale_storer_cannot_touch_a_newer_claim(pool: PgPool) {
+    seed(&pool).await;
+    let repo = PgRecordingRepository::new(pool.clone());
+    repo.register(&segment(100, BROADCAST)).await.unwrap();
+
+    let stale = repo.claim(Duration::ZERO).await.unwrap().unwrap();
+    let current = repo.claim(LEASE).await.unwrap().expect("the lease ran out");
+    assert!(
+        !repo
+            .release_failed(stale.id, stale.attempts, StoreRetry::GiveUp)
+            .await
+            .unwrap(),
+        "the stale storer's failure"
+    );
+    assert!(
+        repo.mark_stored(current.id, current.attempts, 1_234)
+            .await
+            .unwrap()
+    );
+
+    assert_eq!(
+        status_of(&pool, 100).await,
+        ("READY".into(), Some(1_234), 2)
+    );
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -221,7 +254,11 @@ async fn a_recording_fails_after_the_last_attempt(pool: PgPool) {
             StoreRetry::After(_) => StoreRetry::After(Duration::ZERO),
             give_up => give_up,
         };
-        assert!(repo.release_failed(claimed.id, retry).await.unwrap());
+        assert!(
+            repo.release_failed(claimed.id, claimed.attempts, retry)
+                .await
+                .unwrap()
+        );
     }
 
     assert_eq!(
@@ -240,7 +277,11 @@ async fn a_failed_attempt_waits_out_its_backoff(pool: PgPool) {
 
     let claimed = repo.claim(LEASE).await.unwrap().unwrap();
     let wait = StoreRetry::after_attempt(claimed.attempts);
-    assert!(repo.release_failed(claimed.id, wait).await.unwrap());
+    assert!(
+        repo.release_failed(claimed.id, claimed.attempts, wait)
+            .await
+            .unwrap()
+    );
 
     assert!(repo.claim(LEASE).await.unwrap().is_none());
     let waits: f64 = sqlx::query_scalar(
@@ -261,7 +302,7 @@ async fn recordings_of_a_deleted_broadcast_cannot_be_read(pool: PgPool) {
     for (recording, broadcast) in [(100, BROADCAST), (101, OTHER_BROADCAST), (102, BROADCAST)] {
         repo.register(&segment(recording, broadcast)).await.unwrap();
     }
-    repo.mark_stored(id(102), 77).await.unwrap();
+    repo.mark_stored(id(102), UNCLAIMED, 77).await.unwrap();
 
     let ids = |views: Vec<application::ports::recording::RecordingView>| {
         views.into_iter().map(|v| v.id.as_i64()).collect::<Vec<_>>()

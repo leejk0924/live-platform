@@ -151,7 +151,11 @@ impl StoreRecordings {
         let recording = claimed.id;
         let error = match self.storage.put(&claimed.source, &claimed.key).await {
             Ok(size_bytes) => {
-                if !self.recordings.mark_stored(recording, size_bytes).await? {
+                if !self
+                    .recordings
+                    .mark_stored(recording, claimed.attempts, size_bytes)
+                    .await?
+                {
                     return Ok(Some(StoreOutcome::Superseded(recording)));
                 }
                 return Ok(Some(StoreOutcome::Stored {
@@ -163,7 +167,9 @@ impl StoreRecordings {
             Err(error) => error,
         };
         let retry = StoreRetry::after_attempt(claimed.attempts);
-        self.recordings.release_failed(recording, retry).await?;
+        self.recordings
+            .release_failed(recording, claimed.attempts, retry)
+            .await?;
         Ok(Some(match retry {
             StoreRetry::After(after) => StoreOutcome::Retrying {
                 recording,
@@ -329,8 +335,8 @@ mod tests {
         accepts: bool,
         claimable: Option<ClaimedRecording>,
         still_pending: bool,
-        stored: Mutex<Vec<(RecordingId, u64)>>,
-        released: Mutex<Vec<(RecordingId, StoreRetry)>>,
+        stored: Mutex<Vec<(RecordingId, u32, u64)>>,
+        released: Mutex<Vec<(RecordingId, u32, StoreRetry)>>,
         inserted: Mutex<Vec<NewRecording>>,
     }
 
@@ -346,17 +352,23 @@ mod tests {
             Ok(self.claimable.clone())
         }
 
-        async fn mark_stored(&self, id: RecordingId, size: u64) -> Result<bool, PortError> {
-            self.stored.lock().unwrap().push((id, size));
+        async fn mark_stored(
+            &self,
+            id: RecordingId,
+            attempts: u32,
+            size: u64,
+        ) -> Result<bool, PortError> {
+            self.stored.lock().unwrap().push((id, attempts, size));
             Ok(self.still_pending)
         }
 
         async fn release_failed(
             &self,
             id: RecordingId,
+            attempts: u32,
             retry: StoreRetry,
         ) -> Result<bool, PortError> {
-            self.released.lock().unwrap().push((id, retry));
+            self.released.lock().unwrap().push((id, attempts, retry));
             Ok(true)
         }
     }
@@ -517,7 +529,10 @@ mod tests {
                 discard: Ok(()),
             })
         );
-        assert_eq!(*recordings.stored.lock().unwrap(), [(id(RECORDING), 4_096)]);
+        assert_eq!(
+            *recordings.stored.lock().unwrap(),
+            [(id(RECORDING), 1, 4_096)]
+        );
         assert_eq!(*spool.discarded.lock().unwrap(), [claimed(1).source]);
         assert!(recordings.released.lock().unwrap().is_empty());
     }
@@ -591,7 +606,7 @@ mod tests {
             assert_eq!(outcome, Some(expected), "attempt {attempts}");
             assert_eq!(
                 *recordings.released.lock().unwrap(),
-                [(id(RECORDING), retry)]
+                [(id(RECORDING), attempts, retry)]
             );
             assert!(recordings.stored.lock().unwrap().is_empty());
             assert!(spool.discarded.lock().unwrap().is_empty());
