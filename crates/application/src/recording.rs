@@ -117,9 +117,9 @@ pub enum StoreOutcome {
         /// retention deletes it later.
         discard: Result<(), PortError>,
     },
-    /// Stored, but the recording was no longer pending, so another storer
-    /// whose lease had run out finished it first. The spool copy is left
-    /// alone.
+    /// The outcome was not recorded because this claim no longer holds the
+    /// recording: its lease ran out and a newer claim took over or finished
+    /// it. The spool copy is left alone.
     Superseded(RecordingId),
     Retrying {
         recording: RecordingId,
@@ -167,9 +167,19 @@ impl StoreRecordings {
             Err(error) => error,
         };
         let retry = StoreRetry::after_attempt(claimed.attempts);
-        self.recordings
+        match self
+            .recordings
             .release_failed(recording, claimed.attempts, retry)
-            .await?;
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => return Ok(Some(StoreOutcome::Superseded(recording))),
+            Err(release) => {
+                return Err(PortError(format!(
+                    "{release}, after storing failed: {error}"
+                )));
+            }
+        }
         Ok(Some(match retry {
             StoreRetry::After(after) => StoreOutcome::Retrying {
                 recording,
@@ -335,6 +345,9 @@ mod tests {
         accepts: bool,
         claimable: Option<ClaimedRecording>,
         still_pending: bool,
+        /// `release_failed` answers that a newer claim holds the recording.
+        release_superseded: bool,
+        release_error: Option<PortError>,
         stored: Mutex<Vec<(RecordingId, u32, u64)>>,
         released: Mutex<Vec<(RecordingId, u32, StoreRetry)>>,
         inserted: Mutex<Vec<NewRecording>>,
@@ -369,7 +382,10 @@ mod tests {
             retry: StoreRetry,
         ) -> Result<bool, PortError> {
             self.released.lock().unwrap().push((id, attempts, retry));
-            Ok(true)
+            match &self.release_error {
+                Some(error) => Err(error.clone()),
+                None => Ok(!self.release_superseded),
+            }
         }
     }
 
@@ -611,6 +627,41 @@ mod tests {
             assert!(recordings.stored.lock().unwrap().is_empty());
             assert!(spool.discarded.lock().unwrap().is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn a_failure_after_a_newer_claim_took_over_is_superseded() {
+        let recordings = Arc::new(Recordings {
+            claimable: Some(claimed(1)),
+            release_superseded: true,
+            ..Recordings::default()
+        });
+        let outcome = store(
+            recordings,
+            Arc::new(Spool::default()),
+            Err(PortError("storage unreachable".into())),
+        )
+        .await;
+        assert_eq!(outcome, Some(StoreOutcome::Superseded(id(RECORDING))));
+    }
+
+    #[tokio::test]
+    async fn a_failed_release_reports_the_storage_error_too() {
+        let recordings = Arc::new(Recordings {
+            claimable: Some(claimed(1)),
+            release_error: Some(PortError("database down".into())),
+            ..Recordings::default()
+        });
+        let error = StoreRecordings {
+            recordings,
+            spool: Arc::new(Spool::default()),
+            storage: Arc::new(Storage(Err(PortError("storage unreachable".into())))),
+        }
+        .run_once()
+        .await
+        .unwrap_err();
+        assert!(error.0.contains("database down"), "{error}");
+        assert!(error.0.contains("storage unreachable"), "{error}");
     }
 
     fn view(raw_id: i64, status: RecordingStatus) -> RecordingView {

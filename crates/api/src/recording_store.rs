@@ -105,7 +105,7 @@ fn report(finished: Result<Result<Option<StoreOutcome>, PortError>, JoinError>) 
             }
         }
         StoreOutcome::Superseded(recording) => {
-            tracing::info!(%recording, "recording was already stored by another attempt");
+            tracing::info!(%recording, "recording is held by a newer attempt, outcome dropped");
         }
         StoreOutcome::Retrying {
             recording,
