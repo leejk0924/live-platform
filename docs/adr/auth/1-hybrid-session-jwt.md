@@ -4,7 +4,7 @@ area: auth
 summary: 웹은 DB 세션 쿠키(SessionStore), 송출은 EdDSA 1회용 단기 JWT를 쓰는 하이브리드 인증
 status: confirmed
 date: 2026-11-05
-paths: [crates/application/src/ports/session.rs, crates/infrastructure/src/auth]
+paths: [crates/application/src/ports/auth.rs, crates/infrastructure/src/auth.rs, crates/infrastructure/src/persistence/session.rs, crates/infrastructure/src/media/jwt.rs]
 related: []
 ---
 
@@ -46,3 +46,9 @@ related: []
 ## Follow-up (2026-11-08, #10)
 
 "송출 인증을 MediaMTX → API HTTP 콜백으로" 하는 방식은 처음에 기각했다. 이 결정을 송출에 한해 뒤집었다. 콜백은 송출 시도에서만 생기고 시청에서는 생기지 않는다. 이렇게 해서 TTL 60초와 `jti` 1회용을 실제로 강제한다. 자세한 내용은 [media/10-publish-admission-reaper](../media/10-publish-admission-reaper.md).
+
+## Follow-up (2026-11-08, 코드 대조)
+
+- 데모 계정 매일 초기화는 아직 없다. auth/5에서 초기화할 데이터가 없다며 미뤘고, 방송이 생긴 지금 #27에서 정한다.
+- 데모 로그인 제한은 "강한 제한"이 아니라 일반 로그인과 같은 클라이언트당 분당 10회다(`crates/api/src/rate_limit.rs`).
+- frontmatter `paths`를 실제 위치로 고쳤다. 처음 적은 `ports/session.rs`, `infrastructure/src/auth/`는 만들어지지 않았다.

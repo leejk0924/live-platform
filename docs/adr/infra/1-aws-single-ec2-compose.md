@@ -61,3 +61,10 @@ README에 실제 접속 가능한 URL이 필요하고, 화면 공유·카메라�
 - `deploy.sh local`은 로컬에서 실행해 확인했다. `deploy.sh prod`와 운영 절차는 (unverified).
 - 영향: 실기기 화면 공유·카메라는 HTTPS가 필요하다. 공인 HTTPS 주소 없이 #3(실기기 PoC)을 하려면 LAN에서 Caddy 내부 CA를 기기에 신뢰시키거나 다른 터널 수단이 필요하다. #3에서 정한다.
 - 위 결정(EC2, IMDSv2, SSM 등)은 지우지 않는다. 운영 서버를 쓰게 되면 그대로 따른다.
+
+## Follow-up (2026-11-08, 코드 대조)
+
+ADR 상세판을 쓰며 main과 대조했더니 앱 내부 스로틀링 세 항목이 이 문서와 다르다.
+
+- argon2 동시 실행 수는 2가 아니라 코어 수다(`crates/infrastructure/src/auth.rs`의 `Semaphore::new(parallelism)`). auth/5에서 코어 수로 정했고, t3.medium(2 vCPU)에서는 결과적으로 2다.
+- 요청 타임아웃과 본문 64KB 제한은 아직 없다. 본문은 axum `Json` 추출기 기본값(2MB)만 걸린다. #27에서 넣는다.
