@@ -113,23 +113,17 @@ impl RecordingRepository for PgRecordingRepository {
         }))
     }
 
-    async fn mark_stored(
-        &self,
-        id: RecordingId,
-        attempts: u32,
-        size_bytes: u64,
-    ) -> Result<bool, PortError> {
+    async fn mark_stored(&self, id: RecordingId, size_bytes: u64) -> Result<bool, PortError> {
         let size = i64::try_from(size_bytes)
             .map_err(|_| PortError(format!("size of recording {id} is too large")))?;
         let result = sqlx::query(
             "UPDATE recordings SET status = $3, size_bytes = $2, updated_at = now() \
-             WHERE id = $1 AND status = ANY($4) AND attempts = $5",
+             WHERE id = $1 AND status = ANY($4)",
         )
         .bind(id.as_i64())
         .bind(size)
         .bind(RecordingStatus::Ready.as_str())
         .bind(storable())
-        .bind(i64::from(attempts))
         .execute(&self.pool)
         .await
         .map_err(port_error)?;

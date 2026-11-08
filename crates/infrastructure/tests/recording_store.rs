@@ -187,15 +187,12 @@ async fn only_a_pending_recording_is_marked_stored(pool: PgPool) {
             .unwrap()
     );
 
-    assert!(repo.mark_stored(id(100), UNCLAIMED, 1_234).await.unwrap());
+    assert!(repo.mark_stored(id(100), 1_234).await.unwrap());
     assert!(
-        !repo.mark_stored(id(100), UNCLAIMED, 9).await.unwrap(),
+        !repo.mark_stored(id(100), 9).await.unwrap(),
         "already ready"
     );
-    assert!(
-        !repo.mark_stored(id(101), UNCLAIMED, 9).await.unwrap(),
-        "failed"
-    );
+    assert!(!repo.mark_stored(id(101), 9).await.unwrap(), "failed");
     assert!(
         !repo
             .release_failed(id(100), UNCLAIMED, StoreRetry::GiveUp)
@@ -227,11 +224,7 @@ async fn a_stale_storer_cannot_touch_a_newer_claim(pool: PgPool) {
             .unwrap(),
         "the stale storer's failure"
     );
-    assert!(
-        repo.mark_stored(current.id, current.attempts, 1_234)
-            .await
-            .unwrap()
-    );
+    assert!(repo.mark_stored(current.id, 1_234).await.unwrap());
 
     assert_eq!(
         status_of(&pool, 100).await,
@@ -302,7 +295,7 @@ async fn recordings_of_a_deleted_broadcast_cannot_be_read(pool: PgPool) {
     for (recording, broadcast) in [(100, BROADCAST), (101, OTHER_BROADCAST), (102, BROADCAST)] {
         repo.register(&segment(recording, broadcast)).await.unwrap();
     }
-    repo.mark_stored(id(102), UNCLAIMED, 77).await.unwrap();
+    repo.mark_stored(id(102), 77).await.unwrap();
 
     let ids = |views: Vec<application::ports::recording::RecordingView>| {
         views.into_iter().map(|v| v.id.as_i64()).collect::<Vec<_>>()
@@ -342,5 +335,32 @@ async fn recordings_of_a_deleted_broadcast_cannot_be_read(pool: PgPool) {
             .await
             .unwrap()
             .is_empty()
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_stale_storer_that_succeeds_still_stores_the_recording(pool: PgPool) {
+    seed(&pool).await;
+    let repo = PgRecordingRepository::new(pool.clone());
+    repo.register(&segment(100, BROADCAST)).await.unwrap();
+
+    let stale = repo.claim(Duration::ZERO).await.unwrap().unwrap();
+    let current = repo.claim(LEASE).await.unwrap().expect("the lease ran out");
+    assert!(
+        repo.mark_stored(stale.id, 1_234).await.unwrap(),
+        "the same key holds the same bytes, so the stale success counts"
+    );
+    assert!(
+        !repo
+            .release_failed(current.id, current.attempts, StoreRetry::GiveUp)
+            .await
+            .unwrap(),
+        "a later failure cannot undo a stored recording"
+    );
+
+    assert_eq!(
+        status_of(&pool, 100).await,
+        ("READY".into(), Some(1_234), 2)
     );
 }

@@ -86,15 +86,10 @@ pub trait RecordingRepository: Send + Sync {
     /// it for `lease`, after which another storer may take it again.
     async fn claim(&self, lease: Duration) -> Result<Option<ClaimedRecording>, PortError>;
 
-    /// Marks it ready with its stored size. Whether it was still pending and
-    /// still held by the claim that counted `attempts`, so a storer whose
-    /// lease ran out cannot finish over a newer claim.
-    async fn mark_stored(
-        &self,
-        id: RecordingId,
-        attempts: u32,
-        size_bytes: u64,
-    ) -> Result<bool, PortError>;
+    /// Marks it ready with its stored size. Whether it was still pending. Any
+    /// claim may finish it, even one whose lease ran out: every attempt
+    /// writes the same segment under the same key.
+    async fn mark_stored(&self, id: RecordingId, size_bytes: u64) -> Result<bool, PortError>;
 
     /// Makes it due again after the wait `retry` names, or marks it failed.
     /// Whether it was still pending and held by the claim that counted

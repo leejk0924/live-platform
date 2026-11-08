@@ -151,11 +151,7 @@ impl StoreRecordings {
         let recording = claimed.id;
         let error = match self.storage.put(&claimed.source, &claimed.key).await {
             Ok(size_bytes) => {
-                if !self
-                    .recordings
-                    .mark_stored(recording, claimed.attempts, size_bytes)
-                    .await?
-                {
+                if !self.recordings.mark_stored(recording, size_bytes).await? {
                     return Ok(Some(StoreOutcome::Superseded(recording)));
                 }
                 return Ok(Some(StoreOutcome::Stored {
@@ -348,7 +344,7 @@ mod tests {
         /// `release_failed` answers that a newer claim holds the recording.
         release_superseded: bool,
         release_error: Option<PortError>,
-        stored: Mutex<Vec<(RecordingId, u32, u64)>>,
+        stored: Mutex<Vec<(RecordingId, u64)>>,
         released: Mutex<Vec<(RecordingId, u32, StoreRetry)>>,
         inserted: Mutex<Vec<NewRecording>>,
     }
@@ -365,13 +361,8 @@ mod tests {
             Ok(self.claimable.clone())
         }
 
-        async fn mark_stored(
-            &self,
-            id: RecordingId,
-            attempts: u32,
-            size: u64,
-        ) -> Result<bool, PortError> {
-            self.stored.lock().unwrap().push((id, attempts, size));
+        async fn mark_stored(&self, id: RecordingId, size: u64) -> Result<bool, PortError> {
+            self.stored.lock().unwrap().push((id, size));
             Ok(self.still_pending)
         }
 
@@ -545,10 +536,7 @@ mod tests {
                 discard: Ok(()),
             })
         );
-        assert_eq!(
-            *recordings.stored.lock().unwrap(),
-            [(id(RECORDING), 1, 4_096)]
-        );
+        assert_eq!(*recordings.stored.lock().unwrap(), [(id(RECORDING), 4_096)]);
         assert_eq!(*spool.discarded.lock().unwrap(), [claimed(1).source]);
         assert!(recordings.released.lock().unwrap().is_empty());
     }
