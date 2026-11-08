@@ -27,6 +27,9 @@ pub struct Reaped {
     pub not_active: Vec<BroadcastId>,
     pub forgotten_tickets: u64,
     pub forgotten_sessions: u64,
+    /// Demo broadcasts from before today, deleted so the demo accounts start
+    /// each day empty.
+    pub demo_reset: Vec<BroadcastId>,
     /// The media server could not be asked, so nothing was reconciled. A
     /// pass never interrupts broadcasts because the media server is
     /// unreachable.
@@ -66,6 +69,7 @@ impl Reaper {
         reaped.expired = pass.expire(INTERRUPT_GRACE).await?;
         reaped.forgotten_tickets = pass.forget_spent_tickets().await?;
         reaped.forgotten_sessions = pass.forget_expired_sessions().await?;
+        reaped.demo_reset = pass.reset_demo_broadcasts().await?;
         pass.finish().await?;
 
         for &id in reaped.expired.iter().chain(&reaped.not_active) {

@@ -20,6 +20,10 @@ pub const REAPER_LOCK_KEY: i64 = 0x6c70_5f72_6561_7072;
 /// whose clock runs behind the database's still refuses a replay.
 const SPENT_TICKET_RETENTION: Duration = Duration::from_secs(5 * 60);
 
+/// Where the day of the demo reset begins: midnight for the audience the
+/// service runs for.
+const DEMO_RESET_TIME_ZONE: &str = "Asia/Seoul";
+
 fn port_error(err: sqlx::Error) -> PortError {
     PortError(err.to_string())
 }
@@ -170,6 +174,24 @@ impl ReapPass for PgReapPass {
         .await
         .map_err(port_error)?;
         Ok(deleted.rows_affected())
+    }
+
+    async fn reset_demo_broadcasts(&mut self) -> Result<Vec<BroadcastId>, PortError> {
+        let reset: Vec<i64> = sqlx::query_scalar(
+            "UPDATE broadcasts b \
+             SET deleted_at = now(), version = b.version + 1, updated_at = now() \
+             FROM users u \
+             WHERE u.id = b.owner_id AND u.is_demo AND b.status = ANY($1) \
+               AND b.deleted_at IS NULL \
+               AND b.created_at < date_trunc('day', now() AT TIME ZONE $2) AT TIME ZONE $2 \
+             RETURNING b.id",
+        )
+        .bind(status_names(&BroadcastStatus::DELETABLE))
+        .bind(DEMO_RESET_TIME_ZONE)
+        .fetch_all(&mut *self.tx)
+        .await
+        .map_err(port_error)?;
+        to_ids(reset)
     }
 
     async fn finish(self: Box<Self>) -> Result<(), PortError> {

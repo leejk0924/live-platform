@@ -115,6 +115,12 @@ fn report_pass(finished: Result<Result<Option<Reaped>, PortError>, JoinError>) {
             "reaper deleted expired sessions"
         );
     }
+    if !reaped.demo_reset.is_empty() {
+        tracing::info!(
+            broadcasts = %joined(&reaped.demo_reset),
+            "reaper reset demo broadcasts from before today"
+        );
+    }
 }
 
 fn joined(ids: &[BroadcastId]) -> String {

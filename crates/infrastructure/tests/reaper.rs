@@ -413,3 +413,72 @@ async fn two_reapers_forget_expired_sessions_once(pool: PgPool) {
     assert_eq!(second.unwrap(), None, "the second found the lock held");
     assert!(session_tags(&pool).await.is_empty());
 }
+
+/// Sets the broadcast's `created_at` this many seconds after the latest
+/// midnight in Korea.
+async fn created_after_korean_midnight(pool: &PgPool, id: i64, secs: f64) {
+    sqlx::query(
+        "UPDATE broadcasts SET created_at = \
+             ((now() AT TIME ZONE 'Asia/Seoul')::date::timestamp AT TIME ZONE 'Asia/Seoul') \
+             + make_interval(secs => $2) \
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(secs)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn demo_broadcasts_from_before_today_are_reset_once_they_are_not_active(pool: PgPool) {
+    owners(&pool, 6).await;
+    sqlx::query("UPDATE users SET is_demo = false, password_hash = 'not-a-real-hash' WHERE id = 5")
+        .execute(&pool)
+        .await
+        .unwrap();
+    broadcast(&pool, 1, "ENDED", 60.0).await;
+    broadcast(&pool, 2, "READY", 60.0).await;
+    broadcast(&pool, 3, "READY", 0.0).await;
+    broadcast(&pool, 4, "LIVE", 300.0).await;
+    broadcast(&pool, 5, "ENDED", 60.0).await;
+    broadcast(&pool, 6, "ENDED", 60.0).await;
+    for id in [1, 4, 5] {
+        created_after_korean_midnight(&pool, id, -86_400.0).await;
+    }
+    created_after_korean_midnight(&pool, 2, -1.0).await;
+    created_after_korean_midnight(&pool, 6, 0.0).await;
+
+    let mut reaped = reaper(&pool, Probe::on_air(&[4]), Arc::default())
+        .tick()
+        .await
+        .unwrap()
+        .unwrap();
+
+    reaped.demo_reset.sort_by_key(|id| id.as_i64());
+    assert_eq!(reaped.demo_reset, ids(&[1, 2]));
+    let kept: Vec<(i64, i32)> =
+        sqlx::query_as("SELECT id, version FROM broadcasts WHERE deleted_at IS NULL ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        kept,
+        [(3, 1), (4, 1), (5, 1), (6, 1)],
+        "created today, still on air, or not a demo account's"
+    );
+    let reset: Vec<i32> =
+        sqlx::query_scalar("SELECT version FROM broadcasts WHERE deleted_at IS NOT NULL")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(reset, [2, 2], "a reset is a soft delete");
+
+    let again = reaper(&pool, Probe::on_air(&[4]), Arc::default())
+        .tick()
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(again.demo_reset.is_empty(), "a second pass resets nothing");
+}

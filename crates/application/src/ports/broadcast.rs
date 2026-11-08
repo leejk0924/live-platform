@@ -143,6 +143,12 @@ pub trait ReapPass: Send {
     /// many.
     async fn forget_expired_sessions(&mut self) -> Result<u64, PortError>;
 
+    /// Soft-deletes the demo accounts' broadcasts that are deletable and were
+    /// created before the current day began, so every demo visitor starts
+    /// the day with an empty account. An active one waits until it ends.
+    /// Returns them.
+    async fn reset_demo_broadcasts(&mut self) -> Result<Vec<BroadcastId>, PortError>;
+
     async fn finish(self: Box<Self>) -> Result<(), PortError>;
 }
 
