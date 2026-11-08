@@ -11,7 +11,8 @@ use async_trait::async_trait;
 use domain::{
     auth::{UserId, Username},
     broadcast::{
-        Broadcast, BroadcastDescription, BroadcastId, BroadcastStatus, BroadcastTitle, Version,
+        Broadcast, BroadcastDescription, BroadcastEvent, BroadcastId, BroadcastStatus,
+        BroadcastTitle, Version,
     },
     id::SnowflakeId,
 };
@@ -19,6 +20,11 @@ use sqlx::{PgPool, types::time::OffsetDateTime};
 
 fn port_error(err: sqlx::Error) -> PortError {
     PortError(err.to_string())
+}
+
+/// A status set as the `TEXT[]` a `status = ANY($n)` condition binds.
+fn status_names(statuses: &[BroadcastStatus]) -> Vec<&'static str> {
+    statuses.iter().map(|status| status.as_str()).collect()
 }
 
 /// A macro rather than a const so `concat!` builds every statement at
@@ -80,22 +86,21 @@ impl PgBroadcastRepository {
     }
 
     /// Runs `sql`, a conditional status change binding `$1` id, `$2` owner,
-    /// `$3` the statuses it may leave and `$4` the one it enters, and says why
-    /// when it matched no row.
+    /// `$3` the statuses `event` may leave and `$4` the one it enters, and
+    /// says why when it matched no row.
     async fn transition(
         &self,
         sql: &'static str,
         id: BroadcastId,
         owner: UserId,
-        from: &[BroadcastStatus],
-        to: BroadcastStatus,
+        event: BroadcastEvent,
     ) -> Result<Result<Broadcast, TransitionRejection>, PortError> {
-        let from: Vec<&str> = from.iter().map(|status| status.as_str()).collect();
+        let transition = event.transition();
         let row: Option<BroadcastRow> = sqlx::query_as(sql)
             .bind(id.as_i64())
             .bind(owner.as_i64())
-            .bind(&from)
-            .bind(to.as_str())
+            .bind(status_names(transition.from))
+            .bind(transition.to.as_str())
             .fetch_optional(&self.pool)
             .await
             .map_err(port_error)?;
@@ -176,10 +181,6 @@ impl BroadcastRepository for PgBroadcastRepository {
         id: BroadcastId,
         owner: UserId,
     ) -> Result<Result<(), WriteRejection>, PortError> {
-        let deletable: Vec<&str> = BroadcastStatus::DELETABLE
-            .iter()
-            .map(|status| status.as_str())
-            .collect();
         let result = sqlx::query(
             "UPDATE broadcasts \
              SET deleted_at = now(), version = version + 1, updated_at = now() \
@@ -187,7 +188,7 @@ impl BroadcastRepository for PgBroadcastRepository {
         )
         .bind(id.as_i64())
         .bind(owner.as_i64())
-        .bind(&deletable)
+        .bind(status_names(&BroadcastStatus::DELETABLE))
         .execute(&self.pool)
         .await
         .map_err(port_error)?;
@@ -213,14 +214,7 @@ impl BroadcastRepository for PgBroadcastRepository {
              RETURNING ",
             columns!()
         );
-        self.transition(
-            sql,
-            id,
-            owner,
-            &BroadcastStatus::STARTABLE,
-            BroadcastStatus::Live,
-        )
-        .await
+        self.transition(sql, id, owner, BroadcastEvent::Start).await
     }
 
     async fn stop(
@@ -235,14 +229,7 @@ impl BroadcastRepository for PgBroadcastRepository {
              RETURNING ",
             columns!()
         );
-        self.transition(
-            sql,
-            id,
-            owner,
-            &BroadcastStatus::STOPPABLE,
-            BroadcastStatus::Ended,
-        )
-        .await
+        self.transition(sql, id, owner, BroadcastEvent::Stop).await
     }
 }
 
