@@ -18,6 +18,7 @@ export const broadcastApi = {
     return unwrap(api.GET('/api/broadcasts', { params: { query: { before } }, cache }))
   },
   get: (id: string) => unwrap(api.GET('/api/broadcasts/{id}', { params: { path: { id } } })),
+  playback: (id: string) => unwrap(api.GET('/api/broadcasts/{id}/playback', { params: { path: { id } } })),
   create: (input: BroadcastInput) => write(unwrap(api.POST('/api/broadcasts', { body: input }))),
   update: (id: string, version: number, input: BroadcastInput) =>
     write(

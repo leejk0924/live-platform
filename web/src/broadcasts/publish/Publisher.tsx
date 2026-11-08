@@ -3,7 +3,8 @@ import { broadcastApi } from '../../api/broadcasts.ts'
 import { errorMessage } from '../../api/client.ts'
 import type { Broadcast } from '../../api/types.ts'
 import { canCaptureScreen, captureScreen, type Capture } from './capture.ts'
-import { publish, videoStatsSampler, watchConnection, WhipError, type Publication, type SendStats } from './whip.ts'
+import { watchConnection } from '../webrtc.ts'
+import { publish, videoStatsSampler, WhipError, type Publication, type SendStats } from './whip.ts'
 
 type Phase =
   | { kind: 'idle' }
