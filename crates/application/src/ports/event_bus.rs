@@ -1,6 +1,9 @@
 //! Live events of one broadcast, delivered to every API instance that has a
-//! follower of it. Delivery is best effort: a follower learns that it may
-//! have missed events and catches up from the store, which holds the truth.
+//! follower of it. Comment changes are announced by
+//! [`super::comment::CommentRepository`] with the write itself, so they
+//! arrive in revision order; other events go through [`EventBus::publish`].
+//! Delivery is still best effort: a follower learns that it may have missed
+//! events and catches up from the store, which holds the truth.
 
 use std::sync::Arc;
 
@@ -35,9 +38,10 @@ pub enum Delivery {
 
 #[async_trait]
 pub trait EventBus: Send + Sync {
-    /// Never fails the caller: the change it announces is already stored,
-    /// and a follower that misses it catches up. Failures are the adapter's
-    /// to log.
+    /// Announces a change that is not a comment write, such as a new chat
+    /// policy. Never fails the caller: the change it announces is already
+    /// stored, and a follower that misses it catches up. Failures are the
+    /// adapter's to log.
     async fn publish(&self, event: RealtimeEvent);
 
     /// Events of `broadcast` published from now until the subscription is

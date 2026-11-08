@@ -6,6 +6,7 @@ use application::ports::{
         ChatPolicyStore, ChatTarget, CommentQuery, CommentRepository, CommentView,
         CommentWriteRejection, NewComment, PolicyRejection,
     },
+    event_bus::{EventKind, RealtimeEvent},
 };
 use async_trait::async_trait;
 use domain::{
@@ -17,6 +18,7 @@ use domain::{
 use sqlx::{PgPool, types::time::OffsetDateTime};
 
 use super::status_names;
+use crate::realtime;
 
 fn port_error(err: sqlx::Error) -> PortError {
     PortError(err.to_string())
@@ -119,15 +121,17 @@ impl PgCommentRepository {
     }
 
     /// Runs `query`, one conditional change to `broadcast`'s comments that
-    /// returns the changed row, holding the broadcast's write lock until it
-    /// commits. The change takes its revision under the lock, so a
-    /// broadcast's revisions commit in ascending order and a follower that
+    /// returns the changed row, and announces the change, holding the
+    /// broadcast's write lock until it commits. The change takes its
+    /// revision under the lock, so a broadcast's revisions commit, and their
+    /// announcements reach listeners, in ascending order: a follower that
     /// has seen one has seen every lower one.
     async fn locked(
         &self,
         broadcast: BroadcastId,
         query: ViewQuery<'_>,
-    ) -> Result<Option<ViewRow>, PortError> {
+        priority: bool,
+    ) -> Result<Option<CommentView>, PortError> {
         let mut tx = self.pool.begin().await.map_err(port_error)?;
         let (class, key) = comment_write_lock(broadcast);
         sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
@@ -136,9 +140,20 @@ impl PgCommentRepository {
             .execute(&mut *tx)
             .await
             .map_err(port_error)?;
-        let row = query.fetch_optional(&mut *tx).await.map_err(port_error)?;
+        let Some(row) = query.fetch_optional(&mut *tx).await.map_err(port_error)? else {
+            return Ok(None);
+        };
+        let view = to_view(row)?;
+        let event = RealtimeEvent {
+            broadcast,
+            priority,
+            kind: EventKind::Comment(view.clone()),
+        };
+        realtime::notify(&mut *tx, &event)
+            .await
+            .map_err(port_error)?;
         tx.commit().await.map_err(port_error)?;
-        Ok(row)
+        Ok(Some(view))
     }
 
     /// Runs `query`, a conditional change binding `$1` comment, `$2`
@@ -152,8 +167,8 @@ impl PgCommentRepository {
         id: CommentId,
         author: UserId,
     ) -> Result<Result<CommentView, CommentWriteRejection>, PortError> {
-        if let Some(row) = self.locked(broadcast, query).await? {
-            return Ok(Ok(to_view(row)?));
+        if let Some(view) = self.locked(broadcast, query, false).await? {
+            return Ok(Ok(view));
         }
         let stored_author: Option<i64> = sqlx::query_scalar(
             "SELECT c.author_id FROM comments c JOIN broadcasts b ON b.id = c.broadcast_id \
@@ -175,7 +190,11 @@ impl PgCommentRepository {
 
 #[async_trait]
 impl CommentRepository for PgCommentRepository {
-    async fn insert(&self, new: &NewComment) -> Result<Option<CommentView>, PortError> {
+    async fn insert(
+        &self,
+        new: &NewComment,
+        priority: bool,
+    ) -> Result<Option<CommentView>, PortError> {
         let query = sqlx::query_as::<_, ViewRow>(concat!(
             "WITH c AS ( \
                  INSERT INTO comments (id, broadcast_id, author_id, body) \
@@ -191,10 +210,7 @@ impl CommentRepository for PgCommentRepository {
         .bind(new.author_id.as_i64())
         .bind(new.body.as_str())
         .bind(open_statuses());
-        self.locked(new.broadcast_id, query)
-            .await?
-            .map(to_view)
-            .transpose()
+        self.locked(new.broadcast_id, query, priority).await
     }
 
     async fn edit(

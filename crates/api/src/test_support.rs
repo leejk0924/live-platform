@@ -221,7 +221,7 @@ impl StreamTerminator for Unavailable {
 
 #[async_trait]
 impl CommentRepository for Unavailable {
-    async fn insert(&self, _: &NewComment) -> Result<Option<CommentView>, PortError> {
+    async fn insert(&self, _: &NewComment, _: bool) -> Result<Option<CommentView>, PortError> {
         unavailable()
     }
 

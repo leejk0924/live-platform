@@ -73,15 +73,12 @@ impl CommentUseCases {
                 comments: repository.clone(),
                 policies: policies.clone(),
                 limiter,
-                events: events.clone(),
             },
             edit: EditComment {
                 comments: repository.clone(),
-                events: events.clone(),
             },
             delete: DeleteComment {
                 comments: repository,
-                events: events.clone(),
             },
             list: ListComments {
                 query: query.clone(),

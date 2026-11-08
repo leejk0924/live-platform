@@ -1,19 +1,23 @@
 //! The comment adapters against Postgres: every write is one conditional
 //! statement that moves the comment forward in its broadcast's change feed.
 
-use application::ports::comment::{
-    ChatPolicyStore, CommentQuery, CommentRepository, CommentView, CommentWriteRejection,
-    NewComment, PolicyRejection,
+use application::ports::{
+    comment::{
+        ChatPolicyStore, CommentQuery, CommentRepository, CommentView, CommentWriteRejection,
+        NewComment, PolicyRejection,
+    },
+    event_bus::{Delivery, EventBus, EventKind, EventSubscription},
 };
 use domain::{
     broadcast::{BroadcastStatus, Version},
-    comment::{ChatPolicy, CommentBody},
+    comment::{ChatPolicy, CommentBody, Revision},
     id::SnowflakeId,
 };
-use infrastructure::persistence::{
-    PgChatPolicyStore, PgCommentQuery, PgCommentRepository, comment_write_lock,
+use infrastructure::{
+    persistence::{PgChatPolicyStore, PgCommentQuery, PgCommentRepository, comment_write_lock},
+    realtime::PgEventBus,
 };
-use sqlx::PgPool;
+use sqlx::{PgPool, postgres::PgPoolOptions};
 use std::{sync::Arc, time::Duration};
 
 const OWNER: i64 = 1;
@@ -51,12 +55,15 @@ async fn seed(pool: &PgPool, status: &str) {
 }
 
 async fn post(repo: &PgCommentRepository, comment: i64, text: &str) -> Option<CommentView> {
-    repo.insert(&NewComment {
-        id: id(comment),
-        broadcast_id: id(BROADCAST),
-        author_id: id(VIEWER),
-        body: body(text),
-    })
+    repo.insert(
+        &NewComment {
+            id: id(comment),
+            broadcast_id: id(BROADCAST),
+            author_id: id(VIEWER),
+            body: body(text),
+        },
+        false,
+    )
     .await
     .unwrap()
 }
@@ -282,5 +289,163 @@ async fn a_broadcasts_revisions_become_visible_in_order(pool: PgPool) {
         replayed,
         [101, 102],
         "everything committed after the list is replayed"
+    );
+}
+
+/// How many sessions of this test's database wait for a lock of any kind.
+async fn lock_waiters(pool: &PgPool) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM pg_stat_activity \
+         WHERE datname = current_database() AND wait_event_type = 'Lock'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn until_lock_waiters(pool: &PgPool, count: i64) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while lock_waiters(pool).await < count {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{count} sessions waiting for a lock"));
+}
+
+async fn comment_revision(subscription: &mut Box<dyn EventSubscription>) -> Revision {
+    let delivery = tokio::time::timeout(Duration::from_secs(5), subscription.next())
+        .await
+        .expect("a delivery within 5 s")
+        .expect("the bus is open");
+    match delivery {
+        Delivery::Event(event) => match &event.kind {
+            EventKind::Comment(view) => view.revision,
+            EventKind::ChatPolicy(_) => panic!("expected a comment event"),
+        },
+        Delivery::Missed => panic!("expected an event, got Missed"),
+    }
+}
+
+/// A write announces itself in its own transaction, so a follower on any
+/// instance hears a broadcast's changes in revision order even when the
+/// writer that took the lower revision is the slower one.
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_broadcasts_comment_events_arrive_in_revision_order(pool: PgPool) {
+    seed(&pool, "LIVE").await;
+    let (bus, listener) = PgEventBus::start(pool.clone()).await.unwrap();
+    let mut events = bus.subscribe(id(BROADCAST));
+    let repo = Arc::new(PgCommentRepository::new(pool.clone()));
+
+    // The viewer's insert takes its revision under the write lock, then
+    // waits on its foreign key to the viewer's row.
+    let mut hold = pool.begin().await.unwrap();
+    sqlx::query("SELECT 1 FROM users WHERE id = $1 FOR UPDATE")
+        .bind(VIEWER)
+        .execute(&mut *hold)
+        .await
+        .unwrap();
+    let slow = tokio::spawn({
+        let repo = Arc::clone(&repo);
+        async move { post(&repo, 100, "slow").await }
+    });
+    until_lock_waiters(&pool, 1).await;
+    let fast = tokio::spawn({
+        let repo = Arc::clone(&repo);
+        async move {
+            repo.insert(
+                &NewComment {
+                    id: id(101),
+                    broadcast_id: id(BROADCAST),
+                    author_id: id(OWNER),
+                    body: body("fast"),
+                },
+                true,
+            )
+            .await
+            .unwrap()
+        }
+    });
+    until_lock_waiters(&pool, 2).await;
+    hold.rollback().await.unwrap();
+
+    let slow = slow.await.unwrap().unwrap().revision;
+    let fast = fast.await.unwrap().unwrap().revision;
+    assert!(slow < fast, "the held writer took the lower revision");
+    let heard = [
+        comment_revision(&mut events).await,
+        comment_revision(&mut events).await,
+    ];
+    assert_eq!(heard, [slow, fast]);
+    listener.shutdown().await;
+}
+
+/// A pool whose `pg_notify` always fails: a function of the same name in a
+/// schema searched before `pg_catalog` raises instead.
+async fn pool_whose_notify_fails(pool: &PgPool) -> PgPool {
+    sqlx::query("CREATE SCHEMA notify_fails")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "CREATE FUNCTION notify_fails.pg_notify(TEXT, TEXT) RETURNS VOID \
+         LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'notify refused'; END $$",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    let options = pool
+        .connect_options()
+        .as_ref()
+        .clone()
+        .options([("search_path", "notify_fails, pg_catalog, public")]);
+    PgPoolOptions::new().connect_lazy_with(options)
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_write_that_cannot_be_announced_is_not_stored(pool: PgPool) {
+    seed(&pool, "LIVE").await;
+    let posted = post(&PgCommentRepository::new(pool.clone()), 100, "kept")
+        .await
+        .unwrap();
+    let failing = PgCommentRepository::new(pool_whose_notify_fails(&pool).await);
+    let query = PgCommentQuery::new(pool.clone());
+
+    let inserted = failing
+        .insert(
+            &NewComment {
+                id: id(101),
+                broadcast_id: id(BROADCAST),
+                author_id: id(VIEWER),
+                body: body("lost"),
+            },
+            false,
+        )
+        .await;
+    assert!(inserted.is_err(), "got {inserted:?}");
+    let edited = failing
+        .edit(
+            id(BROADCAST),
+            id(100),
+            id(VIEWER),
+            Version::FIRST,
+            &body("x"),
+        )
+        .await;
+    assert!(edited.is_err(), "got {edited:?}");
+    let deleted = failing
+        .soft_delete(id(BROADCAST), id(100), id(VIEWER))
+        .await;
+    assert!(deleted.is_err(), "got {deleted:?}");
+
+    assert_eq!(
+        query
+            .changes_since(id(BROADCAST), Revision::START, 10)
+            .await
+            .unwrap(),
+        [posted],
+        "nothing but the announced comment"
     );
 }

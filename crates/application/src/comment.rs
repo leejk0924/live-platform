@@ -2,7 +2,7 @@
 //! the authenticated actor, so a request can never write as someone else or
 //! change someone else's comment by naming them.
 
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use domain::{
     auth::UserId,
@@ -28,9 +28,6 @@ use crate::ports::{
 /// The most changes a follower catches up on at once. A follower further
 /// behind is told to reload instead.
 pub const FEED_CATCH_UP_LIMIT: u32 = 500;
-
-/// How many caught-up revisions a feed remembers to skip their live copies.
-const CAUGHT_UP_KEPT: usize = 2 * FEED_CATCH_UP_LIMIT as usize;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -77,22 +74,11 @@ async fn target_of(
         .ok_or_else(|| CommentError::BroadcastNotFound.into())
 }
 
-async fn announce(events: &dyn EventBus, view: &CommentView, priority: bool) {
-    events
-        .publish(RealtimeEvent {
-            broadcast: view.comment.broadcast_id,
-            priority,
-            kind: EventKind::Comment(view.clone()),
-        })
-        .await;
-}
-
 pub struct PostComment {
     pub ids: Arc<dyn IdGenerator>,
     pub comments: Arc<dyn CommentRepository>,
     pub policies: Arc<dyn ChatPolicyStore>,
     pub limiter: Arc<dyn RateLimiter>,
-    pub events: Arc<dyn EventBus>,
 }
 
 impl PostComment {
@@ -122,17 +108,15 @@ impl PostComment {
         // The broadcast ended between the read above and this write.
         let view = self
             .comments
-            .insert(&new)
+            .insert(&new, is_owner)
             .await?
             .ok_or(CommentError::Closed)?;
-        announce(self.events.as_ref(), &view, is_owner).await;
         Ok(view)
     }
 }
 
 pub struct EditComment {
     pub comments: Arc<dyn CommentRepository>,
-    pub events: Arc<dyn EventBus>,
 }
 
 impl EditComment {
@@ -145,18 +129,15 @@ impl EditComment {
         body: &str,
     ) -> Result<CommentView, Error> {
         let body = CommentBody::parse(body)?;
-        let view = self
+        Ok(self
             .comments
             .edit(broadcast, id, actor, expected, &body)
-            .await??;
-        announce(self.events.as_ref(), &view, false).await;
-        Ok(view)
+            .await??)
     }
 }
 
 pub struct DeleteComment {
     pub comments: Arc<dyn CommentRepository>,
-    pub events: Arc<dyn EventBus>,
 }
 
 impl DeleteComment {
@@ -166,8 +147,7 @@ impl DeleteComment {
         broadcast: BroadcastId,
         id: CommentId,
     ) -> Result<(), Error> {
-        let tombstone = self.comments.soft_delete(broadcast, id, actor).await??;
-        announce(self.events.as_ref(), &tombstone, false).await;
+        self.comments.soft_delete(broadcast, id, actor).await??;
         Ok(())
     }
 }
@@ -307,7 +287,6 @@ impl FollowComments {
             behind,
             policy_due: true,
             queued,
-            caught_up: BTreeSet::new(),
         })
     }
 }
@@ -319,7 +298,9 @@ pub struct CommentFeed {
     query: Arc<dyn CommentQuery>,
     policies: Arc<dyn ChatPolicyStore>,
     subscription: Box<dyn EventSubscription>,
-    /// The newest revision delivered.
+    /// The newest revision delivered. A broadcast's comment events arrive in
+    /// revision order, so a live event at or below it was delivered by a
+    /// catch-up already.
     cursor: Revision,
     /// Events may be missing after `cursor`; the next call catches up first.
     behind: bool,
@@ -328,13 +309,6 @@ pub struct CommentFeed {
     policy_due: bool,
     /// Delivered before anything else.
     queued: Option<FeedItem>,
-    /// Revisions catch-ups delivered whose live events are still to come
-    /// and must not be delivered twice, at most [`CAUGHT_UP_KEPT`] of the
-    /// newest. A set rather than "at most the cursor": each write publishes
-    /// after its own commit, so a lower revision's event may arrive after a
-    /// higher one's. A copy forgotten here is delivered twice, which a
-    /// client keeping the highest revision per comment ignores.
-    caught_up: BTreeSet<Revision>,
 }
 
 impl CommentFeed {
@@ -378,10 +352,10 @@ impl CommentFeed {
         match &event.kind {
             EventKind::ChatPolicy(policy) => Some(FeedItem::Policy(*policy)),
             EventKind::Comment(view) => {
-                if self.caught_up.remove(&view.revision) {
+                if view.revision <= self.cursor {
                     return None;
                 }
-                self.cursor = self.cursor.max(view.revision);
+                self.cursor = view.revision;
                 Some(FeedItem::Comments {
                     changes: vec![view.clone()],
                     priority: event.priority,
@@ -399,18 +373,12 @@ impl CommentFeed {
         if changes.len() > FEED_CATCH_UP_LIMIT as usize {
             let cursor = self.query.latest_revision(self.broadcast).await?;
             self.cursor = cursor;
-            self.caught_up.clear();
             return Ok(Some(FeedItem::Reset { cursor }));
         }
         let Some(last) = changes.last() else {
             return Ok(None);
         };
-        self.cursor = self.cursor.max(last.revision);
-        self.caught_up
-            .extend(changes.iter().map(|view| view.revision));
-        while self.caught_up.len() > CAUGHT_UP_KEPT {
-            self.caught_up.pop_first();
-        }
+        self.cursor = last.revision;
         Ok(Some(FeedItem::Comments {
             changes,
             priority: false,
@@ -630,14 +598,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_late_lower_revision_is_still_delivered() {
+    async fn live_events_from_before_the_feed_opened_are_not_delivered() {
         let store = Store::with(5);
         let (bus, tx) = Bus::new();
         let mut feed = open(&store, &bus, None).await.unwrap();
-        tx.send(live(7)).unwrap();
-        tx.send(live(6)).unwrap();
+        for n in [5, 6] {
+            tx.send(live(n)).unwrap();
+        }
 
-        assert_eq!(revisions(&next(&mut feed).await), [7]);
         assert_eq!(revisions(&next(&mut feed).await), [6]);
     }
 
@@ -825,16 +793,27 @@ mod tests {
         }
     }
 
-    /// Stores every comment it is given.
-    struct Comments;
+    /// Stores every comment it is given and announces it on `bus`.
+    struct Comments {
+        bus: Arc<Bus>,
+    }
 
     #[async_trait]
     impl CommentRepository for Comments {
-        async fn insert(&self, new: &NewComment) -> Result<Option<CommentView>, PortError> {
+        async fn insert(
+            &self,
+            new: &NewComment,
+            priority: bool,
+        ) -> Result<Option<CommentView>, PortError> {
             let mut stored = view(1);
             stored.comment.id = new.id;
             stored.comment.author_id = new.author_id;
             stored.comment.body = Some(new.body.clone());
+            self.bus.published.lock().unwrap().push(RealtimeEvent {
+                broadcast: new.broadcast_id,
+                priority,
+                kind: EventKind::Comment(stored.clone()),
+            });
             Ok(Some(stored))
         }
 
@@ -884,10 +863,11 @@ mod tests {
         async fn post(&self, actor: i64, body: &str) -> Result<CommentView, Error> {
             PostComment {
                 ids: Arc::new(Ids),
-                comments: Arc::new(Comments),
+                comments: Arc::new(Comments {
+                    bus: self.bus.clone(),
+                }),
                 policies: self.store.clone(),
                 limiter: self.limiter.clone(),
-                events: self.bus.clone(),
             }
             .run(id(actor), id(BROADCAST), body)
             .await

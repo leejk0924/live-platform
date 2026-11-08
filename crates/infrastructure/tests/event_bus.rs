@@ -209,7 +209,12 @@ async fn an_event_that_cannot_be_sent_is_a_local_miss(pool: PgPool) {
     let mut subscription = bus.subscribe(id(1));
     let mut other_broadcast = bus.subscribe(id(2));
 
-    bus.publish(comment(1, 7, "lost")).await;
+    bus.publish(RealtimeEvent {
+        broadcast: id(1),
+        priority: true,
+        kind: EventKind::ChatPolicy(ChatPolicy::from_secs(10).unwrap()),
+    })
+    .await;
     assert!(matches!(next(&mut subscription).await, Delivery::Missed));
     assert!(
         tokio::time::timeout(Duration::from_millis(300), other_broadcast.next())

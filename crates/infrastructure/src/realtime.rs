@@ -1,7 +1,8 @@
 //! Live event delivery. [`EventHub`] fans events out to the subscriptions
 //! of this process; [`PgEventBus`] carries them between processes over
 //! Postgres `NOTIFY`, so a follower connected to any API instance receives
-//! what was published on any other.
+//! what was announced on any other. Comment writes announce themselves
+//! with [`notify`] inside their own transaction.
 
 use std::{
     collections::HashMap,
@@ -21,7 +22,7 @@ use domain::{
     id::SnowflakeId,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, postgres::PgListener};
+use sqlx::{PgExecutor, PgPool, postgres::PgListener};
 use tokio::{
     sync::{broadcast, oneshot},
     task::JoinHandle,
@@ -174,9 +175,23 @@ impl EventBus for LocalEventBus {
     }
 }
 
-/// Publishes with `pg_notify` and receives through one `LISTEN` connection
-/// per process. Postgres delivers a notification to every listener,
-/// including the publisher's own, after the publishing statement commits.
+/// Announces `event` on [`CHANNEL`]. Postgres delivers it to every
+/// listener, the announcing instance's own included, when the transaction
+/// that ran this commits, and in commit order; never if it rolls back.
+pub(crate) async fn notify(
+    executor: impl PgExecutor<'_>,
+    event: &RealtimeEvent,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_notify($1, $2)")
+        .bind(CHANNEL)
+        .bind(encode(event))
+        .execute(executor)
+        .await
+        .map(drop)
+}
+
+/// Publishes with [`notify`] and receives through one `LISTEN` connection
+/// per process.
 pub struct PgEventBus {
     pool: PgPool,
     hub: Arc<EventHub>,
@@ -296,14 +311,8 @@ async fn listen_again(pool: &PgPool, stopped: &mut oneshot::Receiver<()>) -> Opt
 impl EventBus for PgEventBus {
     async fn publish(&self, event: RealtimeEvent) {
         let broadcast = event.broadcast;
-        let payload = encode(&event);
-        let sent = sqlx::query("SELECT pg_notify($1, $2)")
-            .bind(CHANNEL)
-            .bind(&payload)
-            .execute(&self.pool)
-            .await;
-        if let Err(err) = sent {
-            tracing::warn!(%err, %broadcast, bytes = payload.len(), "broadcast event not published");
+        if let Err(err) = notify(&self.pool, &event).await {
+            tracing::warn!(%err, %broadcast, "broadcast event not published");
             // Followers here catch up from the store; those on other
             // instances only at their next miss.
             self.hub.miss(broadcast);

@@ -36,11 +36,24 @@ pub enum CommentWriteRejection {
 /// The write side. Each write checks the broadcast, the author and the
 /// version in the same statement that changes the row, and gives the
 /// comment a new [`Revision`].
+///
+/// A write that succeeds is also announced to the broadcast's followers as
+/// an [`EventKind::Comment`](super::event_bus::EventKind::Comment) of the
+/// returned view, atomically: the change is
+/// stored only if it is announced, and announced only once it is stored.
+/// Followers hear one broadcast's changes in revision order. A write that
+/// cannot be announced fails and stores nothing, so the caller may retry.
 #[async_trait]
 pub trait CommentRepository: Send + Sync {
     /// Stores the comment at [`Version::FIRST`] if its broadcast exists and
-    /// [`domain::comment::accepts_comments`]; `None` otherwise.
-    async fn insert(&self, new: &NewComment) -> Result<Option<CommentView>, PortError>;
+    /// [`domain::comment::accepts_comments`]; `None` otherwise. A `priority`
+    /// comment is sent to followers at once, see
+    /// [`RealtimeEvent::priority`](super::event_bus::RealtimeEvent::priority).
+    async fn insert(
+        &self,
+        new: &NewComment,
+        priority: bool,
+    ) -> Result<Option<CommentView>, PortError>;
 
     /// Replaces the body if `author` wrote the comment and its version is
     /// still `expected`, and bumps the version.
