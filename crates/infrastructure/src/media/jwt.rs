@@ -65,7 +65,7 @@ impl PublishKey {
         Ok(Self::from_seed(&seed))
     }
 
-    /// A fresh random key, for tests.
+    /// A new key from the OS random number generator.
     pub fn generate() -> Self {
         let mut seed = Zeroizing::new([0u8; 32]);
         getrandom::fill(seed.as_mut()).expect("os rng is available");
