@@ -9,7 +9,7 @@ use domain::{
 };
 
 use crate::{
-    broadcast::{Error, view_of},
+    broadcast::Error,
     ports::{
         PortError,
         auth::UserRepository,
@@ -77,6 +77,15 @@ impl StopBroadcast {
     /// after the status change is stored, so a publisher that reconnects in
     /// between finds the broadcast already ended.
     pub async fn run(&self, actor: UserId, id: BroadcastId) -> Result<Stopped, Error> {
+        // The write only matches the actor's own broadcast, so the actor is
+        // the owner the view names. Reading it first leaves nothing fallible
+        // between the commit and the kick.
+        let owner_name = self
+            .users
+            .find_by_id(actor)
+            .await?
+            .ok_or_else(|| PortError(format!("user {actor} not found")))?
+            .username;
         let broadcast = self
             .broadcasts
             .stop(id, actor)
@@ -88,7 +97,10 @@ impl StopBroadcast {
             .await
             .err();
         Ok(Stopped {
-            broadcast: view_of(self.users.as_ref(), broadcast).await?,
+            broadcast: BroadcastView {
+                broadcast,
+                owner_name,
+            },
             kick_failure,
         })
     }
@@ -203,6 +215,24 @@ mod tests {
         }
     }
 
+    /// The owner's account is gone, so the broadcast view cannot be built.
+    struct NoOwner;
+
+    #[async_trait]
+    impl UserRepository for NoOwner {
+        async fn insert(&self, _: &User) -> Result<Inserted, PortError> {
+            unreachable!()
+        }
+
+        async fn find_by_username(&self, _: &Username) -> Result<Option<User>, PortError> {
+            unreachable!()
+        }
+
+        async fn find_by_id(&self, _: UserId) -> Result<Option<User>, PortError> {
+            Ok(None)
+        }
+    }
+
     struct LivePath;
 
     impl IngestRouter for LivePath {
@@ -275,19 +305,31 @@ mod tests {
         outcome: Transition,
         terminator: CountingTerminator,
     ) -> (Result<Stopped, Error>, usize) {
+        let (result, kicks, _) = stop_with(Arc::new(Owner), outcome, terminator).await;
+        (result, kicks)
+    }
+
+    /// Also returns how many transitions were attempted.
+    async fn stop_with(
+        users: Arc<dyn UserRepository>,
+        outcome: Transition,
+        terminator: CountingTerminator,
+    ) -> (Result<Stopped, Error>, usize, usize) {
         let terminator = Arc::new(terminator);
+        let repository = Arc::new(Scripted {
+            outcome,
+            calls: Mutex::default(),
+        });
         let result = StopBroadcast {
-            broadcasts: Arc::new(Scripted {
-                outcome,
-                calls: Mutex::default(),
-            }),
-            users: Arc::new(Owner),
+            broadcasts: repository.clone(),
+            users,
             ingest: Arc::new(LivePath),
             terminator: terminator.clone(),
         }
         .run(id(OWNER), id(BROADCAST))
         .await;
-        (result, terminator.kicks.load(Ordering::SeqCst))
+        let transitions = repository.calls.lock().unwrap().len();
+        (result, terminator.kicks.load(Ordering::SeqCst), transitions)
     }
 
     fn rejection_code(result: Result<impl std::fmt::Debug, Error>) -> BroadcastError {
@@ -381,5 +423,18 @@ mod tests {
             Some(PortError("media server unreachable".into()))
         );
         assert_eq!(kicks, 1);
+    }
+
+    #[tokio::test]
+    async fn stop_fails_before_ending_anything_when_the_view_cannot_be_built() {
+        let (result, kicks, transitions) = stop_with(
+            Arc::new(NoOwner),
+            Ok(broadcast(BroadcastStatus::Ended)),
+            CountingTerminator::default(),
+        )
+        .await;
+        assert!(matches!(result, Err(Error::Internal(_))), "{result:?}");
+        assert_eq!(transitions, 0, "nothing was ended");
+        assert_eq!(kicks, 0, "nobody was kicked");
     }
 }
