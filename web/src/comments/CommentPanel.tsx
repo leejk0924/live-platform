@@ -4,7 +4,7 @@ import { ApiError, errorMessage } from '../api/client.ts'
 import { commentApi, eventsUrl } from '../api/comments.ts'
 import type { Broadcast, ChatPolicy, Comment } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
-import { startEdit, type EditDraft } from './commentEdit.ts'
+import { draftAfterSaveError, startEdit, type EditDraft } from './commentEdit.ts'
 import { parseComments } from './events.ts'
 import { commentsReducer, initialComments, visibleComments, type CommentsAction } from './commentsState.ts'
 
@@ -189,13 +189,14 @@ function CommentItem({
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function run(work: () => Promise<void>) {
+  async function run(work: () => Promise<void>, onError?: (error: unknown) => void) {
     setPending(true)
     setError(null)
     try {
       await work()
     } catch (e) {
       setError(commentError(e))
+      onError?.(e)
     } finally {
       setPending(false)
     }
@@ -204,11 +205,19 @@ function CommentItem({
   function onSave(e: FormEvent) {
     e.preventDefault()
     if (draft === null) return
-    void run(async () => {
-      const saved = await commentApi.edit(broadcastId, comment.id, draft.version, draft.body)
-      dispatch({ type: 'changed', items: [saved] })
-      setDraft(null)
-    })
+    void run(
+      async () => {
+        const saved = await commentApi.edit(broadcastId, comment.id, draft.version, draft.body)
+        dispatch({ type: 'changed', items: [saved] })
+        setDraft(null)
+      },
+      (e) => setDraft(draftAfterSaveError(draft, e)),
+    )
+  }
+
+  function onStartEdit() {
+    setError(null)
+    setDraft(startEdit(comment))
   }
 
   function onDelete() {
@@ -246,7 +255,7 @@ function CommentItem({
       )}
       {mine && draft === null && (
         <span className="comment-actions">
-          <button type="button" onClick={() => setDraft(startEdit(comment))} disabled={pending}>
+          <button type="button" onClick={onStartEdit} disabled={pending}>
             수정
           </button>
           <button type="button" onClick={onDelete} disabled={pending}>
