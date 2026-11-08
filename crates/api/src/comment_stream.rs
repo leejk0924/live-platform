@@ -7,7 +7,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     convert::Infallible,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::Duration,
 };
 
@@ -74,8 +74,14 @@ impl LiveStreams {
         self.closing.send_replace(true);
     }
 
+    /// A count is updated in one step, so a panic while the lock was held
+    /// left it consistent.
+    fn counts(&self) -> MutexGuard<'_, HashMap<String, usize>> {
+        self.open.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     fn admit(self: &Arc<Self>, client: &ClientKey) -> Result<StreamSlot, ApiError> {
-        let mut open = self.open.lock().expect("streams lock");
+        let mut open = self.counts();
         let count = open.entry(client.as_str().to_owned()).or_default();
         if *count >= MAX_STREAMS_PER_CLIENT {
             return Err(ApiError::too_many_streams());
@@ -89,12 +95,7 @@ impl LiveStreams {
 
     #[cfg(test)]
     fn open_for(&self, client: &str) -> usize {
-        self.open
-            .lock()
-            .expect("streams lock")
-            .get(client)
-            .copied()
-            .unwrap_or_default()
+        self.counts().get(client).copied().unwrap_or_default()
     }
 }
 
@@ -107,7 +108,7 @@ struct StreamSlot {
 
 impl Drop for StreamSlot {
     fn drop(&mut self) {
-        let mut open = self.streams.open.lock().expect("streams lock");
+        let mut open = self.streams.counts();
         if let Some(count) = open.get_mut(&self.client) {
             *count -= 1;
             if *count == 0 {
@@ -522,6 +523,28 @@ mod tests {
         client.follow().await;
         drop(open);
         assert_eq!(client.state.streams.open_for("203.0.113.7"), 0);
+    }
+
+    #[test]
+    fn a_poisoned_count_still_admits_and_frees_slots() {
+        let streams = Arc::new(LiveStreams::default());
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "203.0.113.9".parse().unwrap());
+        let client = ClientKey::of(&headers, &axum::http::Extensions::new());
+        let slot = streams.admit(&client).unwrap();
+        let poisoner = Arc::clone(&streams);
+        std::thread::spawn(move || {
+            let _held = poisoner.open.lock();
+            panic!("poison the count");
+        })
+        .join()
+        .unwrap_err();
+
+        drop(slot);
+        let again = streams.admit(&client).unwrap();
+        assert_eq!(streams.open_for("203.0.113.9"), 1);
+        drop(again);
+        assert_eq!(streams.open_for("203.0.113.9"), 0);
     }
 
     #[tokio::test]
