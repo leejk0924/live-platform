@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Comment } from '../api/types.ts'
-import { commentsReducer, initialComments, MAX_KEPT, visibleComments, type CommentsState } from './commentsState.ts'
+import {
+  commentsReducer,
+  initialComments,
+  MAX_KEPT,
+  MAX_TOMBSTONES,
+  visibleComments,
+  type CommentsState,
+} from './commentsState.ts'
 
 const comment = (id: string, revision: string, body: string | null = `c${id}`): Comment => ({
   id,
@@ -78,6 +85,22 @@ test(`only the newest ${MAX_KEPT} comments are kept`, () => {
   assert.equal(ids.length, MAX_KEPT)
   assert.equal(ids[0], '21')
   assert.equal(ids.at(-1), String(MAX_KEPT + 20))
+})
+
+test(`deleted comments do not take room from the ${MAX_KEPT} shown`, () => {
+  const live = Array.from({ length: MAX_KEPT }, (_, i) => comment(String(i + 1), String(i + 1)))
+  const gone = Array.from({ length: 20 }, (_, i) => comment(String(MAX_KEPT + i + 1), String(MAX_KEPT + i + 1), null))
+  const ids = visibleComments(changed(loaded([]), ...live, ...gone)).map((c) => c.id)
+  assert.equal(ids.length, MAX_KEPT)
+  assert.equal(ids[0], '1')
+})
+
+test(`only the newest ${MAX_TOMBSTONES} deletions are remembered`, () => {
+  const gone = Array.from({ length: MAX_TOMBSTONES + 1 }, (_, i) => comment(String(i + 1), String(i + 1), null))
+  const state = changed(loaded([]), ...gone)
+  assert.equal(state.tombstones.size, MAX_TOMBSTONES)
+  assert.equal(state.tombstones.has('1'), false)
+  assert.deepEqual(shown(changed(state, comment('2', '1', 'stale'))), [], 'a remembered deletion keeps its comment out')
 })
 
 test('a policy event sets the slow mode', () => {

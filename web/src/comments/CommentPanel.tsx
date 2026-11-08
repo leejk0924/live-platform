@@ -137,7 +137,7 @@ function CommentList({
   userId,
   dispatch,
 }: {
-  comments: Comment[]
+  comments: readonly Comment[]
   loading: boolean
   broadcastId: string
   userId: string | null
