@@ -10,7 +10,7 @@ use std::{
 
 use axum::{
     extract::{ConnectInfo, FromRequestParts},
-    http::request::Parts,
+    http::{Extensions, HeaderMap, request::Parts},
 };
 use governor::{DefaultKeyedRateLimiter, Quota, clock::Clock};
 
@@ -58,10 +58,7 @@ impl RateLimits {
 
     pub fn login(&self, client: &ClientKey, username: &str) -> Result<(), ApiError> {
         check(&self.login_per_client, &client.0)?;
-        // Usernames are at most 20 characters, so a longer key buys an
-        // attacker nothing but memory.
-        let username: String = username.chars().take(32).collect();
-        check(&self.login_per_username, &username)
+        check(&self.login_per_username, &bounded_username(username))
     }
 
     pub fn demo_login(&self, client: &ClientKey) -> Result<(), ApiError> {
@@ -76,6 +73,12 @@ impl RateLimits {
         self.login_per_username.retain_recent();
         self.demo_login_per_client.retain_recent();
     }
+}
+
+/// Usernames are at most 20 characters, so keeping more of what a client
+/// sent buys an attacker nothing but memory and log volume.
+pub(crate) fn bounded_username(username: &str) -> String {
+    username.chars().take(32).collect()
 }
 
 /// Who a request comes from: the last `X-Forwarded-For` entry, which Caddy
@@ -96,12 +99,9 @@ fn client_network(ip: IpAddr) -> IpAddr {
     }
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for ClientKey {
-    type Rejection = Infallible;
-
-    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
-        let forwarded = parts
-            .headers
+impl ClientKey {
+    pub fn of(headers: &HeaderMap, extensions: &Extensions) -> Self {
+        let forwarded = headers
             .get_all("x-forwarded-for")
             .iter()
             .filter_map(|value| value.to_str().ok())
@@ -110,15 +110,26 @@ impl<S: Send + Sync> FromRequestParts<S> for ClientKey {
             .rfind(|entry| !entry.is_empty())
             .and_then(|entry| entry.parse::<IpAddr>().ok());
         let peer = || {
-            parts
-                .extensions
+            extensions
                 .get::<ConnectInfo<SocketAddr>>()
                 .map(|info| info.0.ip())
         };
         let key = forwarded
             .or_else(peer)
             .map_or_else(|| "unknown".to_owned(), |ip| client_network(ip).to_string());
-        Ok(Self(key))
+        Self(key)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl<S: Send + Sync> FromRequestParts<S> for ClientKey {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        Ok(Self::of(&parts.headers, &parts.extensions))
     }
 }
 

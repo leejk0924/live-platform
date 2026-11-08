@@ -19,6 +19,7 @@ use utoipa::ToSchema;
 
 use crate::{
     AppState,
+    audit::{AuditEvent, audit},
     auth::AuthUser,
     broadcast::{BroadcastDto, api_error, broadcast_id, tagged},
     error::{ApiError, ErrorBody},
@@ -130,8 +131,22 @@ pub(crate) async fn stop(
     let stopping = tokio::spawn(
         async move {
             let stopped = state.broadcasts.stop.run(actor, broadcast).await?;
-            if let Some(err) = &stopped.kick_failure {
-                tracing::warn!(error = %err, broadcast = %broadcast, "ended, but the publisher was not disconnected");
+            match &stopped.kick_failure {
+                None => audit!(
+                    info,
+                    AuditEvent::PublisherKicked,
+                    %broadcast,
+                    by = "owner",
+                    "ended, publisher disconnected"
+                ),
+                Some(err) => audit!(
+                    warn,
+                    AuditEvent::KickFailed,
+                    error = %err,
+                    %broadcast,
+                    by = "owner",
+                    "ended, but the publisher was not disconnected"
+                ),
             }
             Ok(stopped)
         }

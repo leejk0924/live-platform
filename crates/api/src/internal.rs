@@ -23,7 +23,11 @@ use domain::secret::Secret;
 use serde::Deserialize;
 use subtle::ConstantTimeEq;
 
-use crate::{AppState, error::ApiError};
+use crate::{
+    AppState,
+    audit::{AuditEvent, audit},
+    error::ApiError,
+};
 
 pub fn routes(secret: Arc<Secret<String>>) -> Router<AppState> {
     Router::new()
@@ -113,7 +117,15 @@ async fn auth(
         }
         Err(Denied { reason, ticket }) => {
             let jti = ticket.as_ref().map(|jti| jti.as_str());
-            tracing::info!(action, path, jti, ?reason, "media access denied");
+            audit!(
+                info,
+                AuditEvent::MediaAccessDenied,
+                action,
+                path,
+                jti,
+                ?reason,
+                "media access denied"
+            );
             Err(ApiError::unauthenticated())
         }
     }
@@ -161,18 +173,25 @@ async fn hook(
         Observed::Unchanged(id) => {
             tracing::info!(?event, path, broadcast = %id, "hook changed nothing")
         }
+        // `event` names the audit event here, so the hook event is `hook`.
         Observed::NotActive { broadcast, kick } => match kick {
-            Ok(()) => tracing::warn!(
-                ?event,
+            Ok(()) => audit!(
+                warn,
+                AuditEvent::PublisherKicked,
+                hook = ?event,
                 path,
                 %broadcast,
+                by = "hook",
                 "stream of a broadcast that is not active; publisher disconnected"
             ),
-            Err(err) => tracing::warn!(
-                ?event,
+            Err(err) => audit!(
+                warn,
+                AuditEvent::KickFailed,
+                hook = ?event,
                 path,
                 %broadcast,
                 %err,
+                by = "hook",
                 "stream of a broadcast that is not active; disconnect failed, the reaper retries"
             ),
         },

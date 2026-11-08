@@ -7,6 +7,8 @@ use application::{
     reaper::{REAP_INTERVAL, Reaped, Reaper},
 };
 use domain::broadcast::BroadcastId;
+
+use crate::audit::{AuditEvent, audit};
 use tokio::{
     sync::oneshot,
     task::{JoinError, JoinHandle},
@@ -90,15 +92,26 @@ fn report_pass(finished: Result<Result<Option<Reaped>, PortError>, JoinError>) {
         tracing::warn!(%err, "reaper could not list the streams on air; nothing reconciled");
     }
     for (broadcast, err) in &reaped.kick_failures {
-        tracing::warn!(%err, %broadcast, "publisher was not disconnected; the next pass retries");
+        audit!(
+            warn,
+            AuditEvent::KickFailed,
+            %err,
+            %broadcast,
+            by = "reaper",
+            "publisher was not disconnected; the next pass retries"
+        );
     }
     for err in &reaped.housekeeping_failures {
         tracing::warn!(%err, "reaper housekeeping step failed; the next pass retries");
     }
-    if !reaped.not_active.is_empty() {
-        tracing::warn!(
-            broadcasts = %joined(&reaped.not_active),
-            "disconnecting publishers of broadcasts that are not active"
+    let failed = |id: &BroadcastId| reaped.kick_failures.iter().any(|(f, _)| f == id);
+    for broadcast in reaped.not_active.iter().filter(|id| !failed(id)) {
+        audit!(
+            warn,
+            AuditEvent::PublisherKicked,
+            %broadcast,
+            by = "reaper",
+            "disconnected the publisher of a broadcast that is not active"
         );
     }
     let changed = !reaped.expired.is_empty()
