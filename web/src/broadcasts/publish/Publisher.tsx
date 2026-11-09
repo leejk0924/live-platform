@@ -102,7 +102,7 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
   function pause() {
     release()
     setNotice(null)
-    setPhase({ kind: 'paused' })
+    setPhase({ kind: 'paused', since: Date.now() })
     onChanged()
   }
 
@@ -218,7 +218,8 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
   useEffect(() => {
     const sync = () => {
       const hidden = document.visibilityState === 'hidden'
-      const action = backgroundAction({ phase: phase.kind, hidden, pauses, status: broadcast.status })
+      const pausedMs = phase.kind === 'paused' ? Date.now() - phase.since : 0
+      const action = backgroundAction({ phase: phase.kind, hidden, pauses, status: broadcast.status, pausedMs })
       if (action === 'pause') pause()
       else if (action === 'resume') void start()
       else if (action === 'idle') setPhase({ kind: 'idle' })
