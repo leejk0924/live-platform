@@ -13,6 +13,8 @@ export class WhipError extends Error {
 
 export type Publication = {
   peer: RTCPeerConnection
+  // Swaps the sent picture in place: the WHIP session and its negotiation stay as they are.
+  replaceVideo: (track: MediaStreamTrack) => Promise<void>
   close: () => Promise<void>
 }
 
@@ -25,8 +27,14 @@ function preferCodec(transceiver: RTCRtpTransceiver, mimeType: string) {
   transceiver.setCodecPreferences([...preferred, ...codecs.filter((c) => !preferred.includes(c))])
 }
 
-async function capSender(sender: RTCRtpSender, track: MediaStreamTrack) {
-  const { height = TARGET.height } = track.getSettings()
+// The 720 budget applies to the shorter side, so a portrait 720x1280 phone frame is not shrunk to 405x720.
+export function scaleDownBy({ width, height }: { width?: number; height?: number }): number {
+  const sides = [width, height].filter((side): side is number => side !== undefined && side > 0)
+  if (sides.length === 0) return 1
+  return Math.max(1, Math.min(...sides) / TARGET.height)
+}
+
+async function capSender(sender: VideoSender, track: MediaStreamTrack) {
   const params = sender.getParameters()
   const [encoding = {}] = params.encodings
   params.encodings = [
@@ -34,10 +42,18 @@ async function capSender(sender: RTCRtpSender, track: MediaStreamTrack) {
       ...encoding,
       maxBitrate: TARGET.maxBitrate,
       maxFramerate: TARGET.fps,
-      scaleResolutionDownBy: Math.max(1, height / TARGET.height),
+      scaleResolutionDownBy: scaleDownBy(track.getSettings()),
     },
   ]
   await sender.setParameters(params)
+}
+
+type VideoSender = Pick<RTCRtpSender, 'replaceTrack' | 'getParameters' | 'setParameters'>
+
+// Fails only when the sender keeps the old track. A missed bitrate cap still sends the new picture.
+export async function replaceSenderVideo(sender: VideoSender, track: MediaStreamTrack): Promise<void> {
+  await sender.replaceTrack(track)
+  await capSender(sender, track).catch(() => {})
 }
 
 // WHIP: POST the complete offer with the bearer token, get the answer and a session URL back.
@@ -62,9 +78,15 @@ export async function publish(capture: Capture, whipUrl: string, token: string):
     const session = response.headers.get('Location')
     return {
       peer,
+      replaceVideo: (track) => replaceSenderVideo(video.sender, track),
       close: async () => {
         if (session) {
-          await fetch(session, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => {})
+          // keepalive lets the DELETE outlive a page that is being hidden or unloaded.
+          await fetch(session, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+            keepalive: true,
+          }).catch(() => {})
         }
         peer.close()
       },

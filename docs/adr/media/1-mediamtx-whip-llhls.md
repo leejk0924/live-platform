@@ -98,3 +98,7 @@ PC는 Windows의 Chrome 156.0.8078.8, 휴대폰은 iPhone 15 Pro(iOS 26.6.2) Saf
 ## Follow-up (2026-11-09, #12 녹화)
 
 녹화는 MediaMTX fMP4 세그먼트를 API가 `RecordingStorage`(로컬·S3)로 옮기고, 다시보기는 5분짜리 서명 URL로 일반 `<video>`에서 재생한다. CloudFront 서명은 RSA가 아니라 ECDSA P-256이다. 결정과 이유는 [recording/12-recording-replay](../recording/12-recording-replay.md).
+
+## Follow-up (2026-11-09, #9 모바일 송출)
+
+휴대폰 카메라 송출을 같은 WHIP 경로에 더했다. 위의 "Android 송출(2번)은 #9 전에 확인한다"는 이번에도 실기기 없이 헤드리스 Chrome 모바일 에뮬레이션으로만 확인했다. MediaMTX WHIP 응답은 영상 방향 확장(CVO)을 협상하지 않아 휴대폰을 돌리면 송출 해상도가 바뀐다. 결정과 이유는 [media/9-mobile-camera-publish](9-mobile-camera-publish.md).
