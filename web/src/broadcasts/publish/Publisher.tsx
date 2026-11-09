@@ -3,28 +3,18 @@ import { broadcastApi } from '../../api/broadcasts.ts'
 import { errorMessage } from '../../api/client.ts'
 import type { Broadcast } from '../../api/types.ts'
 import {
-  availableSources,
-  CameraSwitchError,
   captureCamera,
   captureScreen,
   otherFacing,
-  pausesInBackground,
-  switchCamera,
-  type CameraCapture,
+  publishOptions,
+  switchSentCamera,
   type Capture,
   type Facing,
   type Source,
 } from './capture.ts'
 import { watchConnection } from '../webrtc.ts'
+import { backgroundAction, type Phase } from './phase.ts'
 import { publish, videoStatsSampler, WhipError, type Publication, type SendStats } from './whip.ts'
-
-type Phase =
-  | { kind: 'idle' }
-  | { kind: 'capturing' }
-  | { kind: 'connecting' }
-  | { kind: 'publishing'; stats: SendStats | null }
-  | { kind: 'paused' }
-  | { kind: 'stopping' }
 
 type Session = {
   capture: Capture
@@ -67,7 +57,7 @@ function formatStats(stats: SendStats): string {
 }
 
 export default function Publisher({ broadcast, onChanged }: { broadcast: Broadcast; onChanged: () => void }) {
-  const sources = availableSources(navigator.mediaDevices)
+  const [{ sources, pausesInBackground: pauses }] = useState(() => publishOptions())
   const [source, setSource] = useState<Source>(sources[0] ?? 'screen')
   const [facing, setFacing] = useState<Facing>('user')
   const [switching, setSwitching] = useState(false)
@@ -77,7 +67,6 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
   const session = useRef<Session | null>(null)
   const preview = useRef<HTMLVideoElement>(null)
   const supported = sources.length > 0
-  const pauses = pausesInBackground(source, navigator.mediaDevices)
 
   function release() {
     const current = session.current
@@ -208,40 +197,31 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
     }
     setSwitching(true)
     setError(null)
-    let next: CameraCapture
-    try {
-      next = await switchCamera(current.capture)
-    } catch (e) {
-      const fallback = e instanceof CameraSwitchError ? e.fallback : null
-      if (!fallback) {
-        setSwitching(false)
-        if (session.current === current) lose(CAMERA_LOST)
-        return
-      }
-      next = fallback
-      setError('다른 카메라로 바꾸지 못했습니다.')
-    }
+    const outcome = await switchSentCamera(current.capture, publication.replaceVideo)
     setSwitching(false)
     if (session.current !== current) {
-      next.release()
+      if (outcome.kind !== 'lost') outcome.capture.release()
       return
     }
-    current.capture = next
-    setFacing(next.facing)
-    show(next)
-    await publication.replaceVideo(next.video).catch(() => setError('다른 카메라로 바꾸지 못했습니다.'))
+    if (outcome.kind === 'lost') {
+      lose(CAMERA_LOST)
+      return
+    }
+    if (outcome.kind === 'kept') setError('다른 카메라로 바꾸지 못했습니다.')
+    current.capture = outcome.capture
+    setFacing(outcome.capture.facing)
+    show(outcome.capture)
   }
 
-  // Mobile browsers stop the camera in the background. Leaving lets the media server mark the
-  // broadcast INTERRUPTED, and coming back within the 30 s grace publishes again with a fresh token.
-  // Runs after every render too, so a page hidden while connecting pauses once it publishes, and a
+  // Runs after every render, so a page hidden while connecting pauses once it publishes, and a
   // return that raced the paused render still resumes.
   useEffect(() => {
-    if (!pauses) return
     const sync = () => {
       const hidden = document.visibilityState === 'hidden'
-      if (hidden && phase.kind === 'publishing') pause()
-      else if (!hidden && phase.kind === 'paused') void start()
+      const action = backgroundAction({ phase: phase.kind, hidden, pauses, status: broadcast.status })
+      if (action === 'pause') pause()
+      else if (action === 'resume') void start()
+      else if (action === 'idle') setPhase({ kind: 'idle' })
     }
     sync()
     document.addEventListener('visibilitychange', sync)

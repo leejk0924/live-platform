@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { broadcastApi } from '../../api/broadcasts.ts'
 import type { PlaybackKind, PlaybackSource } from '../../api/types.ts'
+import { isIos } from '../platform.ts'
 import { watchConnection } from '../webrtc.ts'
-import { isIos, playOrder } from './playOrder.ts'
+import { playOrder } from './playOrder.ts'
 import { receive } from './whep.ts'
 
 type Playback = { kind: 'loading' } | { kind: 'playing'; source: PlaybackSource } | { kind: 'failed' }

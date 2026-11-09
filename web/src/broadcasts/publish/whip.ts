@@ -34,7 +34,7 @@ export function scaleDownBy({ width, height }: { width?: number; height?: number
   return Math.max(1, Math.min(...sides) / TARGET.height)
 }
 
-async function capSender(sender: RTCRtpSender, track: MediaStreamTrack) {
+async function capSender(sender: VideoSender, track: MediaStreamTrack) {
   const params = sender.getParameters()
   const [encoding = {}] = params.encodings
   params.encodings = [
@@ -46,6 +46,14 @@ async function capSender(sender: RTCRtpSender, track: MediaStreamTrack) {
     },
   ]
   await sender.setParameters(params)
+}
+
+type VideoSender = Pick<RTCRtpSender, 'replaceTrack' | 'getParameters' | 'setParameters'>
+
+// Fails only when the sender keeps the old track. A missed bitrate cap still sends the new picture.
+export async function replaceSenderVideo(sender: VideoSender, track: MediaStreamTrack): Promise<void> {
+  await sender.replaceTrack(track)
+  await capSender(sender, track).catch(() => {})
 }
 
 // WHIP: POST the complete offer with the bearer token, get the answer and a session URL back.
@@ -70,10 +78,7 @@ export async function publish(capture: Capture, whipUrl: string, token: string):
     const session = response.headers.get('Location')
     return {
       peer,
-      replaceVideo: async (track) => {
-        await video.sender.replaceTrack(track)
-        await capSender(video.sender, track)
-      },
+      replaceVideo: (track) => replaceSenderVideo(video.sender, track),
       close: async () => {
         if (session) {
           // keepalive lets the DELETE outlive a page that is being hidden or unloaded.

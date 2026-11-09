@@ -1,3 +1,5 @@
+import { isMobile, type Platform } from '../platform.ts'
+
 // Passthrough has no server-side transcoding, so the browser is the only place the
 // 720p30 / 2.5 Mbps budget can hold.
 export const TARGET = { width: 1280, height: 720, fps: 30, maxBitrate: 2_500_000 } as const
@@ -18,18 +20,20 @@ export type Capture = ScreenCapture | CameraCapture
 
 type Devices = { getDisplayMedia?: unknown; getUserMedia?: unknown } | undefined
 
-// Screen first, so a PC that can do both keeps screen sharing as the default.
-export function availableSources(devices: Devices): Source[] {
-  const sources: Source[] = []
-  if (typeof devices?.getDisplayMedia === 'function') sources.push('screen')
-  if (typeof devices?.getUserMedia === 'function') sources.push('camera')
-  return sources
-}
+export type PublishPlatform = Platform & { mediaDevices?: Devices }
+export type PublishOptions = { sources: Source[]; pausesInBackground: boolean }
 
 // Mobile browsers stop camera capture in the background while desktop browsers keep it, and a PC
-// screen sharer switches tabs all the time. No getDisplayMedia is how a mobile browser shows itself.
-export function pausesInBackground(source: Source, devices: Devices): boolean {
-  return source === 'camera' && typeof devices?.getDisplayMedia !== 'function'
+// screen sharer switches tabs all the time. Screen sharing from a phone is untested, so phones get
+// only the camera. Screen comes first so a PC that can do both keeps it as the default.
+export function publishOptions(nav: PublishPlatform = navigator): PublishOptions {
+  const devices = nav.mediaDevices
+  const camera = typeof devices?.getUserMedia === 'function'
+  if (isMobile(nav)) return { sources: camera ? ['camera'] : [], pausesInBackground: true }
+  const sources: Source[] = []
+  if (typeof devices?.getDisplayMedia === 'function') sources.push('screen')
+  if (camera) sources.push('camera')
+  return { sources, pausesInBackground: false }
 }
 
 export function otherFacing(facing: Facing): Facing {
@@ -131,6 +135,32 @@ export async function switchCamera(capture: CameraCapture): Promise<CameraCaptur
     const video = await cameraTrack({ ...CAMERA_SIZE, facingMode: capture.facing }).catch(() => null)
     throw new CameraSwitchError(error, video && cameraCapture(video, capture.audio, capture.facing))
   }
+}
+
+export type CameraSwitch =
+  | { kind: 'switched'; capture: CameraCapture }
+  | { kind: 'kept'; capture: CameraCapture; error: unknown }
+  | { kind: 'lost' }
+
+// The old camera is already stopped, so a sender that will not take the new one sends nothing.
+export async function switchSentCamera(
+  capture: CameraCapture,
+  replace: (track: MediaStreamTrack) => Promise<void>,
+): Promise<CameraSwitch> {
+  let outcome: CameraSwitch
+  try {
+    outcome = { kind: 'switched', capture: await switchCamera(capture) }
+  } catch (error) {
+    if (!(error instanceof CameraSwitchError) || !error.fallback) return { kind: 'lost' }
+    outcome = { kind: 'kept', capture: error.fallback, error }
+  }
+  try {
+    await replace(outcome.capture.video)
+  } catch {
+    outcome.capture.video.stop()
+    return { kind: 'lost' }
+  }
+  return outcome
 }
 
 // WHIP carries one audio track, so tab audio and the microphone are summed in Web Audio.
