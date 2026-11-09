@@ -66,6 +66,7 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
   const [error, setError] = useState<string | null>(null)
   const session = useRef<Session | null>(null)
   const preview = useRef<HTMLVideoElement>(null)
+  const starting = useRef(false)
   const supported = sources.length > 0
 
   function release() {
@@ -136,7 +137,18 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
     onChanged()
   }
 
+  // Two quick returns to the page can both see the paused phase before it re-renders.
   async function start() {
+    if (starting.current) return
+    starting.current = true
+    try {
+      await begin()
+    } finally {
+      starting.current = false
+    }
+  }
+
+  async function begin() {
     setError(null)
     setNotice(null)
     setPhase({ kind: 'capturing' })
