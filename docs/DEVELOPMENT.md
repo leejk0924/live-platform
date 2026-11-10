@@ -84,6 +84,7 @@ Refs #<이슈 번호>
 - AI 작성자 표기(`Co-Authored-By` 등)를 넣지 않는다.
 - 최소 기능 단위마다 커밋하고, **각 커밋은 검증 명령을 통과한 상태**여야 한다.
 - PR CI가 `scripts/check-commit-msg.sh`로 형식을 검사한다. push 전에 로컬에서도 돌릴 수 있다.
+- dependabot PR은 이 검사를 건너뛴다. dependabot 커밋에는 `Refs #N`을 넣을 수 없기 때문이다. 머지할 때 squash 메시지를 이 규칙대로 직접 쓴다(예: `build: <한국어 요약> (#PR)` + `Refs #14`).
 - clone마다 한 번 `git config core.hooksPath .githooks`를 실행한다. `.githooks/pre-commit`이 staged 변경을 gitleaks로 검사해 비밀값이 든 커밋을 막는다. gitleaks가 없으면 digest를 고정한 이미지를 docker로 돌린다.
 
 ```bash
@@ -130,7 +131,7 @@ cd web && npm run lint && npm test && npm run typecheck && npm run build
 | `rust` | fmt, clippy, test(Postgres 서비스로 DB 테스트 포함), 계층 의존성(`check-layer-deps.sh`) |
 | `cargo-deny` | 라이선스, 취약점, 금지 crate |
 | `gitleaks` | 비밀값 유출 |
-| `commit-messages` | 커밋 메시지 형식 (PR만) |
+| `commit-messages` | 커밋 메시지 형식 (PR만, dependabot PR 제외) |
 | `web` | npm audit(high 이상), lint, test, typecheck, build |
 
 ## 7. 코드 규칙 요약
