@@ -60,8 +60,7 @@ DB 테스트는 `#[ignore]`라 `cargo test --workspace -- --include-ignored`로 
 | 남의 방송으로 송출(하이재킹) | EdDSA JWT, TTL 60초, 경로 한정, `jti` 1회용, 송출 허가를 MediaMTX가 API에 묻는다 | `crates/infrastructure/src/media/jwt.rs`, `crates/api/src/internal.rs` | `tests/media_admission.rs` `a_token_publishes_only_to_its_own_broadcast`, `fifty_concurrent_uses_of_one_token_admit_one` |
 | 가짜 송출 시작·종료 이벤트 | `/internal/*`은 공유 비밀값(상수 시간 비교), 공개 `/api` 밖 | `crates/api/src/internal.rs` | `tests/media_hooks.rs` `hooks_need_the_secret_and_a_known_shape`, `tests/media_admission.rs` `the_internal_routes_are_not_under_the_public_api` |
 | MediaMTX 관리 API 노출 | Control API는 내부망 전용, JWT 필요, 외부 포트 없음 | `compose.yml`, `deploy/mediamtx/mediamtx.yml` | `deploy/README.md` 1절 포트 표 |
-
-미구현: 녹화 서명 URL(#12).
+| 녹화 파일 무단 접근 | 녹화 파일은 5분짜리 서명 URL로만 내준다. 로컬 저장소는 HMAC-SHA256 서명을 요청마다 확인하고, S3는 CloudFront ECDSA P-256 서명 URL. 방송을 지우면 이미 받은 URL도 404 | `crates/infrastructure/src/recording/local_url.rs`, `crates/infrastructure/src/recording/cloudfront.rs`, `crates/api/src/recording.rs` | `recording::local_url` `a_signed_url_verifies_until_it_expires`, `a_url_changed_in_any_part_does_not_verify`, `recording::cloudfront` `signs_the_canned_policy_with_sha256`, `tests/recordings.rs` `a_file_url_must_carry_its_own_valid_signature`, `deleting_the_broadcast_cuts_off_its_recordings_at_once` |
 
 ### S6. 결제
 
@@ -82,13 +81,15 @@ DB 테스트는 `#[ignore]`라 `cargo test --workspace -- --include-ignored`로 
 | 대상 | 한도 | 코드 | 검증 |
 |---|---|---|---|
 | 로그인 | IP당 분 10, 사용자명당 분 5 | `crates/api/src/rate_limit.rs` | `tests/auth.rs` `repeated_logins_for_one_username_are_rate_limited` |
-| 회원가입 | IP당 10분 5 | `crates/api/src/rate_limit.rs` | `api::rate_limit` `signup_allows_five_per_client_then_says_when_to_retry` |
+| 회원가입 | IP당 2분 5 | `crates/api/src/rate_limit.rs` | `api::rate_limit` `signup_allows_five_per_client_then_says_when_to_retry` |
 | 결제 webhook | 클라이언트당 분 60(넘으면 Toss 조회 전에 429, Toss가 재전송) | `crates/api/src/rate_limit.rs` | `api::donation` `the_webhook_is_rate_limited_per_client_before_asking_toss` |
 | 후원 주문 | 사용자당 3초에 1건(`DONATION_ORDER_INTERVAL`) | `crates/application/src/donation.rs` | `application::donation` `orders_are_spaced_out_per_donor`, `tests/donations.rs` `a_donor_orders_again_only_after_a_pause` |
+| 댓글 쓰기 | 사용자당 1초에 1건(`POST_INTERVAL`), 소유자가 켜는 슬로우 모드(소유자는 제외) | `crates/domain/src/comment.rs`, `crates/application/src/comment.rs` | `tests/comments.rs` `a_user_posts_at_most_once_per_second`, `slow_mode_holds_back_viewers_but_not_the_owner` |
+| 댓글 SSE 연결 | 클라이언트당 20개(`MAX_STREAMS_PER_CLIENT`) | `crates/api/src/comment_stream.rs` | `api::comment_stream` `a_client_may_hold_20_streams` |
 | 동시 방송 | 사용자당 활성 방송 1개(부분 UNIQUE 인덱스) | `crates/infrastructure/migrations/` | `infrastructure/tests/broadcast_schema.rs` `an_owner_holds_at_most_one_broadcast_in_the_active_statuses` |
 | 컨테이너 자원 | CPU·메모리·PID·로그 크기 제한 | `compose.yml` | `docker compose config` |
 
-미구현: 방송 시작 분당 5회 제한, 댓글·SSE 제한(#11). AWS WAF/Shield와 분산 속도 제한은 ADR에만 둔다.
+미구현: 방송 시작 분당 5회 제한. AWS WAF/Shield와 분산 속도 제한은 ADR에만 둔다.
 
 ### S8. 인프라·공급망
 
