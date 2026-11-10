@@ -9,6 +9,10 @@
 - [실행 방법](#실행-방법)
 - [기능 확인 절차](#기능-확인-절차)
 - [지원 환경](#지원-환경)
+- [아키텍처](#아키텍처)
+- [확장 설계](#확장-설계)
+- [보안 요약](#보안-요약)
+- [더 읽을 문서](#더-읽을-문서)
 - [Credits](#credits)
 
 ## 서비스 주소
@@ -225,10 +229,148 @@ docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.
 
 이미지 안에서 빌드하므로 스택을 띄우는 데는 Rust와 Node가 필요 없다.
 
+## 아키텍처
+
+### 서비스 구성
+
+서버 한 대에 docker compose로 네 서비스를 띄운다. 밖으로 열린 것은 Caddy(80, 443)와 MediaMTX의 WebRTC 미디어 포트(8189)뿐이다. api, Postgres, MediaMTX Control API는 compose 내부망에만 있다.
+
+```mermaid
+flowchart LR
+    B["브라우저 (PC, 휴대폰)"]
+    subgraph host["docker compose (서버 1대)"]
+        C["caddy<br/>HTTPS 종료, SPA 정적 파일"]
+        A["api<br/>Rust, axum"]
+        M["mediamtx<br/>WHIP, WHEP, LL-HLS"]
+        P[("postgres")]
+        R[("녹화 볼륨<br/>recording_spool, recording_store")]
+    end
+    T["Toss Payments<br/>샌드박스"]
+    S["S3 + CloudFront<br/>RECORDING_STORAGE=s3일 때"]
+
+    B -- "HTTPS 443: SPA, /api/*" --> C
+    B -- "HTTPS 443: /media/hls/*, /media/webrtc/*" --> C
+    B -- "WebRTC 미디어 8189 UDP, TCP" --> M
+    B -- "결제위젯 (/pay/checkout)" --> T
+    C -- "/api/*" --> A
+    C -- "/media/hls/* :8888, /media/webrtc/* :8889" --> M
+    M -- "송출 허가 /internal/media/auth, 상태 hook /internal/media/hooks" --> A
+    A -- "송출 끊기 (Control API :9997)" --> M
+    A --> P
+    M -- "fMP4 세그먼트" --> R
+    A -- "spool에서 store로 옮기기" --> R
+    A -. "업로드, 서명 URL" .-> S
+    A -- "결제 승인, 조회" --> T
+```
+
+송출 한 번의 흐름은 다음과 같다.
+
+1. 소유자가 `방송 시작`을 누르면 api(`POST /api/broadcasts/{id}/start`)가 조건부 UPDATE로 방송을 `LIVE`로 바꾸고 60초짜리 1회용 송출 JWT(EdDSA)를 준다.
+2. 브라우저가 그 토큰으로 `/media/webrtc/.../whip`에 WHIP 요청을 보낸다. MediaMTX는 api의 `/internal/media/auth`에 허가를 묻고, api는 서명, 경로, 소유자, 방송 상태를 확인한 뒤 `jti`를 소비한다.
+3. 송출이 끊기면 MediaMTX hook이 api에 알리고 방송은 `INTERRUPTED`가 된다. 다시 송출하면 `LIVE`로 돌아온다. 30초 안에 돌아오지 않으면 5초마다 도는 reaper가 `ENDED`로 바꾸고 남은 송출을 끊는다.
+4. 시청자는 `GET /api/broadcasts/{id}/playback`으로 LL-HLS와 WHEP 주소를 순서대로 받아 재생한다.
+5. 녹화 구간이 끝나면 hook이 api에 알리고, api가 파일을 녹화 저장소로 옮긴 뒤 `READY`로 표시한다.
+
+방송 상태는 `READY → LIVE ⇄ INTERRUPTED(30초 유예) → ENDED`다. 모든 상태 전이는 `UPDATE ... WHERE id = $1 AND owner_id = $2 AND status IN (...)` 한 문장으로 하고, 영향받은 행이 0이면 409, 403, 404 중 하나로 답한다.
+
+### 코드 구조
+
+Cargo workspace 네 crate로 나눈 Hexagonal(Ports & Adapters) 구조다. 의존은 안쪽으로만 향하고, `scripts/check-layer-deps.sh`가 CI에서 `domain`과 `application`의 의존성을 허용 목록과 비교한다.
+
+| crate | 역할 | 의존할 수 있는 crate |
+|---|---|---|
+| `domain` | 엔티티, 값 객체, 상태 머신, 도메인 에러 | 없음 (`thiserror`만) |
+| `application` | 유스케이스, port trait | `domain` |
+| `infrastructure` | sqlx, MediaMTX, S3, Toss, JWT adapter | `domain`, `application` |
+| `api` | axum handler, DTO, DI 조립(`main`) | 모두 |
+
+- `domain`과 `application`에는 AWS, MediaMTX, Postgres, axum 같은 인프라 이름이 나오지 않는다.
+- port는 작게 나눈다. 예를 들어 미디어는 `IngestRouter`, `PublishAuthorizer`, `PlaybackResolver`, `StreamTerminator`로 나뉜다. 주입은 `Arc<dyn Trait>`다.
+- API 계약은 utoipa가 핸들러에서 만든 OpenAPI(`/api/openapi.json`)이고, 웹 클라이언트 타입은 그 명세에서 생성한다.
+- ID는 Snowflake `BIGINT`이고 JSON에서는 문자열이다.
+
+설계 결정과 그 이유는 [ADR 목록](docs/adr/README.md)에 기능별로 있다.
+
+## 확장 설계
+
+구현은 서버 한 대지만, 평상시 동시 시청 약 130만, 이벤트 피크 500만을 가정하고 구조를 나눴다. 숫자는 설계 방향을 정하려고 세운 추정이다.
+
+| 구분 | 방송인 | 평균 동시 시청 |
+|---|---|---|
+| 소형 | 약 1,000 | 1,000 이하 |
+| 중형 | 약 100 | 약 5,000 |
+| 대형 | 약 25 | 약 20,000 |
+| 이벤트 피크 | | 합계 500만 |
+
+피크 시청 대역은 약 15Tbps다. 서버 한 대로는 낼 수 없고 WebRTC SFU로는 노드가 수천 대 필요하다. 그래서 기본 시청 방식을 CDN에 얹을 수 있는 LL-HLS로 정했고, WebRTC는 저지연이 필요한 시청자만 고른다.
+
+서비스는 다섯 plane으로 나누고 plane마다 따로 늘린다.
+
+| plane | 무엇에 비례하나 | 지금 | 확장할 때 |
+|---|---|---|---|
+| Control (api) | API 요청 수 | api 1개, 세션과 상태는 Postgres | 로드 밸런서 뒤 N개 |
+| Ingest | 송출자 수 | MediaMTX 1개 (`IngestRouter`) | 미디어 노드 풀과 노드 배정 |
+| Delivery | 시청자 수 | MediaMTX가 LL-HLS, WHEP를 직접 냄 (`PlaybackResolver`) | LL-HLS 오리진 + CDN, 선택적 트랜스코딩 |
+| Realtime | 댓글을 보는 시청자 수 | SSE + Postgres `LISTEN/NOTIFY` (`EventBus`), 200ms 묶음 | SSE 게이트웨이 N개, Redis나 NATS |
+| Data | 읽기 요청 수 | Postgres 1개, 쓰기 Repository와 읽기 Query port 분리 | primary + replica, 캐시 |
+
+다중 노드, CDN 라이브 전달, 트랜스코딩은 port와 경계만 두고 구현하지 않았다. 가정에서 나온 수치, 인스턴스 밖으로 뺀 상태와 port, 댓글 저장 확장 단계는 [`docs/capacity-plan.md`](docs/capacity-plan.md)에 있다.
+
+## 보안 요약
+
+원칙은 deny by default다. 허용할 경로만 열고, 인가는 handler가 아니라 유스케이스에서 한다. 위협(S1~S10)마다 막는 코드와 그 테스트는 [`SECURITY.md`](SECURITY.md)에 있다.
+
+| 영역 | 하는 일 |
+|---|---|
+| 로그인과 세션 | argon2id 해시(`spawn_blocking`과 세마포어로 동시 실행 수 제한), 비밀번호 10자 이상과 유출 목록 거부. 256bit 세션 토큰은 SHA-256만 저장하고 `__Host-` HttpOnly Secure SameSite=Lax 쿠키로 준다. 유휴 30분, 최대 7일, 로그인할 때마다 새로 발급. 없는 계정과 틀린 비밀번호는 같은 에러다 |
+| CSRF | 상태를 바꾸는 `/api` 요청은 허용된 `Origin`과 정확히 같고 `X-Requested-With: live-platform` 헤더가 있어야 한다 |
+| 인가 | 소유자 확인과 실행을 조건부 UPDATE 한 문장으로 한다. 요청 DTO는 `owner_id`, `status`, `version`을 받지 않는다. 수정 충돌은 `If-Match`와 `version`으로 막는다. SQL은 sqlx 바인딩만 쓴다 |
+| 송출 | 60초짜리 EdDSA JWT는 방송 경로 하나에만 쓰이고 `jti`로 한 번만 쓰인다. MediaMTX가 송출마다 api에 허가를 묻는다. hook 경로 `/internal/*`은 Caddy가 밖으로 내지 않고, 공유 비밀값을 상수 시간으로 비교한다 |
+| 결제 | 금액이 주문과 다르면 Toss를 부르지 않는다. 승인은 주문마다 같은 `Idempotency-Key`로 하고, `PENDING`에서 한 번만 적립한다. `payment_key`는 UNIQUE다. webhook 본문은 믿지 않고 Toss 조회 API로 다시 확인한다. `test_` 키만 받는다 |
+| 녹화 | 파일은 5분 서명 URL(로컬 HMAC-SHA256, CloudFront ECDSA P-256)로만 내준다 |
+| 브라우저 헤더 | CSP `script-src 'self'`(인라인 스크립트 없음), `frame-ancestors 'none'`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `Server` 헤더 제거. Toss를 허용하는 넓은 CSP는 `/pay` 문서에만 준다. 운영 HSTS는 1년 |
+| 남용 | 로그인 IP당 분당 10회·아이디당 분당 5회, 가입 2분에 5회, 댓글 사용자당 1초에 1건과 슬로우 모드, SSE 클라이언트당 20개, 후원 주문 3초에 1건, 사용자당 진행 중 방송 1개. API 요청 10초, 본문 64KB, Caddy 헤더 10초·본문 30초 |
+| 로그와 에러 | 에러 응답은 `{code, message, traceId}`만 담는다. 비밀값은 `Secret<T>`로 감싸 로그에 나오지 않는다. 로그인 실패, 403, 송출 끊기, 결제는 감사 로그(target `audit`)에 남긴다 |
+| 컨테이너와 공급망 | 모든 서비스가 non-root, read-only rootfs, `cap_drop: ALL`, `no-new-privileges`이고 CPU·메모리·PID·로그 크기 상한이 있다. 베이스 이미지는 digest로 고정했다. cargo-deny, npm audit, gitleaks(pre-commit과 CI), Dependabot을 쓴다 |
+
+실행 중인 스택의 헤더, slowloris 차단, 컨테이너 설정은 `bash deploy/check-hardening.sh local`로 확인한다. 로그인 실패 횟수에 따른 지연, 결제 취소·환불, WAF, AWS 쪽 설정(IMDSv2, IAM Role, SSM)은 구현하지 않았다.
+
+## 더 읽을 문서
+
+| 문서 | 내용 |
+|---|---|
+| [`intent.md`](intent.md) | 목표, 하지 않는 것, 규모 가정, 원칙 |
+| [`docs/adr/README.md`](docs/adr/README.md) | 설계 결정 기록(ADR) 목록 |
+| [`docs/capacity-plan.md`](docs/capacity-plan.md) | 확장 설계 상세 |
+| [`SECURITY.md`](SECURITY.md) | 위협별 대응 코드와 테스트, 취약점 신고 |
+| [`deploy/README.md`](deploy/README.md) | 배포 구성, 운영 절차, 문제 해결 |
+| [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) | 개발 절차, 검증 명령, CI |
+| [`features/README.md`](.claude/skills/verify-live-platform/features/README.md) | 기능별 동작 정의와 자동 확인 절차 |
+
 ## Credits
+
+이 프로젝트가 쓰는 오픈소스와 외부 서비스다. 라이선스는 각 패키지 메타데이터(`Cargo.toml`, `package.json`)와 저장소의 `LICENSE`에서 확인했다.
 
 | 이름 | 쓰는 곳 | 라이선스 |
 |---|---|---|
+| [MediaMTX](https://github.com/bluenviron/mediamtx) | 미디어 서버. WHIP 송출 수신, LL-HLS와 WHEP 전달, fMP4 녹화 | MIT |
+| [Caddy](https://github.com/caddyserver/caddy) | HTTPS 종료(내부 CA, Let's Encrypt), 리버스 프록시, 보안 헤더, SPA 정적 파일 | Apache-2.0 |
+| [PostgreSQL](https://www.postgresql.org/) | 데이터 저장, `LISTEN/NOTIFY`, advisory lock | [PostgreSQL License](https://www.postgresql.org/about/licence/) |
+| [axum](https://github.com/tokio-rs/axum) | HTTP API 서버(handler, router, SSE) | MIT |
+| [tokio](https://github.com/tokio-rs/tokio) | 비동기 런타임, `spawn_blocking`, 세마포어, 타이머 | MIT |
+| [tower-http](https://github.com/tower-rs/tower-http) | handler panic을 에러 응답으로 바꾸기(`catch-panic`), 로컬 녹화 파일의 Range 응답(`ServeFile`) | MIT |
+| [sqlx](https://github.com/launchbadge/sqlx) | Postgres 접속, 바인딩 쿼리, 마이그레이션 | MIT OR Apache-2.0 |
+| [serde](https://github.com/serde-rs/serde), [serde_json](https://github.com/serde-rs/json) | API DTO와 외부 API 응답의 JSON 직렬화 | MIT OR Apache-2.0 |
+| [tracing](https://github.com/tokio-rs/tracing), tracing-subscriber | 구조화 로그, 요청 span, 감사 로그(target `audit`) | MIT |
+| [thiserror](https://github.com/dtolnay/thiserror) | 도메인·유스케이스 에러 타입 | MIT OR Apache-2.0 |
+| [async-trait](https://github.com/dtolnay/async-trait) | `Arc<dyn Trait>`로 주입하는 async port trait | MIT OR Apache-2.0 |
+| [uuid](https://github.com/uuid-rs/uuid) | 에러 응답과 로그의 `traceId` | Apache-2.0 OR MIT |
+| [React](https://github.com/facebook/react) | 웹 SPA 화면 | MIT |
+| [React Router](https://github.com/remix-run/react-router) | SPA 라우팅 | MIT |
+| [Vite](https://github.com/vitejs/vite), [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react) | 웹 개발 서버와 빌드 | MIT |
+| [TypeScript](https://github.com/microsoft/TypeScript) | 웹 코드 타입 검사 | Apache-2.0 |
+| [oxlint](https://github.com/oxc-project/oxc) | 웹 코드 lint | MIT |
+| [Playwright](https://github.com/microsoft/playwright) (`playwright-core`) | 기능 자동 확인 스크립트(`.claude/skills/verify-live-platform`)의 브라우저 조작 | Apache-2.0 |
 | [argon2](https://github.com/RustCrypto/password-hashes) | 비밀번호 해시(argon2id) | MIT OR Apache-2.0 |
 | [sha2](https://github.com/RustCrypto/hashes) | 세션 토큰의 SHA-256 저장 | MIT OR Apache-2.0 |
 | [hmac](https://github.com/RustCrypto/MACs) | 로컬 녹화 파일 URL의 HMAC-SHA256 서명 | MIT OR Apache-2.0 |
