@@ -1,12 +1,17 @@
-// Feature: layout (features/layout.md). Every screen of the SPA, at desktop 1280x800 and phone 390x844, in the dark
-// and light color schemes: a full-page screenshot, no horizontal scroll, 44x44 px touch targets on the phone, no
-// browser-default links or form controls, and WCAG text contrast against the background actually behind the text.
+// Feature: layout (features/layout.md). Every screen of the SPA, at desktop 1280x800 and phones 390x844 and 360x780,
+// in the dark and light color schemes: a full-page screenshot, no horizontal scroll, 44x44 px touch targets on the
+// phones, no browser-default links or form controls, and WCAG text contrast against the background actually behind
+// the text.
 import {
   BASE, RUN_ID, log, check, must, shot, launchBrowser, newContext, phoneContext, account, createBroadcast,
   startPublishing, waitStatus, stopBroadcast, api, noCspViolations, summary,
 } from '../lib.mjs'
 
-const VIEWPORTS = ['desktop', 'phone']
+const VIEWPORTS = [
+  { name: 'desktop', size: { width: 1280, height: 800 } },
+  { name: 'phone', size: { width: 390, height: 844 }, phone: true },
+  { name: 'phone360', size: { width: 360, height: 780 }, phone: true },
+]
 const SCHEMES = ['dark', 'light']
 const WORST = 6
 
@@ -212,15 +217,14 @@ try {
   const tally = { overflow: 0, touch: 0, defaults: 0, contrast: 0 }
 
   const sessions = { caster: await castContext.storageState(), viewer: await viewerContext.storageState(), guest: undefined }
-  for (const viewport of VIEWPORTS) {
-    const phone = viewport === 'phone'
+  for (const { name: viewport, size, phone = false } of VIEWPORTS) {
     const contexts = {}
     for (const role of Object.keys(sessions)) {
       const label = `${role}-${viewport}`
-      const options = { storageState: sessions[role] }
+      const options = { storageState: sessions[role], viewport: size }
       contexts[role] = phone
-        ? await phoneContext(browser, label, 'Pixel 7', { ...options, viewport: { width: 390, height: 844 } })
-        : await newContext(browser, label, { ...options, viewport: { width: 1280, height: 800 } })
+        ? await phoneContext(browser, label, 'Pixel 7', options)
+        : await newContext(browser, label, options)
       const page = await contexts[role].newPage()
       pages.push([label, page])
       contexts[role] = page
