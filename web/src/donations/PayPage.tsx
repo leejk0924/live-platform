@@ -17,14 +17,14 @@ export default function PayPage({
   const broadcastId = parseBroadcastId(search)
 
   return (
-    <section className="stack">
+    <section className="page-card">
       <h1 className="page-title">{title}</h1>
       {broadcastId === null ? (
         <p className="error" role="alert">
           어느 방송의 후원인지 알 수 없습니다.
         </p>
       ) : auth.status === 'loading' ? (
-        <p>불러오는 중…</p>
+        <p className="hint-text">불러오는 중…</p>
       ) : auth.status === 'signedOut' ? (
         <p className="error" role="alert">
           로그인이 필요합니다. 로그인한 뒤 방송 화면에서 다시 후원하세요.
@@ -40,7 +40,7 @@ export default function PayPage({
 // A plain anchor, so the broadcast page loads with the strict CSP again.
 function BackToBroadcast({ broadcastId }: { broadcastId: string | null }) {
   return (
-    <p>
+    <p className="links">
       <a href={broadcastId === null ? '/' : broadcastUrl(broadcastId)}>
         {broadcastId === null ? '홈으로' : '방송으로 돌아가기'}
       </a>

@@ -30,12 +30,21 @@ export function RecordingFacts({ recording }: { recording: Recording }) {
 // `withTitle` is off where the broadcast is already on screen.
 export default function RecordingItem({ recording, withTitle }: { recording: Recording; withTitle: boolean }) {
   return (
-    <li className={`status-${recording.status}`}>
-      <Link to={`/recordings/${recording.id}`}>
-        {withTitle && <span className="broadcast-title">{recording.broadcastTitle}</span>}
-        <span className="broadcast-meta">
-          {withTitle && `${recording.ownerName} · `}
-          <RecordingFacts recording={recording} />
+    <li className="card">
+      <Link to={`/recordings/${recording.id}`} className="card-link">
+        <span className={`thumb thumb-${recording.status}`} aria-hidden="true">
+          <svg className="thumb-icon" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="9" />
+            <path d="m10 8.5 5 3.5-5 3.5z" />
+          </svg>
+          <span className="thumb-duration">{formatDuration(recording.durationMs)}</span>
+        </span>
+        <span className="card-body">
+          {withTitle && <span className="card-title">{recording.broadcastTitle}</span>}
+          <span className="card-meta">
+            {withTitle && `${recording.ownerName} · `}
+            <RecordingFacts recording={recording} />
+          </span>
         </span>
       </Link>
     </li>

@@ -34,17 +34,26 @@ function RecordingPage({ id }: { id: string }) {
     setAttempt((n) => n + 1)
   }, [])
 
-  if (load.status === 'loading') return <p>불러오는 중…</p>
+  if (load.status === 'loading') {
+    return (
+      <div className="recording-page" aria-busy="true">
+        <div className="stage skeleton" />
+        <p className="hint-text">불러오는 중…</p>
+      </div>
+    )
+  }
   if (load.status === 'failed') return <LoadFailed error={load.error} onRetry={reload} subject="recording" />
   const { recording } = load
   return (
-    <article className="stack">
-      <h1 className="broadcast-heading">{recording.broadcastTitle}</h1>
-      <p className="broadcast-meta">
-        {recording.ownerName} · <RecordingFacts recording={recording} />
-      </p>
+    <article className="recording-page">
       <Screen recording={recording} onRefresh={reload} />
-      <p>
+      <div className="broadcast-info">
+        <h1 className="broadcast-heading">{recording.broadcastTitle}</h1>
+        <p className="broadcast-meta">
+          {recording.ownerName} · <RecordingFacts recording={recording} />
+        </p>
+      </div>
+      <p className="links">
         <Link to={`/broadcasts/${recording.broadcastId}`}>방송 페이지로</Link>
         {' · '}
         <Link to="/recordings">다시보기 목록</Link>
@@ -59,9 +68,9 @@ function Screen({ recording, onRefresh }: { recording: Recording; onRefresh: () 
       return <ReplayPlayer key={recording.id} recordingId={recording.id} />
     case 'PENDING':
       return (
-        <div className="stack">
-          <p className="notice">녹화를 저장하는 중입니다. 잠시 후 새로고침하세요.</p>
-          <div className="actions">
+        <div className="stage">
+          <div className="stage-notice">
+            <p>녹화를 저장하는 중입니다. 잠시 후 새로고침하세요.</p>
             <button type="button" onClick={onRefresh}>
               새로고침
             </button>
@@ -69,6 +78,12 @@ function Screen({ recording, onRefresh }: { recording: Recording; onRefresh: () 
         </div>
       )
     case 'FAILED':
-      return <p className="notice">녹화를 저장하지 못해 다시 볼 수 없습니다.</p>
+      return (
+        <div className="stage">
+          <div className="stage-notice">
+            <p>녹화를 저장하지 못해 다시 볼 수 없습니다.</p>
+          </div>
+        </div>
+      )
   }
 }

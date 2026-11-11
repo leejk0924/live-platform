@@ -562,6 +562,7 @@ textarea {
 }
 
 .thumb {
+  position: relative;
   display: grid;
   place-items: center;
   aspect-ratio: 16 / 9;
@@ -759,6 +760,40 @@ textarea {
   color: var(--color-text-muted);
   font-size: 0.8125rem;
   font-weight: 600;
+}
+
+.thumb-duration {
+  position: absolute;
+  right: var(--space-sm);
+  bottom: var(--space-sm);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.thumb-FAILED {
+  background:
+    radial-gradient(circle at 75% 20%, color-mix(in srgb, var(--color-error) 35%, transparent), transparent 55%),
+    linear-gradient(135deg, var(--color-surface-2), var(--color-bg));
+}
+
+.recording-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.pay-amount strong {
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Broadcast page: player or publisher with its details, beside a sidebar of donations over comments. */
@@ -1033,45 +1068,6 @@ textarea {
   .publisher-actions > button {
     flex: 1 1 auto;
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation: none !important;
-    transition: none !important;
-  }
-}
-
-
-.broadcast-list {
-  margin: 0 0 1rem;
-  padding: 0;
-  list-style: none;
-}
-
-.broadcast-list li {
-  border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
-}
-
-.broadcast-list a {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.75rem 0;
-  color: inherit;
-  text-decoration: none;
-}
-
-.broadcast-title {
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.broadcast-list .status-ENDED,
-.broadcast-list .status-FAILED {
-  opacity: 0.55;
 }
 
 .comments,
@@ -1352,5 +1348,14 @@ textarea {
   .comment-actions button,
   .donation-presets button {
     min-height: var(--target);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
   }
 }

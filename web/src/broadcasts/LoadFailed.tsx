@@ -18,7 +18,7 @@ export default function LoadFailed({
   const text = subjects[subject]
   const notFound = error instanceof ApiError && error.code === text.notFoundCode
   return (
-    <>
+    <section className="page-card page-card-narrow">
       <h1>{notFound ? text.notFound : text.failed}</h1>
       {!notFound && (
         <p className="error" role="alert">
@@ -32,9 +32,9 @@ export default function LoadFailed({
           </button>
         </div>
       )}
-      <p>
+      <p className="links">
         <Link to="/">홈으로</Link>
       </p>
-    </>
+    </section>
   )
 }
