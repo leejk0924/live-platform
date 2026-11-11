@@ -251,66 +251,76 @@ export default function Publisher({ broadcast, onChanged }: { broadcast: Broadca
   const mirrored = source === 'camera' && facing === 'user'
 
   return (
-    <section className="stack publisher" aria-label="송출">
-      {!supported && <p className="error">이 브라우저에서는 송출할 수 없습니다. HTTPS 주소로 접속했는지 확인하세요.</p>}
-      {sources.length > 1 && (
-        <fieldset className="source-choice" disabled={!choosing}>
-          <legend>송출 방식</legend>
-          {sources.map((s) => (
-            <label key={s}>
-              <input type="radio" name="source" value={s} checked={source === s} onChange={() => setSource(s)} />
-              {sourceLabel[s]}
-            </label>
-          ))}
-        </fieldset>
-      )}
-      <div className="actions">
-        {(canStart || !supported) && (
-          <button type="button" onClick={start} disabled={busy || !supported}>
-            방송 시작
-          </button>
-        )}
-        {canStop && (
-          <button type="button" onClick={stop} disabled={busy}>
-            방송 종료
-          </button>
-        )}
-        {supported && source === 'camera' && (canStart || publishing) && (
-          <button type="button" onClick={flipCamera} disabled={busy || switching}>
-            카메라 전환 <span className="facing">({facingLabel[facing]})</span>
-          </button>
+    <section className="publisher" aria-label="송출">
+      <div className="stage">
+        <video
+          ref={preview}
+          className={mirrored ? 'preview mirrored' : 'preview'}
+          autoPlay
+          muted
+          playsInline
+          hidden={choosing}
+        />
+        {choosing && (
+          <svg className="stage-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="2" y="5" width="15" height="14" rx="2" />
+            <path d="m17 10 5-3v10l-5-3" />
+          </svg>
         )}
       </div>
-      <p className="publish-state" role="status">
-        {phase.kind === 'capturing' &&
-          (source === 'camera' ? '카메라와 마이크 권한을 확인하는 중…' : '공유할 화면을 고르세요…')}
-        {phase.kind === 'connecting' && '송출 서버에 연결하는 중…'}
-        {phase.kind === 'publishing' && `송출 중${phase.stats ? ` · ${formatStats(phase.stats)}` : ''}`}
-        {phase.kind === 'stopping' && '방송을 종료하는 중…'}
-      </p>
-      {pauses && choosing && canStart && (
-        <p className="hint-text">
-          방송 중에 휴대폰을 돌리면 화면 크기가 바뀌어 일부 시청자 화면이 멈출 수 있습니다. 방향을 정한 뒤 시작하세요.
+      <div className="publisher-panel">
+        <p className="publish-state" role="status" data-phase={phase.kind}>
+          {phase.kind === 'capturing' &&
+            (source === 'camera' ? '카메라와 마이크 권한을 확인하는 중…' : '공유할 화면을 고르세요…')}
+          {phase.kind === 'connecting' && '송출 서버에 연결하는 중…'}
+          {phase.kind === 'publishing' && `송출 중${phase.stats ? ` · ${formatStats(phase.stats)}` : ''}`}
+          {phase.kind === 'stopping' && '방송을 종료하는 중…'}
         </p>
-      )}
-      {phase.kind === 'paused' && (
-        <p className="notice">화면이 꺼지거나 다른 앱으로 전환되어 송출을 멈췄습니다. 30초 안에 돌아오면 자동으로 이어집니다.</p>
-      )}
-      {interrupted && <p className="notice">연결 끊김, 30초 안에 다시 시작하면 이어집니다.</p>}
-      {notice && <p className="notice">{notice}</p>}
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      <video
-        ref={preview}
-        className={mirrored ? 'preview mirrored' : 'preview'}
-        autoPlay
-        muted
-        playsInline
-        hidden={choosing}
-      />
+        {!supported && <p className="error">이 브라우저에서는 송출할 수 없습니다. HTTPS 주소로 접속했는지 확인하세요.</p>}
+        {sources.length > 1 && (
+          <fieldset className="source-choice" disabled={!choosing}>
+            <legend>송출 방식</legend>
+            {sources.map((s) => (
+              <label key={s}>
+                <input type="radio" name="source" value={s} checked={source === s} onChange={() => setSource(s)} />
+                {sourceLabel[s]}
+              </label>
+            ))}
+          </fieldset>
+        )}
+        <div className="actions publisher-actions">
+          {(canStart || !supported) && (
+            <button type="button" className="button-primary" onClick={start} disabled={busy || !supported}>
+              방송 시작
+            </button>
+          )}
+          {canStop && (
+            <button type="button" className="button-danger" onClick={stop} disabled={busy}>
+              방송 종료
+            </button>
+          )}
+          {supported && source === 'camera' && (canStart || publishing) && (
+            <button type="button" onClick={flipCamera} disabled={busy || switching}>
+              카메라 전환 <span className="facing">({facingLabel[facing]})</span>
+            </button>
+          )}
+        </div>
+        {pauses && choosing && canStart && (
+          <p className="hint-text">
+            방송 중에 휴대폰을 돌리면 화면 크기가 바뀌어 일부 시청자 화면이 멈출 수 있습니다. 방향을 정한 뒤 시작하세요.
+          </p>
+        )}
+        {phase.kind === 'paused' && (
+          <p className="notice">화면이 꺼지거나 다른 앱으로 전환되어 송출을 멈췄습니다. 30초 안에 돌아오면 자동으로 이어집니다.</p>
+        )}
+        {interrupted && <p className="notice">연결 끊김, 30초 안에 다시 시작하면 이어집니다.</p>}
+        {notice && <p className="notice">{notice}</p>}
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
     </section>
   )
 }
