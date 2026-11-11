@@ -319,6 +319,8 @@ textarea {
 .links a {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-width: var(--target);
   min-height: var(--target);
   font-weight: 600;
 }

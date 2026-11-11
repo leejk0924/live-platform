@@ -1,6 +1,6 @@
 # Layout and theme
 
-Every screen uses the design tokens from `design.md`: dark by default, light under `prefers-color-scheme: light`. The home and replay lists are card grids, and the broadcast page puts the player (or the owner's publisher) next to a donations and comments sidebar at 1100 px and wider. Phones get the same screens stacked, with no horizontal scroll and touch targets at least 44 px tall (#9, #56).
+Every screen uses the design tokens from `design.md`: dark by default, light under `prefers-color-scheme: light`. The home and replay lists are card grids, and the broadcast page puts the player (or the owner's publisher) next to a donations and comments sidebar at 1100 px and wider. Phones get the same screens stacked, with no horizontal scroll and touch targets at least 44x44 px (#9, #56).
 
 ## Sub-features
 - Screens: home (signed in and signed out), watch (viewer of a LIVE broadcast), studio (owner of a LIVE broadcast), an ENDED broadcast, broadcast new and edit, login, signup, recordings list and detail, `/pay/checkout`, `/pay/success`, `/pay/fail`, not found.
@@ -8,7 +8,7 @@ Every screen uses the design tokens from `design.md`: dark by default, light und
 - Color schemes: dark and light, through `page.emulateMedia({ colorScheme })`.
 - Rules, each checked on every screen, viewport and scheme:
   - No horizontal scroll: `document.documentElement.scrollWidth <= innerWidth`.
-  - Phone only: every visible `button`, `a[href]`, `input`, `select`, `textarea`, `[role=button]` and `summary` is at least 44 px tall. A checkbox or radio is measured by its `label`. A link inside a sentence (`p` with more text than the link) is exempt, as WCAG 2.5.8 exempts inline links. A link row (`p.links`) is not a sentence, so its links are measured.
+  - Phone only: every visible `button`, `a[href]`, `input`, `select`, `textarea`, `[role=button]` and `summary` is at least 44 px tall and 44 px wide. A checkbox or radio is measured by its `label`. A link inside a sentence (`p` with more text than the link) is exempt, as WCAG 2.5.8 exempts inline links. A link row (`p.links`) is not a sentence, so its links are measured.
   - No browser defaults: no link with the user agent's link color, no link underlined outside a sentence, and no control whose background and border equal an unstyled one in a shadow root (which keeps page CSS out and inherits the color scheme).
   - Text contrast at least 4.5:1, or 3:1 for large text (24 px, or 18.66 px bold). The text color, scaled by the opacity of the element and its ancestors, is blended over every translucent layer down to the first opaque background. A gradient counts at its worst stop. Text under `aria-hidden`, disabled controls and `<option>` are skipped. Placeholders count.
 

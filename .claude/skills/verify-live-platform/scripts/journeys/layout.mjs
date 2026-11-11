@@ -1,5 +1,5 @@
 // Feature: layout (features/layout.md). Every screen of the SPA, at desktop 1280x800 and phone 390x844, in the dark
-// and light color schemes: a full-page screenshot, no horizontal scroll, 44 px touch targets on the phone, no
+// and light color schemes: a full-page screenshot, no horizontal scroll, 44x44 px touch targets on the phone, no
 // browser-default links or form controls, and WCAG text contrast against the background actually behind the text.
 import {
   BASE, RUN_ID, log, check, must, shot, launchBrowser, newContext, phoneContext, account, createBroadcast,
@@ -64,8 +64,8 @@ function audit({ scheme, phone }) {
     for (const el of document.querySelectorAll('button, a[href], input:not([type=hidden]), select, textarea, [role=button], summary')) {
       const target = el.matches('input[type=checkbox], input[type=radio]') ? (el.closest('label') ?? el) : el
       if (!visible(target) || (el.matches('a') && inProse(el))) continue
-      const h = target.getBoundingClientRect().height
-      if (h < 43.5) result.small.push(`${name(target)} ${h.toFixed(0)}px`)
+      const { width, height } = target.getBoundingClientRect()
+      if (Math.min(width, height) < 43.5) result.small.push(`${name(target)} ${width.toFixed(0)}x${height.toFixed(0)}px`)
     }
   }
 
@@ -241,7 +241,7 @@ try {
         await shot(page, id)
         const r = await page.evaluate(audit, { scheme, phone })
         if (!check(r.overflow <= 0, `${id}: no horizontal scroll (scrollWidth - innerWidth = ${r.overflow})`)) tally.overflow++
-        if (phone && !check(r.small.length === 0, `${id}: touch targets at least 44 px tall${r.small.length ? ` (${r.small.length}: ${r.small.slice(0, WORST).join('; ')})` : ''}`)) tally.touch++
+        if (phone && !check(r.small.length === 0, `${id}: touch targets at least 44 px on each side${r.small.length ? ` (${r.small.length}: ${r.small.slice(0, WORST).join('; ')})` : ''}`)) tally.touch++
         if (!check(r.defaults.length === 0, `${id}: no browser-default links (link color, underline outside prose) or controls (UA background and border)${r.defaults.length ? ` (${r.defaults.length}: ${r.defaults.slice(0, WORST).join('; ')})` : ''}`)) tally.defaults++
         const worst = r.contrast.sort((a, b) => a.ratio - b.ratio).slice(0, WORST).map((c) => `${c.what} ${c.ratio.toFixed(2)}<${c.need}`)
         if (!check(r.contrast.length === 0, `${id}: text contrast >= 4.5 (3 for large text) over the real background${r.gradient ? `, ${r.gradient} over gradients at their worst stop` : ''}${worst.length ? ` (${r.contrast.length}: ${worst.join('; ')})` : ''}`)) tally.contrast++
