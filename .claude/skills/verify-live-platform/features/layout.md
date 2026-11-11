@@ -16,13 +16,14 @@ Every screen uses the design tokens from `design.md`: dark by default, light und
 Open each route at a desktop window and on a phone, once with the system in dark mode and once in light mode.
 
 ## Driving it with Playwright
-`bash scripts/run.sh layout` ([journeys/layout.mjs](../scripts/journeys/layout.mjs)), about 3 minutes:
-1. Roles `lcaster` and `lviewer` sign in. The caster goes live for 8 s and ends, which leaves a READY recording, then goes live on a second broadcast and stays live. Viewer and caster each post a comment through the API. The caster creates a third broadcast that stays READY. Role `lphone` goes live from an emulated phone (one owner cannot have two LIVE broadcasts).
+`bash scripts/run.sh layout` ([journeys/layout.mjs](../scripts/journeys/layout.mjs)), about 7 minutes:
+1. Roles `lcaster` and `lviewer` sign in. The caster goes live for 8 s and ends, which leaves a READY recording, then goes live on a second broadcast and stays live. Viewer and caster take turns posting eight comments through the API. The caster creates a third broadcast that stays READY. Role `lphone` goes live from an emulated phone (one owner cannot have two LIVE broadcasts).
 2. For each viewport, a context per role (caster, viewer, guest) starts from the signed-in cookies. For each scheme, each screen is opened, waited for (feed title, playing video, publisher, form, notice), and screenshotted as `<screen>-<desktop|phone|phone360>-<dark|light>.png`. Before each interrupted screen the phone page goes hidden (`setHidden`), its publisher pauses and the broadcast turns INTERRUPTED; the screen is ready when `방송 연결이 끊겼습니다` shows. After it the phone comes back and the broadcast is LIVE again within the 30 s grace.
 3. The audit runs in the page and each rule becomes one check per screen, naming the worst offenders with their size or ratio.
-4. The caster and the phone press `방송 종료`, and the READY broadcast is deleted. No CSP violations on any page.
+4. Short desktop window: the viewer opens the watch screen at 1280x600 (`watch-desktopshort-dark.png`). Scrolled to the top, the comment input (`textbox` named `댓글`) ends within the 600 px; after `scrollIntoViewIfNeeded` it lies inside the viewport; the comment list keeps at least 96 px. The check names the sidebar, donations, comments and list heights.
+5. The caster and the phone press `방송 종료`, and the READY broadcast is deleted. No CSP violations on any page.
 
-End state that proves it: `VERIFY OK (n checks)` with 102 screenshots, and the log line `failing screens per rule {"overflow":0,"touch":0,"defaults":0,"contrast":0}`.
+End state that proves it: `VERIFY OK (n checks)` with 103 screenshots, and the log line `failing screens per rule {"overflow":0,"touch":0,"defaults":0,"contrast":0}`.
 
 ## Gotchas
 - `/pay/checkout` is opened with an out-of-range amount, so the page shows its error without loading Toss. The Toss widget itself runs in Toss's frames and is covered by the donation journey.

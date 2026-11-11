@@ -1,7 +1,7 @@
 // Feature: layout (features/layout.md). Every screen of the SPA, at desktop 1280x800 and phones 390x844 and 360x780,
 // in the dark and light color schemes: a full-page screenshot, no horizontal scroll, 44x44 px touch targets on the
 // phones, no browser-default links or form controls, and WCAG text contrast against the background actually behind
-// the text.
+// the text. In a short desktop window (1280x600) the watch screen keeps the comment input within reach.
 import {
   BASE, RUN_ID, log, check, must, shot, launchBrowser, newContext, phoneContext, account, createBroadcast,
   startPublishing, waitStatus, stopBroadcast, setHidden, api, noCspViolations, summary,
@@ -12,6 +12,7 @@ const VIEWPORTS = [
   { name: 'phone', size: { width: 390, height: 844 }, phone: true },
   { name: 'phone360', size: { width: 360, height: 780 }, phone: true },
 ]
+const SHORT = { width: 1280, height: 600 }
 const SCHEMES = ['dark', 'light']
 const WORST = 6
 
@@ -188,9 +189,16 @@ try {
   const liveTitle = `verify layout ${RUN_ID}`
   liveId = await createBroadcast(castPage, liveTitle)
   must(await startPublishing(castPage, liveId), 'the main broadcast goes LIVE')
-  check((await api(viewerPage, 'POST', `/api/broadcasts/${liveId}/comments`, { body: `안녕하세요, 레이아웃 확인 ${RUN_ID}` })).status === 201, 'viewer posts a comment for the sidebar')
-  await viewerPage.waitForTimeout(1100)
-  check((await api(castPage, 'POST', `/api/broadcasts/${liveId}/comments`, { body: '반갑습니다. 오늘은 화면 공유로 진행합니다.' })).status === 201, 'caster posts a comment for the sidebar')
+  const conversation = [
+    `안녕하세요, 레이아웃 확인 ${RUN_ID}`, '반갑습니다. 오늘은 화면 공유로 진행합니다.', '화면 잘 보여요.', '소리도 괜찮나요?',
+    '네, 잘 들립니다.', '그럼 시작하겠습니다.', '기대됩니다!', '질문은 댓글로 남겨 주세요.',
+  ]
+  for (const [i, body] of conversation.entries()) {
+    // Viewer and caster take turns, so each posts at most once a second (the per-user comment interval).
+    if (i > 0) await castPage.waitForTimeout(600)
+    const page = i % 2 === 0 ? viewerPage : castPage
+    check((await api(page, 'POST', `/api/broadcasts/${liveId}/comments`, { body })).status === 201, `comment ${i + 1} posted for the sidebar`)
+  }
 
   const readyId = await createBroadcast(castPage, `verify layout ready ${RUN_ID}`)
 
@@ -276,6 +284,25 @@ try {
     }
   }
   log('failing screens per rule', JSON.stringify(tally))
+
+  const shortPage = await (await newContext(browser, 'viewer-short', { storageState: sessions.viewer, viewport: SHORT })).newPage()
+  pages.push(['viewer-short', shortPage])
+  await shortPage.emulateMedia({ colorScheme: 'dark' })
+  await shortPage.goto(`${BASE}/broadcasts/${liveId}`)
+  await shortPage.locator('section.player[data-source] video').waitFor({ timeout: 30_000 })
+  await shortPage.locator('.comment').nth(conversation.length - 1).waitFor({ timeout: 15_000 })
+  await shortPage.waitForTimeout(1000)
+  await shortPage.evaluate(() => scrollTo(0, 0))
+  await shot(shortPage, 'watch-desktopshort-dark')
+  const commentInput = shortPage.getByRole('textbox', { name: '댓글', exact: true })
+  const sizes = await shortPage.evaluate(() => ['.broadcast-side', '.donations', '.comments', '.comment-list'].map((s) => `${s} ${Math.round(document.querySelector(s).getBoundingClientRect().height)}`).join(', '))
+  const first = await commentInput.boundingBox()
+  check(first !== null && first.y + first.height <= SHORT.height, `desktop ${SHORT.width}x${SHORT.height}: comment input within the first screen (bottom ${first && Math.round(first.y + first.height)}px; ${sizes})`)
+  await commentInput.scrollIntoViewIfNeeded()
+  const reached = await commentInput.boundingBox()
+  check(reached !== null && reached.y >= 0 && reached.y + reached.height <= SHORT.height, `desktop ${SHORT.width}x${SHORT.height}: comment input reachable by scrolling (${reached && `${Math.round(reached.y)}..${Math.round(reached.y + reached.height)}px`})`)
+  const listHeight = await shortPage.locator('.comment-list').evaluate((el) => el.clientHeight)
+  check(listHeight >= 96, `desktop ${SHORT.width}x${SHORT.height}: comment list keeps room for comments (${listHeight}px)`)
   log('caster', caster.username, 'live', liveId, 'ended', endedId, 'recording', recordingId)
 
   await castPage.bringToFront()
