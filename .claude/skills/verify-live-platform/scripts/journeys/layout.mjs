@@ -4,7 +4,7 @@
 // the text.
 import {
   BASE, RUN_ID, log, check, must, shot, launchBrowser, newContext, phoneContext, account, createBroadcast,
-  startPublishing, waitStatus, stopBroadcast, api, noCspViolations, summary,
+  startPublishing, waitStatus, stopBroadcast, setHidden, api, noCspViolations, summary,
 } from '../lib.mjs'
 
 const VIEWPORTS = [
@@ -161,7 +161,7 @@ function audit({ scheme, phone }) {
 
 const browser = await launchBrowser()
 const pages = []
-let castPage, liveId
+let castPage, liveId, phonePage, phoneId
 try {
   const castContext = await newContext(browser, 'caster')
   castPage = await castContext.newPage()
@@ -192,6 +192,23 @@ try {
   await viewerPage.waitForTimeout(1100)
   check((await api(castPage, 'POST', `/api/broadcasts/${liveId}/comments`, { body: '반갑습니다. 오늘은 화면 공유로 진행합니다.' })).status === 201, 'caster posts a comment for the sidebar')
 
+  const readyId = await createBroadcast(castPage, `verify layout ready ${RUN_ID}`)
+
+  // The owner already has a LIVE broadcast, so a second account publishes from a phone and goes INTERRUPTED in the
+  // background for each interrupted screen, then comes back within the 30 s grace.
+  phonePage = await (await phoneContext(browser, 'phone-publisher')).newPage()
+  await account(phonePage, 'lphone')
+  phoneId = await createBroadcast(phonePage, `verify layout interrupted ${RUN_ID}`)
+  must(await startPublishing(phonePage, phoneId), 'a phone publisher goes LIVE to be interrupted')
+  const interrupt = async () => {
+    await setHidden(phonePage, true)
+    if (!(await waitStatus(phonePage, phoneId, 'INTERRUPTED', 20_000))) throw new Error('the hidden phone publisher did not turn INTERRUPTED')
+  }
+  const resume = async () => {
+    await setHidden(phonePage, false)
+    check(await waitStatus(phonePage, phoneId, 'LIVE', 30_000), 'the phone publisher comes back LIVE within the grace')
+  }
+
   const ready = {
     feed: (title) => (p) => p.locator('section.feed').getByText(title).first().waitFor({ timeout: 15_000 }),
     text: (text) => (p) => p.getByText(text).first().waitFor({ timeout: 15_000 }),
@@ -202,6 +219,8 @@ try {
     { name: 'home-guest', role: 'guest', path: '/', ready: ready.feed(liveTitle) },
     { name: 'watch', role: 'viewer', path: `/broadcasts/${liveId}`, ready: ready.css('section.player[data-source] video') },
     { name: 'studio', role: 'caster', path: `/broadcasts/${liveId}`, ready: ready.css('section.publisher') },
+    { name: 'studio-ready', role: 'caster', path: `/broadcasts/${readyId}`, ready: ready.css('section.publisher') },
+    { name: 'interrupted', role: 'viewer', path: `/broadcasts/${phoneId}`, ready: ready.text('방송 연결이 끊겼습니다'), before: interrupt, after: resume },
     { name: 'ended', role: 'guest', path: `/broadcasts/${endedId}`, ready: ready.text('종료된 방송입니다.') },
     { name: 'broadcast-new', role: 'caster', path: '/broadcasts/new', ready: ready.css('form input[name=title]') },
     { name: 'broadcast-edit', role: 'caster', path: `/broadcasts/${liveId}/edit`, ready: ready.css('form input[name=title]') },
@@ -233,17 +252,21 @@ try {
       for (const screen of screens) {
         const page = contexts[screen.role]
         const id = `${screen.name}-${viewport}-${scheme}`
+        let r
         try {
+          await screen.before?.()
           await page.emulateMedia({ colorScheme: scheme })
           await page.goto(`${BASE}${screen.path}`)
           await screen.ready(page)
           await page.waitForTimeout(1000)
+          await shot(page, id)
+          r = await page.evaluate(audit, { scheme, phone })
         } catch (e) {
           check(false, `${id}: screen ready (${e.message.split('\n')[0]})`)
-          continue
+        } finally {
+          await screen.after?.()
         }
-        await shot(page, id)
-        const r = await page.evaluate(audit, { scheme, phone })
+        if (!r) continue
         if (!check(r.overflow <= 0, `${id}: no horizontal scroll (scrollWidth - innerWidth = ${r.overflow})`)) tally.overflow++
         if (phone && !check(r.small.length === 0, `${id}: touch targets at least 44 px on each side${r.small.length ? ` (${r.small.length}: ${r.small.slice(0, WORST).join('; ')})` : ''}`)) tally.touch++
         if (!check(r.defaults.length === 0, `${id}: no browser-default links (link color, underline outside prose) or controls (UA background and border)${r.defaults.length ? ` (${r.defaults.length}: ${r.defaults.slice(0, WORST).join('; ')})` : ''}`)) tally.defaults++
@@ -259,11 +282,17 @@ try {
   await castPage.getByRole('button', { name: '방송 종료' }).click()
   check(await waitStatus(castPage, liveId, 'ENDED', 15_000), 'main broadcast turns ENDED after 방송 종료')
   liveId = undefined
-  await noCspViolations([['caster', castPage], ['viewer', viewerPage], ...pages])
+  await phonePage.bringToFront()
+  await phonePage.getByRole('button', { name: '방송 종료' }).click()
+  check(await waitStatus(phonePage, phoneId, 'ENDED', 15_000), 'phone broadcast turns ENDED after 방송 종료')
+  phoneId = undefined
+  check((await api(castPage, 'DELETE', `/api/broadcasts/${readyId}`)).status === 204, 'the READY broadcast is deleted')
+  await noCspViolations([['caster', castPage], ['viewer', viewerPage], ['phone-publisher', phonePage], ...pages])
 } catch (e) {
   check(false, `journey aborted: ${e.message.split('\n')[0]}`)
 } finally {
   if (castPage && liveId) await stopBroadcast(castPage, liveId)
+  if (phonePage && phoneId) await stopBroadcast(phonePage, phoneId)
   await browser.close()
 }
 process.exit(summary() ? 0 : 1)
