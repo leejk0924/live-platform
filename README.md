@@ -374,6 +374,8 @@ Cargo workspace 네 crate로 나눈 Hexagonal(Ports & Adapters) 구조다. 의�
 | [TypeScript](https://github.com/microsoft/TypeScript) | 웹 코드 타입 검사 | Apache-2.0 |
 | [oxlint](https://github.com/oxc-project/oxc) | 웹 코드 lint | MIT |
 | [Playwright](https://github.com/microsoft/playwright) (`playwright-core`) | 기능 자동 확인 스크립트(`.claude/skills/verify-live-platform`)의 브라우저 조작 | Apache-2.0 |
+| [TLA+ tools](https://github.com/tlaplus/tlaplus) (`tla2tools.jar`, TLC) | 방송 상태 머신 모델 검사(`.claude/skills/verify-broadcast-lifecycle`) | MIT |
+| [Eclipse Temurin](https://github.com/adoptium/containers) (`eclipse-temurin:21-jre` 이미지) | 모델 검사기 TLC를 돌리는 Java 런타임 | GPL-2.0 with Classpath Exception |
 | [argon2](https://github.com/RustCrypto/password-hashes) | 비밀번호 해시(argon2id) | MIT OR Apache-2.0 |
 | [sha2](https://github.com/RustCrypto/hashes) | 세션 토큰의 SHA-256 저장 | MIT OR Apache-2.0 |
 | [hmac](https://github.com/RustCrypto/MACs) | 로컬 녹화 파일 URL의 HMAC-SHA256 서명 | MIT OR Apache-2.0 |
