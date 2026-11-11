@@ -789,6 +789,17 @@ textarea {
   margin: 0 auto;
 }
 
+/* Toss's widgets are tall: a tighter card keeps 결제하기 inside a 1280x720 window. Below the fold, a click that
+   comes right after scrolling to it did not reach the page and the payment window never opened. */
+.pay-card {
+  gap: var(--space-xs);
+  padding-top: var(--space-md);
+}
+
+.pay-card > h1 {
+  font-size: 1.5rem;
+}
+
 .pay-amount strong {
   font-size: 1.25rem;
   font-variant-numeric: tabular-nums;

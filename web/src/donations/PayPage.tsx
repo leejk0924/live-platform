@@ -17,7 +17,7 @@ export default function PayPage({
   const broadcastId = parseBroadcastId(search)
 
   return (
-    <section className="page-card">
+    <section className="page-card pay-card">
       <h1 className="page-title">{title}</h1>
       {broadcastId === null ? (
         <p className="error" role="alert">
