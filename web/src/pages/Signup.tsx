@@ -12,7 +12,7 @@ export default function Signup() {
   if (auth.status === 'signedIn') return <Navigate to="/" replace />
 
   return (
-    <>
+    <section className="page-card page-card-narrow">
       <h1>회원가입</h1>
       <CredentialsForm
         mode="signup"
@@ -23,6 +23,6 @@ export default function Signup() {
       <p>
         이미 계정이 있으면 <Link to="/login">로그인</Link>
       </p>
-    </>
+    </section>
   )
 }

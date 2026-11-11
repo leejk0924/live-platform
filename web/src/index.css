@@ -705,6 +705,62 @@ textarea {
   stroke-linejoin: round;
 }
 
+/* Forms: one centered card, label above the field. */
+.page-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: var(--space-xl);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-1);
+}
+
+.page-card-narrow {
+  max-width: 400px;
+}
+
+@media (max-width: 767px) {
+  .page-card {
+    padding: var(--space-lg) var(--space-md);
+  }
+}
+
+.page-card form > button[type='submit'] {
+  align-self: flex-start;
+}
+
+.credentials {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.credentials .hint {
+  margin-top: -12px;
+}
+
+.page-card .credentials > button[type='submit'] {
+  align-self: stretch;
+}
+
+.demo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-border);
+}
+
+.demo h2 {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
 /* Broadcast page: player or publisher with its details, beside a sidebar of donations over comments. */
 .broadcast-layout {
   display: grid;
@@ -988,14 +1044,7 @@ textarea {
   }
 }
 
-.demo {
-  margin-top: 2rem;
-}
 
-.demo h2 {
-  margin: 0;
-  font-size: 1rem;
-}
 .broadcast-list {
   margin: 0 0 1rem;
   padding: 0;
