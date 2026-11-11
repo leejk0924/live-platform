@@ -148,7 +148,7 @@ docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.
 4. 휴대폰에서 로그인하고 방송을 만든 뒤 `방송 시작`을 누르고 카메라·마이크 권한을 허용한다.
 5. 끝나면 `bash deploy/deploy.sh local`로 되돌리고, 휴대폰의 인증서 프로필과 `caddy-root.crt`를 지운다. 인증서 파일은 커밋하지 않는다.
 
-이 방식은 미디어 PoC(#3, [`docs/poc/3-media-device-check.md`](docs/poc/3-media-device-check.md))에서 iPhone 15 Pro Safari의 카메라 송출과 WHEP 시청으로 확인했다. 지금 앱 화면으로 하는 실기기 송출, 카메라 전환, 화면 잠금, 회전은 아직 확인하지 않았고 #9에서 진행 중이다.
+이 방식은 미디어 PoC(#3, [`docs/poc/3-media-device-check.md`](docs/poc/3-media-device-check.md))에서 iPhone 15 Pro Safari의 카메라 송출과 WHEP 시청으로 확인했다. 지금 앱은 #9에서 iPhone 15 Pro Safari로 송출, 카메라 전환, 화면 잠금 후 복귀와 종료를 확인했다. Android는 실기기가 없어 Pixel 7 에뮬레이션으로만 확인했다.
 
 휴대폰으로 송출할 때 알아 둘 것은 다음과 같다.
 
@@ -209,8 +209,8 @@ docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.
 | 환경 | 송출 | 시청 | 확인한 범위 |
 |---|---|---|---|
 | PC Chrome | 화면 공유(`getDisplayMedia`, 탭 소리 + 마이크) 또는 웹캠 | LL-HLS(hls.js, MSE) 기본, WebRTC(WHEP) 토글 | 헤드리스 Chrome 자동 확인. Windows Chrome 화면 공유는 #3 PoC에서 실사용 |
-| Android Chrome | 카메라 + 마이크, 전면·후면 전환 | LL-HLS 기본, WebRTC 토글 | Playwright Pixel 7 에뮬레이션만. 실기기 미확인(#9) |
-| iOS·iPadOS Safari | 카메라 + 마이크, 전면·후면 전환 | WebRTC(WHEP)만, 저지연 토글 없음 | 실기기(iPhone 15 Pro, iOS 26.6.2)는 #3 PoC 페이지로만 확인. 지금 앱은 iPhone UA 에뮬레이션만 |
+| Android Chrome | 카메라 + 마이크, 전면·후면 전환 | LL-HLS 기본, WebRTC 토글 | Playwright Pixel 7 에뮬레이션(UA·뷰포트·터치·가짜 카메라)으로 송출, 전환, 백그라운드, 반응형 확인. 실기기는 없어서 확인하지 않았다(#9) |
+| iOS·iPadOS Safari | 카메라 + 마이크, 전면·후면 전환 | WebRTC(WHEP)만, 저지연 토글 없음 | 실기기 iPhone 15 Pro Safari에서 송출(영상·음성), 전면·후면 전환, 백그라운드 30초 안 복귀와 30초 뒤 종료, 방송 종료, 세로·가로 화면 확인(#9). iPad는 미확인 |
 
 - 송출(화면 공유, 카메라)은 HTTPS 같은 보안 출처에서만 된다. `http://`로 열면 "이 브라우저에서는 송출할 수 없습니다. HTTPS 주소로 접속했는지 확인하세요."가 나온다.
 - 휴대폰 판별은 `navigator.userAgentData.mobile`, iOS·iPadOS UA, Android UA로 한다(`web/src/broadcasts/platform.ts`). Android Chrome의 "데스크톱 사이트" 모드는 PC로 보인다.

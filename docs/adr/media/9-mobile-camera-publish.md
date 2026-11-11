@@ -51,3 +51,12 @@ related: [1, 3, 7, 8, 10, 12, 14]
 - 헤드리스 Chrome의 가짜 카메라 `fake_device_1`은 인코더에 프레임을 넘기지 않는다(처음부터 그 장치로 보내도 `framesSent=0`). 전환 e2e는 이 장치를 목록에서 빼고 `fake_device_2`로 했다.
 - 소유자 상세 화면은 #8대로 자기 방송의 Player도 띄운다. 휴대폰 송출자는 올리면서 LL-HLS도 내려받는다. 후속 이슈 후보다.
 - 실기기(Android Chrome, iOS Safari) 송출, 전환, 백그라운드, 회전은 확인하지 않았다(unverified). 헤드리스 Chrome의 모바일 에뮬레이션(UA, 뷰포트, 터치, 가짜 카메라, 합성 `visibilitychange`)으로만 확인했다.
+
+## Follow-up (2026-11-11)
+
+실기기 확인. iPhone 15 Pro Safari, LAN 스택(`compose.prod.yml`, `DOMAIN`·`PUBLIC_IP`=PC Wi-Fi IP, Caddy 내부 CA 루트 설치), PC 브라우저로 시청.
+
+- 확인됨: 카메라 영상·마이크 음성 송출, 송출 중 전면·후면 전환(시청 끊김 없음), 백그라운드 30초 안 복귀 시 제스처 없이 자동 재송출, 40초 뒤 ENDED, `방송 종료`, 세로·가로 화면.
+- 그래서 위 Cautions의 "복귀 후 자동 재송출은 제스처 없이 `getUserMedia`를 부른다"와 "화면 잠금이 `hidden`을 내는지"는 iOS Safari에서 동작함을 확인했다(iOS 버전은 기록하지 않음).
+- Android Chrome 실기기는 기기가 없어 확인하지 않는다. Pixel 7 에뮬레이션 결과로 갈음하고 README 지원 환경에 그렇게 적었다. Android 항목(데스크톱 사이트 모드, VP8 fallback, 백그라운드 때 ICE)은 계속 unverified다.
+- 송출 중 회전(CVO 미협상)은 이번에 확인하지 않았다.
