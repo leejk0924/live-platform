@@ -60,3 +60,7 @@ related: [1, 3, 7, 8, 10, 12, 14]
 - 그래서 위 Cautions의 "복귀 후 자동 재송출은 제스처 없이 `getUserMedia`를 부른다"와 "화면 잠금이 `hidden`을 내는지"는 iOS Safari에서 동작함을 확인했다(iOS 버전은 기록하지 않음).
 - Android Chrome 실기기는 기기가 없어 확인하지 않는다. Pixel 7 에뮬레이션 결과로 갈음하고 README 지원 환경에 그렇게 적었다. Android 항목(데스크톱 사이트 모드, VP8 fallback, 백그라운드 때 ICE)은 계속 unverified다.
 - 송출 중 회전(CVO 미협상)은 이번에 확인하지 않았다.
+
+## Follow-up (2026-11-12)
+
+#56에서 소유자 상세 화면은 ENDED 전까지 Player 대신 송출 패널만 보인다([common/56](../common/56-ui-design-tokens.md)). 위 Cautions의 "소유자 상세 화면은 자기 방송의 Player도 띄운다"는 더 이상 맞지 않는다.
