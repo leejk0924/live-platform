@@ -29,6 +29,9 @@
 
 `.env`에서 `DEMO_LOGIN_ENABLED=true`로 바꾸고 `bash deploy/deploy.sh local`을 다시 실행한다. api가 시작할 때 데모 계정 두 개를 만들고, `/login` 화면 아래에 **데모 계정** 버튼이 나타난다. 꺼져 있으면 버튼이 보이지 않고 `POST /api/auth/demo-login`은 404다.
 
+> [!IMPORTANT]
+> 데모 계정은 비밀번호가 없다. 위쪽 아이디·비밀번호 폼에 `demo-streamer`를 입력하면 비밀번호 칸을 채우라는 안내만 나온다. 아래 **데모 계정** 버튼을 누른다.
+
 | 버튼 | 계정 | 쓰임 |
 |---|---|---|
 | **데모 방송인으로 로그인** | `demo-streamer` | 방송을 만들고 송출·종료·수정·삭제한다 |
