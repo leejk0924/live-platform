@@ -8,7 +8,7 @@ Every screen uses the design tokens from `design.md`: dark by default, light und
 - Color schemes: dark and light, through `page.emulateMedia({ colorScheme })`.
 - Rules, each checked on every screen, viewport and scheme:
   - No horizontal scroll: `document.documentElement.scrollWidth <= innerWidth`.
-  - Phone only: every visible `button`, `a[href]`, `input`, `select`, `textarea`, `[role=button]` and `summary` is at least 44 px tall. A checkbox or radio is measured by its `label`. A link inside a sentence (`p` with more text than the link) is exempt, as WCAG 2.5.8 exempts inline links.
+  - Phone only: every visible `button`, `a[href]`, `input`, `select`, `textarea`, `[role=button]` and `summary` is at least 44 px tall. A checkbox or radio is measured by its `label`. A link inside a sentence (`p` with more text than the link) is exempt, as WCAG 2.5.8 exempts inline links. A link row (`p.links`) is not a sentence, so its links are measured.
   - No browser defaults: no link with the user agent's link color, no link underlined outside a sentence, and no control whose background and border equal an unstyled one in a shadow root (which keeps page CSS out and inherits the color scheme).
   - Text contrast at least 4.5:1, or 3:1 for large text (24 px, or 18.66 px bold). The text color, scaled by the opacity of the element and its ancestors, is blended over every translucent layer down to the first opaque background. A gradient counts at its worst stop. Text under `aria-hidden`, disabled controls and `<option>` are skipped. Placeholders count.
 

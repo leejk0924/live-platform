@@ -54,7 +54,7 @@ function audit({ scheme, phone }) {
   }
   // A link inside a sentence is exempt from the target size and underline rules (WCAG 2.5.8 inline exception).
   const inProse = (a) => {
-    const p = a.closest('p')
+    const p = a.closest('p:not(.links)')
     return p !== null && p.textContent.trim().length > a.textContent.trim().length
   }
 
