@@ -143,15 +143,8 @@ p:not(.links) a,
   outline-offset: 2px;
 }
 
-time,
-.mono {
+time {
   font-variant-numeric: tabular-nums;
-}
-
-.mono {
-  font-family: var(--font-mono);
-  font-size: 0.8125rem;
-  font-weight: 500;
 }
 
 .sr-only {
