@@ -10,7 +10,7 @@ import DonationPanel from '../donations/DonationPanel.tsx'
 import { useDonations } from '../donations/useDonations.ts'
 import BroadcastRecordings from '../recordings/BroadcastRecordings.tsx'
 import Publisher from '../broadcasts/publish/Publisher.tsx'
-import { statusLabel } from '../broadcasts/status.ts'
+import StatusBadge from '../broadcasts/StatusBadge.tsx'
 import { useBroadcast } from '../broadcasts/useBroadcast.ts'
 import Player from '../broadcasts/watch/Player.tsx'
 
@@ -30,7 +30,16 @@ export default function BroadcastDetail() {
     return () => window.clearTimeout(timer)
   }, [state, reload])
 
-  if (state.status === 'loading') return <p>불러오는 중…</p>
+  if (state.status === 'loading') {
+    return (
+      <div className="broadcast-layout" aria-busy="true">
+        <div className="broadcast-main">
+          <div className="stage skeleton" />
+          <p className="hint-text">불러오는 중…</p>
+        </div>
+      </div>
+    )
+  }
   if (state.status === 'failed') return <LoadFailed error={state.error} onRetry={reload} />
   return (
     <>
@@ -66,52 +75,76 @@ function BroadcastView({ broadcast, onChanged }: { broadcast: Broadcast; onChang
   }
 
   return (
-    <article className="stack">
-      <h1 className="broadcast-heading">{broadcast.title}</h1>
-      <p className="broadcast-meta">
-        {broadcast.ownerName} · <span className={`badge badge-${broadcast.status}`}>{statusLabel[broadcast.status]}</span>
-        {' · '}
-        <time dateTime={broadcast.createdAt}>{new Date(broadcast.createdAt).toLocaleString('ko-KR')}</time>
-      </p>
-      {broadcast.description && <p className="description">{broadcast.description}</p>}
-      <Screen broadcast={broadcast} onLost={onChanged} />
-      <DonationPanel
-        broadcast={broadcast}
-        state={donations.state}
-        loadError={donations.loadError}
-        onRetry={donations.retry}
-      />
-      {broadcast.status === 'ENDED' && <BroadcastRecordings key={broadcast.id} broadcastId={broadcast.id} />}
-      {isOwner && <Publisher broadcast={broadcast} onChanged={onChanged} />}
-      {isOwner && (
-        <div className="actions">
-          <Link to={`/broadcasts/${broadcast.id}/edit`} className="button">
-            수정
-          </Link>
-          <button type="button" onClick={onDelete} disabled={pending}>
-            삭제
-          </button>
+    <div className="broadcast-layout">
+      <article className="broadcast-main">
+        {isOwner && broadcast.status !== 'ENDED' ? (
+          <Publisher broadcast={broadcast} onChanged={onChanged} />
+        ) : (
+          <Screen broadcast={broadcast} onLost={onChanged} />
+        )}
+        <div className="broadcast-info">
+          <h1 className="broadcast-heading">{broadcast.title}</h1>
+          <p className="broadcast-meta">
+            <StatusBadge status={broadcast.status} /> {broadcast.ownerName}
+            {' · '}
+            <time dateTime={broadcast.createdAt}>{new Date(broadcast.createdAt).toLocaleString('ko-KR')}</time>
+          </p>
+          {broadcast.description && <p className="description">{broadcast.description}</p>}
+          {isOwner && (
+            <div className="actions">
+              <Link to={`/broadcasts/${broadcast.id}/edit`} className="button">
+                수정
+              </Link>
+              <button type="button" className="button-danger" onClick={onDelete} disabled={pending}>
+                삭제
+              </button>
+            </div>
+          )}
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
         </div>
-      )}
-      {error && (
-        <p className="error" role="alert">
-          {error}
-        </p>
-      )}
-      <CommentPanel key={broadcast.id} broadcast={broadcast} onDonations={donations.dispatch} />
-    </article>
+        {broadcast.status === 'ENDED' && <BroadcastRecordings key={broadcast.id} broadcastId={broadcast.id} />}
+      </article>
+      <aside className="broadcast-side">
+        <DonationPanel
+          broadcast={broadcast}
+          state={donations.state}
+          loadError={donations.loadError}
+          onRetry={donations.retry}
+        />
+        <CommentPanel key={broadcast.id} broadcast={broadcast} onDonations={donations.dispatch} />
+      </aside>
+    </div>
   )
 }
 
 function Screen({ broadcast, onLost }: { broadcast: Broadcast; onLost: () => void }) {
   switch (broadcast.status) {
     case 'READY':
-      return <p className="notice">아직 방송 전입니다.</p>
+      return <StageNotice>아직 방송 전입니다.</StageNotice>
     case 'LIVE':
       return <Player key={broadcast.id} broadcastId={broadcast.id} onLost={onLost} />
     case 'INTERRUPTED':
-      return <p className="notice">방송 연결이 끊겼습니다. 다시 연결되면 이어서 볼 수 있습니다.</p>
+      return <StageNotice warning>방송 연결이 끊겼습니다. 다시 연결되면 이어서 볼 수 있습니다.</StageNotice>
     case 'ENDED':
-      return <p className="notice">종료된 방송입니다.</p>
+      return <StageNotice>종료된 방송입니다.</StageNotice>
   }
+}
+
+// Takes the player's place at the player's size, so the page does not jump when the broadcast changes state.
+function StageNotice({ children, warning = false }: { children: string; warning?: boolean }) {
+  return (
+    <div className={warning ? 'stage stage-warning' : 'stage'}>
+      <div className="stage-notice">
+        <svg className="stage-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="2" y="5" width="15" height="14" rx="2" />
+          <path d="m17 10 5-3v10l-5-3" />
+        </svg>
+        <p>{children}</p>
+      </div>
+    </div>
+  )
 }

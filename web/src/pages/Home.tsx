@@ -4,7 +4,8 @@ import { broadcastApi } from '../api/broadcasts.ts'
 import { errorMessage } from '../api/client.ts'
 import type { Broadcast } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
-import { statusLabel } from '../broadcasts/status.ts'
+import StatusBadge from '../broadcasts/StatusBadge.tsx'
+import { EmptyState, FeedSkeleton } from '../ui/Feed.tsx'
 
 type Feed = {
   items: Broadcast[]
@@ -62,31 +63,51 @@ function BroadcastFeed({ live, title, empty }: { live: boolean; title: string; e
     <section className="feed" aria-label={title}>
       <h2>{title}</h2>
       {feed.items.length > 0 && (
-        <ul className="broadcast-list">
+        <ul className="card-grid">
           {feed.items.map((b) => (
-            <li key={b.id} className={`status-${b.status}`}>
-              <Link to={`/broadcasts/${b.id}`}>
-                <span className="broadcast-title">{b.title}</span>
-                <span className="broadcast-meta">
-                  {b.ownerName} · <span className={`badge badge-${b.status}`}>{statusLabel[b.status]}</span>
-                </span>
-              </Link>
-            </li>
+            <BroadcastCard key={b.id} broadcast={b} />
           ))}
         </ul>
       )}
-      {!feed.loading && !feed.error && feed.items.length === 0 && <p>{empty}</p>}
-      {feed.loading && <p>불러오는 중…</p>}
+      {!feed.loading && !feed.error && feed.items.length === 0 && <EmptyState>{empty}</EmptyState>}
+      {feed.loading && <FeedSkeleton />}
       {feed.error && (
         <p className="error" role="alert">
           {feed.error}
         </p>
       )}
       {nextBefore && !feed.loading && (
-        <button type="button" onClick={() => loadMore(nextBefore)}>
-          더 보기
-        </button>
+        <div className="feed-more">
+          <button type="button" onClick={() => loadMore(nextBefore)}>
+            더 보기
+          </button>
+        </div>
       )}
     </section>
   )
+}
+
+function BroadcastCard({ broadcast: b }: { broadcast: Broadcast }) {
+  return (
+    <li className="card">
+      <Link to={`/broadcasts/${b.id}`} className="card-link">
+        <span className={`thumb thumb-${b.status}`} aria-hidden="true">
+          <span className="thumb-initial">{[...b.ownerName][0]?.toUpperCase()}</span>
+        </span>
+        <span className="card-badge">
+          <StatusBadge status={b.status} />
+        </span>
+        <span className="card-body">
+          <span className="card-title">{b.title}</span>
+          <span className="card-meta">
+            {b.ownerName} · <time dateTime={b.createdAt}>{formatWhen(b.createdAt)}</time>
+          </span>
+        </span>
+      </Link>
+    </li>
+  )
+}
+
+function formatWhen(iso: string): string {
+  return new Date(iso).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }

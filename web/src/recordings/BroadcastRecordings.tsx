@@ -34,7 +34,7 @@ export default function BroadcastRecordings({ broadcastId }: { broadcastId: stri
   return (
     <section className="feed" aria-label="다시보기">
       <h2>다시보기</h2>
-      <ul className="broadcast-list">
+      <ul className="card-grid">
         {recordings.map((r) => (
           <RecordingItem key={r.id} recording={r} withTitle={false} />
         ))}

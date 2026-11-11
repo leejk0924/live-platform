@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, Outlet } from 'react-router'
+import { Link, NavLink, Outlet } from 'react-router'
 import { errorMessage } from './api/client.ts'
 import { useAuth } from './auth/context.ts'
 
@@ -7,15 +7,23 @@ export default function Layout() {
   return (
     <>
       <header className="app-header">
-        <Link to="/" className="app-name">
-          live-platform
-        </Link>
-        <nav className="site-nav">
-          <Link to="/recordings">다시보기</Link>
-        </nav>
-        <AccountMenu />
+        <div className="app-header-inner">
+          <Link to="/" className="app-name">
+            <svg className="app-mark" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.5" />
+              <path d="M7 7a7 7 0 0 0 0 10M17 7a7 7 0 0 1 0 10" />
+            </svg>
+            live-platform
+          </Link>
+          <nav className="site-nav">
+            <NavLink to="/recordings" className="nav-link">
+              다시보기
+            </NavLink>
+          </nav>
+          <AccountMenu />
+        </div>
       </header>
-      <main>
+      <main className="app-main">
         <Outlet />
       </main>
     </>
@@ -32,8 +40,12 @@ function AccountMenu() {
   if (auth.status === 'signedOut') {
     return (
       <nav className="account">
-        <Link to="/login">로그인</Link>
-        <Link to="/signup">회원가입</Link>
+        <Link to="/login" className="nav-link">
+          로그인
+        </Link>
+        <Link to="/signup" className="button">
+          회원가입
+        </Link>
       </nav>
     )
   }
@@ -52,8 +64,11 @@ function AccountMenu() {
 
   return (
     <nav className="account">
+      <Link to="/broadcasts/new" className="button button-primary">
+        방송하기
+      </Link>
       <span className="username">{auth.user.username}</span>
-      <button type="button" onClick={onLogout} disabled={pending}>
+      <button type="button" className="button-quiet" onClick={onLogout} disabled={pending}>
         로그아웃
       </button>
       {error && (

@@ -29,7 +29,7 @@ export default function Login() {
   if (auth.status === 'signedIn') return <Navigate to={from} replace />
 
   return (
-    <>
+    <section className="page-card page-card-narrow">
       <h1>로그인</h1>
       <CredentialsForm
         mode="login"
@@ -51,6 +51,6 @@ export default function Login() {
       <p>
         계정이 없으면 <Link to="/signup">회원가입</Link>
       </p>
-    </>
+    </section>
   )
 }

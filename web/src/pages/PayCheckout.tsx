@@ -85,10 +85,10 @@ function Checkout({ broadcastId, amount }: { broadcastId: string; amount: number
 
   return (
     <>
-      <p>
+      <p className="pay-amount">
         후원 금액 <strong>{formatWon(amount)}</strong>
       </p>
-      {checkout.status === 'loading' && <p>결제창을 불러오는 중…</p>}
+      {checkout.status === 'loading' && <p className="hint-text">결제창을 불러오는 중…</p>}
       {checkout.status === 'failed' && (
         <p className="error" role="alert">
           {checkout.message}
@@ -97,7 +97,7 @@ function Checkout({ broadcastId, amount }: { broadcastId: string; amount: number
       <div id={METHODS_ID} />
       <div id={AGREEMENT_ID} />
       {checkout.status === 'ready' && (
-        <button type="button" onClick={() => void pay()} disabled={paying}>
+        <button type="button" className="button-primary" onClick={() => void pay()} disabled={paying}>
           결제하기
         </button>
       )}

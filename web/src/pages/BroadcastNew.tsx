@@ -28,9 +28,9 @@ function CreateForm() {
   }
 
   return (
-    <>
+    <section className="page-card">
       <h1>방송 만들기</h1>
       <BroadcastForm submitLabel="만들기" pending={pending} error={error} onSubmit={onSubmit} />
-    </>
+    </section>
   )
 }

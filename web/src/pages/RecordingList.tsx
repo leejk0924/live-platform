@@ -3,6 +3,7 @@ import { errorMessage } from '../api/client.ts'
 import { recordingApi } from '../api/recordings.ts'
 import type { Recording } from '../api/types.ts'
 import RecordingItem from '../recordings/RecordingItem.tsx'
+import { EmptyState, FeedSkeleton } from '../ui/Feed.tsx'
 
 type Feed = {
   items: Recording[]
@@ -42,23 +43,25 @@ export default function RecordingList() {
       <h1>다시보기</h1>
       <section className="feed" aria-label="녹화 목록">
         {feed.items.length > 0 && (
-          <ul className="broadcast-list">
+          <ul className="card-grid">
             {feed.items.map((r) => (
               <RecordingItem key={r.id} recording={r} withTitle />
             ))}
           </ul>
         )}
-        {!feed.loading && !feed.error && feed.items.length === 0 && <p>아직 녹화된 방송이 없습니다.</p>}
-        {feed.loading && <p>불러오는 중…</p>}
+        {!feed.loading && !feed.error && feed.items.length === 0 && <EmptyState>아직 녹화된 방송이 없습니다.</EmptyState>}
+        {feed.loading && <FeedSkeleton />}
         {feed.error && (
           <p className="error" role="alert">
             {feed.error}
           </p>
         )}
         {nextBefore && !feed.loading && (
-          <button type="button" onClick={() => loadMore(nextBefore)}>
-            더 보기
-          </button>
+          <div className="feed-more">
+            <button type="button" onClick={() => loadMore(nextBefore)}>
+              더 보기
+            </button>
+          </div>
         )}
       </section>
     </>

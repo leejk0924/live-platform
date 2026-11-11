@@ -37,29 +37,34 @@ export default function ReplayPlayer({ recordingId }: { recordingId: string }) {
   }
 
   return (
-    <section className="stack player" aria-label="다시보기" data-state={state.kind}>
-      <video
-        ref={video}
-        controls
-        playsInline
-        preload="metadata"
-        src={state.kind === 'ready' ? state.url : undefined}
-        hidden={state.kind === 'failed'}
-        onLoadedMetadata={onLoadedMetadata}
-        onError={onError}
-      />
-      {state.kind === 'loading' && <p role="status">영상을 불러오는 중…</p>}
-      {state.kind === 'failed' && (
-        <div className="stack">
-          <p className="error" role="alert">
-            {state.error === null ? '영상을 재생하지 못했습니다.' : errorMessage(state.error)}
-          </p>
-          <div className="actions">
+    <section className="player" aria-label="다시보기" data-state={state.kind}>
+      <div className="stage">
+        <video
+          ref={video}
+          controls
+          playsInline
+          preload="metadata"
+          src={state.kind === 'ready' ? state.url : undefined}
+          hidden={state.kind === 'failed'}
+          onLoadedMetadata={onLoadedMetadata}
+          onError={onError}
+        />
+        {state.kind === 'loading' && <span className="spinner" aria-hidden="true" />}
+        {state.kind === 'failed' && (
+          <div className="stage-notice">
+            <p className="error" role="alert">
+              {state.error === null ? '영상을 재생하지 못했습니다.' : errorMessage(state.error)}
+            </p>
             <button type="button" onClick={() => dispatch({ type: 'retry' })}>
               다시 시도
             </button>
           </div>
-        </div>
+        )}
+      </div>
+      {state.kind === 'loading' && (
+        <p className="player-status" role="status">
+          영상을 불러오는 중…
+        </p>
       )}
     </section>
   )

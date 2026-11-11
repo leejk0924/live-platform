@@ -59,7 +59,7 @@ function Confirm({ broadcastId, payment }: { broadcastId: string; payment: Payme
 
   switch (confirmation.status) {
     case 'confirming':
-      return <p>결제를 확인하는 중…</p>
+      return <p className="hint-text">결제를 확인하는 중…</p>
     case 'done': {
       const { donation } = confirmation.result
       return (

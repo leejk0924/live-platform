@@ -5,6 +5,7 @@ import { commentApi, eventsUrl } from '../api/comments.ts'
 import type { Broadcast, Comment } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
 import { draftAfterSaveError, saveArgs, startEdit, type EditDraft } from './commentEdit.ts'
+import { commentTime } from './commentTime.ts'
 import { parseComments, parsePolicy } from './events.ts'
 import type { DonationsAction } from '../donations/donationsState.ts'
 import { parseDonation, parseTotals } from '../donations/events.ts'
@@ -180,7 +181,19 @@ function CommentList({
     if (list) nearBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < NEAR_BOTTOM_PX
   }
 
-  if (comments.length === 0) return <p className="hint-text">{loading ? '댓글을 불러오는 중…' : '아직 댓글이 없습니다.'}</p>
+  if (comments.length === 0) {
+    return (
+      <div className="comment-placeholder">
+        {loading && (
+          <>
+            <span className="skeleton skeleton-line" />
+            <span className="skeleton skeleton-line skeleton-short" />
+          </>
+        )}
+        <p className="hint-text">{loading ? '댓글을 불러오는 중…' : '아직 댓글이 없습니다.'}</p>
+      </div>
+    )
+  }
   return (
     <ol className="comment-list" ref={listRef} onScroll={onScroll}>
       {comments.map((comment) => (
@@ -251,9 +264,14 @@ function CommentItem({
     })
   }
 
+  const [now] = useState(() => new Date())
+  const time = commentTime(comment.createdAt, now)
   return (
     <li className="comment">
       <span className="comment-author">{comment.authorName}</span>
+      <time className="comment-time" dateTime={comment.createdAt} title={time.title}>
+        {time.text}
+      </time>
       {draft === null ? (
         <span className="comment-body">
           {comment.body}

@@ -17,24 +17,24 @@ function EditLoader({ user }: { user: User }) {
   const { state, reload } = useBroadcast(id)
   const [conflicted, setConflicted] = useState(false)
 
-  if (state.status === 'loading') return <p>불러오는 중…</p>
+  if (state.status === 'loading') return <p className="hint-text">불러오는 중…</p>
   if (state.status === 'failed') return <LoadFailed error={state.error} />
 
   const broadcast = state.broadcast
   if (broadcast.ownerId !== user.id) {
     return (
-      <>
+      <section className="page-card">
         <h1>수정할 수 없습니다</h1>
         <p>본인이 만든 방송만 수정할 수 있습니다.</p>
-        <p>
+        <p className="links">
           <Link to={`/broadcasts/${broadcast.id}`}>방송으로 돌아가기</Link>
         </p>
-      </>
+      </section>
     )
   }
 
   return (
-    <>
+    <section className="page-card">
       <h1>방송 수정</h1>
       {conflicted && (
         <p className="notice" role="status">
@@ -50,7 +50,7 @@ function EditLoader({ user }: { user: User }) {
           reload()
         }}
       />
-    </>
+    </section>
   )
 }
 
@@ -75,7 +75,7 @@ function EditForm({ broadcast, onConflict }: { broadcast: Broadcast; onConflict:
   return (
     <>
       <BroadcastForm initial={broadcast} submitLabel="저장" pending={pending} error={error} onSubmit={onSubmit} />
-      <p>
+      <p className="links">
         <Link to={`/broadcasts/${broadcast.id}`}>취소</Link>
       </p>
     </>

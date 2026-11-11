@@ -129,26 +129,45 @@ export default function Player({ broadcastId, onLost }: { broadcastId: string; o
 
   return (
     <section
-      className="stack player"
+      className="player"
       aria-label="시청"
       data-state={playback.kind}
       data-source={playback.kind === 'playing' ? playback.source.kind : undefined}
     >
-      <video
-        ref={video}
-        autoPlay
-        muted
-        playsInline
-        controls
-        hidden={playback.kind === 'failed'}
-        onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
-      />
-      <div className="actions">
-        {muted && playback.kind === 'playing' && (
-          <button type="button" onClick={unmute}>
-            소리 켜기
-          </button>
+      <div className="stage">
+        <video
+          ref={video}
+          autoPlay
+          muted
+          playsInline
+          controls
+          hidden={playback.kind === 'failed'}
+          onVolumeChange={(e) => setMuted(e.currentTarget.muted)}
+        />
+        {playback.kind === 'loading' && <span className="spinner" aria-hidden="true" />}
+        {playback.kind === 'failed' && (
+          <div className="stage-notice">
+            <p className="error" role="alert">
+              영상을 재생하지 못했습니다.
+            </p>
+            <button type="button" onClick={() => restart(() => setAttempt((n) => n + 1))}>
+              다시 시도
+            </button>
+          </div>
         )}
+      </div>
+      <div className="player-bar">
+        <div className="player-bar-start">
+          {muted && playback.kind === 'playing' && (
+            <button type="button" onClick={unmute}>
+              소리 켜기
+            </button>
+          )}
+        </div>
+        <p className="player-status" role="status">
+          {playback.kind === 'loading' && '영상을 불러오는 중…'}
+          {playback.kind === 'playing' && `${kindLabel[playback.source.kind]}로 재생 중`}
+        </p>
         {!ios && (
           <label className="toggle">
             <input
@@ -160,22 +179,6 @@ export default function Player({ broadcastId, onLost }: { broadcastId: string; o
           </label>
         )}
       </div>
-      <p role="status">
-        {playback.kind === 'loading' && '영상을 불러오는 중…'}
-        {playback.kind === 'playing' && `${kindLabel[playback.source.kind]}로 재생 중`}
-      </p>
-      {playback.kind === 'failed' && (
-        <div className="stack">
-          <p className="error" role="alert">
-            영상을 재생하지 못했습니다.
-          </p>
-          <div className="actions">
-            <button type="button" onClick={() => restart(() => setAttempt((n) => n + 1))}>
-              다시 시도
-            </button>
-          </div>
-        </div>
-      )}
     </section>
   )
 }
