@@ -5,6 +5,7 @@ import { commentApi, eventsUrl } from '../api/comments.ts'
 import type { Broadcast, Comment } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
 import { draftAfterSaveError, saveArgs, startEdit, type EditDraft } from './commentEdit.ts'
+import { commentTime } from './commentTime.ts'
 import { parseComments, parsePolicy } from './events.ts'
 import type { DonationsAction } from '../donations/donationsState.ts'
 import { parseDonation, parseTotals } from '../donations/events.ts'
@@ -263,11 +264,13 @@ function CommentItem({
     })
   }
 
+  const [now] = useState(() => new Date())
+  const time = commentTime(comment.createdAt, now)
   return (
     <li className="comment">
       <span className="comment-author">{comment.authorName}</span>
-      <time className="comment-time" dateTime={comment.createdAt}>
-        {new Date(comment.createdAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+      <time className="comment-time" dateTime={comment.createdAt} title={time.title}>
+        {time.text}
       </time>
       {draft === null ? (
         <span className="comment-body">
