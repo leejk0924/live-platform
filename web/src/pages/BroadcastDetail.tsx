@@ -137,12 +137,14 @@ function Screen({ broadcast, onLost }: { broadcast: Broadcast; onLost: () => voi
 // Takes the player's place at the player's size, so the page does not jump when the broadcast changes state.
 function StageNotice({ children, warning = false }: { children: string; warning?: boolean }) {
   return (
-    <div className={warning ? 'stage stage-notice stage-warning' : 'stage stage-notice'}>
-      <svg className="stage-icon" viewBox="0 0 24 24" aria-hidden="true">
-        <rect x="2" y="5" width="15" height="14" rx="2" />
-        <path d="m17 10 5-3v10l-5-3" />
-      </svg>
-      <p>{children}</p>
+    <div className={warning ? 'stage stage-warning' : 'stage'}>
+      <div className="stage-notice">
+        <svg className="stage-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="2" y="5" width="15" height="14" rx="2" />
+          <path d="m17 10 5-3v10l-5-3" />
+        </svg>
+        <p>{children}</p>
+      </div>
     </div>
   )
 }
