@@ -180,8 +180,8 @@ export async function stopBroadcast(page, id) {
 // deviceId. Chrome is launched with three fake cameras, and fake_device_1 is hidden: it delivers frames that WebRTC
 // never encodes (0 frames encoded, measured with Chrome 156), so a viewer would freeze on it. The switch then goes
 // fake_device_0 <-> fake_device_2, and both encode.
-export async function phoneContext(browser, label, deviceName = 'Pixel 7') {
-  const context = await newContext(browser, label, { ...devices[deviceName] })
+export async function phoneContext(browser, label, deviceName = 'Pixel 7', options = {}) {
+  const context = await newContext(browser, label, { ...devices[deviceName], ...options })
   await context.addInitScript(() => {
     if (typeof MediaDevices === 'undefined') return // about:blank and other insecure documents
     delete MediaDevices.prototype.getDisplayMedia

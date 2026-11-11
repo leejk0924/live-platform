@@ -9,6 +9,7 @@ One file per user-facing feature. Each file says what "works" means for that mod
 | [comments](comments.md) | comments (#11): REST + SSE, `web/src/comments/` | `run.sh comments` |
 | [recording](recording.md) | recording (#12): hook, storage, `web/src/recordings/` | `run.sh recording` |
 | [donation](donation.md) | donation (#13): Toss sandbox, `web/src/donations/`, `/pay/*` | `run.sh donation` |
+| [layout](layout.md) | design (#56): `web/src/index.css`, every route, dark and light, desktop and phone | `run.sh layout` |
 | [hardening](hardening.md) | security (#14): Caddy headers, CSP, timeouts | `bash deploy/check-hardening.sh local` |
 
 `bash scripts/run-all.sh` runs all of them. A journey passes when it ends with `VERIFY OK (n checks)`; n is one higher on a run that had to sign up an account. Each file's Gotchas list what the journey cannot prove locally (real phones, real AWS, card payments).

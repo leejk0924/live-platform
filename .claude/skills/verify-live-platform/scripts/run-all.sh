@@ -6,7 +6,7 @@ set -uo pipefail
 . "$(dirname "$0")/env.sh"
 cd "$REPO"
 journeys=("$@")
-[ ${#journeys[@]} -eq 0 ] && journeys=(watch publish comments recording donation)
+[ ${#journeys[@]} -eq 0 ] && journeys=(watch publish comments recording donation layout)
 failed=()
 for j in "${journeys[@]}"; do
     echo "=== $j"

@@ -43,11 +43,11 @@ There is one stack. It owns ports 80, 443 and 8189 and a single Postgres volume,
 
 ```bash
 bash $S/run.sh watch          # one journey: scripts/journeys/<name>.mjs
-bash $S/run-all.sh            # watch, publish, comments, recording, donation, then deploy/check-hardening.sh local
+bash $S/run-all.sh            # watch, publish, comments, recording, donation, layout, then deploy/check-hardening.sh local
 bash $S/run-all.sh comments recording   # a subset (no hardening)
 ```
 
-Journeys: `watch`, `publish`, `comments`, `recording`, `donation` (needs internet for the Toss sandbox). A full `run-all.sh` takes about 5 minutes. `publish` alone waits out the 30 s grace, so it takes about 1.5 minutes.
+Journeys: `watch`, `publish`, `comments`, `recording`, `donation` (needs internet for the Toss sandbox), `layout`. A full `run-all.sh` takes about 5 minutes. `publish` alone waits out the 30 s grace, so it takes about 1.5 minutes.
 
 - Journeys are Playwright scripts built on [scripts/lib.mjs](scripts/lib.mjs). Its helpers are `account`, `createBroadcast`, `startPublishing`, `assertPlaying`, `waitStatus`, `broadcastStatus`, `stopBroadcast`, `phoneContext`, `setHidden`, `api` (with optional headers), `check`/`must`, `shot`, `evidence` and `noCspViolations`.
 - `account(page, role)` logs in as the role's account from `$VERIFY_HOME/accounts.json`, or signs one up when there is none or login fails (a reset database). Sign-up allows 5 per client per 2 minutes, so fresh accounts per run would hit 429 in `run-all.sh`. It also stops any broadcast the account left LIVE. Each journey uses its own roles, so journeys never share a broadcast.
