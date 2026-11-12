@@ -12,7 +12,7 @@ let ownerPage, id
 try {
   const owner = await newContext(browser, 'owner')
   ownerPage = await owner.newPage()
-  const { username } = await account(ownerPage, 'caster')
+  const { username } = await account(ownerPage, 'caster', { streamer: true })
   const title = `verify watch ${RUN_ID}`
   id = await createBroadcast(ownerPage, title)
   log('owner', username, 'broadcast', id)

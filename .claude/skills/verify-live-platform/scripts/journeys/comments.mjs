@@ -29,7 +29,7 @@ async function seen(page, what, predicate, ms = 5000) {
 try {
   const author = await newContext(browser, 'author')
   authorPage = await author.newPage()
-  const a = await account(authorPage, 'author')
+  const a = await account(authorPage, 'author', { streamer: true })
   id = await createBroadcast(authorPage, `verify comments ${RUN_ID}`)
   log('author', a.username, 'broadcast', id)
 
