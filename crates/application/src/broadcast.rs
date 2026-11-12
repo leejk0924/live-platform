@@ -94,7 +94,10 @@ impl CreateBroadcast {
             owner_id: actor,
         };
         let broadcast = self.broadcasts.insert(&new).await?;
-        view_of(self.users.as_ref(), broadcast).await
+        Ok(BroadcastView {
+            broadcast,
+            owner_name: actor_account.username,
+        })
     }
 }
 
