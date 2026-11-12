@@ -11,7 +11,7 @@ export default function BroadcastNew() {
   return (
     <RequireSignIn>
       {(user) =>
-        canCreateBroadcast({ status: 'signedIn', user }) ? (
+        canCreateBroadcast(user) ? (
           <CreateForm />
         ) : (
           <section className="page-card">

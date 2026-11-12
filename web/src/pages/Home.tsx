@@ -22,7 +22,7 @@ export default function Home() {
     <>
       <div className="page-title">
         <h1>방송</h1>
-        {canCreateBroadcast(auth) && (
+        {auth.status === 'signedIn' && canCreateBroadcast(auth.user) && (
           <Link to="/broadcasts/new" className="button">
             방송 만들기
           </Link>

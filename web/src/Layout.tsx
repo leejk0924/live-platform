@@ -65,7 +65,7 @@ function AccountMenu() {
 
   return (
     <nav className="account">
-      {canCreateBroadcast(auth) && (
+      {canCreateBroadcast(auth.user) && (
         <Link to="/broadcasts/new" className="button button-primary">
           방송하기
         </Link>

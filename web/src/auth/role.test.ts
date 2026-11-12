@@ -1,20 +1,18 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { User } from '../api/types.ts'
-import type { AuthState } from './context.ts'
 import { canCreateBroadcast } from './role.ts'
 
 const user = (role: User['role']): User => ({ id: '1', username: 'someone', role })
 
-const cases: { name: string; auth: AuthState; expected: boolean }[] = [
-  { name: 'streamer', auth: { status: 'signedIn', user: user('streamer') }, expected: true },
-  { name: 'viewer', auth: { status: 'signedIn', user: user('viewer') }, expected: false },
-  { name: 'signed out', auth: { status: 'signedOut' }, expected: false },
-  { name: 'loading', auth: { status: 'loading' }, expected: false },
+const cases: { name: string; user: User | undefined; expected: boolean }[] = [
+  { name: 'streamer', user: user('streamer'), expected: true },
+  { name: 'viewer', user: user('viewer'), expected: false },
+  { name: 'no user (signed out or loading)', user: undefined, expected: false },
 ]
 
-for (const { name, auth, expected } of cases) {
+for (const { name, user, expected } of cases) {
   test(`canCreateBroadcast: ${name} is ${expected}`, () => {
-    assert.equal(canCreateBroadcast(auth), expected)
+    assert.equal(canCreateBroadcast(user), expected)
   })
 }
