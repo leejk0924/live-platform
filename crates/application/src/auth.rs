@@ -4,7 +4,9 @@
 use std::sync::Arc;
 
 use domain::{
-    auth::{AuthError, Credential, DemoAccount, Password, SessionToken, User, UserId, Username},
+    auth::{
+        AuthError, Credential, DemoAccount, Password, Role, SessionToken, User, UserId, Username,
+    },
     secret::Secret,
 };
 use thiserror::Error;
@@ -78,6 +80,7 @@ impl SignUp {
             id: self.ids.next_id()?,
             username,
             credential: Credential::Password(self.hasher.hash(&password).await?),
+            role: Role::Viewer,
         };
         match self.users.insert(&user).await? {
             Inserted::Created => sign_in(self.sessions.as_ref(), user, previous).await,
@@ -145,6 +148,7 @@ impl DemoLogIn {
                 id: self.ids.next_id()?,
                 username: account.username(),
                 credential: Credential::DemoOnly,
+                role: account.role(),
             };
             if self.users.insert(&user).await? == Inserted::UsernameTaken {
                 self.demo_user(account).await?;
@@ -306,6 +310,7 @@ mod tests {
             id: SnowflakeId::try_from(7).unwrap(),
             username,
             credential,
+            role: Role::Viewer,
         }
     }
 

@@ -11,7 +11,7 @@ use axum::{
 use base64ct::{Base64, Encoding};
 use serde_json::{Value, json};
 use sqlx::PgPool;
-use support::{MEDIA_SECRET, PASSWORD, Reply, publish_key, request, send, sign_up, state};
+use support::{MEDIA_SECRET, PASSWORD, Reply, publish_key, request, send, sign_up_streamer, state};
 
 const AUTH: &str = "/internal/media/auth";
 
@@ -24,7 +24,9 @@ struct World {
 impl World {
     async fn new(pool: PgPool) -> Self {
         let router = api::app(state(&pool, false).await);
-        let owner = sign_up(&router, "owner", PASSWORD).await.token();
+        let owner = sign_up_streamer(&pool, &router, "owner", PASSWORD)
+            .await
+            .token();
         Self {
             pool,
             router,

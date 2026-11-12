@@ -15,7 +15,8 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 
 use support::{
-    MEDIA_SECRET, PASSWORD, RecordingHarness, Reply, recording_state, request, send, sign_up,
+    MEDIA_SECRET, PASSWORD, RecordingHarness, Reply, recording_state, request, send,
+    sign_up_streamer,
 };
 
 const SEGMENT_NAME: &str = "2026-11-08_19-32-15-610734.mp4";
@@ -43,13 +44,15 @@ async fn segment_complete(router: &Router, stream: &str, segment: &str, duration
 }
 
 /// A signed-up owner's new broadcast id.
-async fn broadcast(router: &Router, owner: &str) -> String {
-    owned_broadcast(router, owner).await.0
+async fn broadcast(pool: &PgPool, router: &Router, owner: &str) -> String {
+    owned_broadcast(pool, router, owner).await.0
 }
 
 /// A signed-up owner's new broadcast id and the owner's session token.
-async fn owned_broadcast(router: &Router, owner: &str) -> (String, String) {
-    let token = sign_up(router, owner, PASSWORD).await.token();
+async fn owned_broadcast(pool: &PgPool, router: &Router, owner: &str) -> (String, String) {
+    let token = sign_up_streamer(pool, router, owner, PASSWORD)
+        .await
+        .token();
     let reply = send(
         router,
         request(
@@ -75,7 +78,7 @@ async fn recordings(pool: &PgPool) -> Vec<(i64, String, i64, Option<i64>)> {
 async fn recorded(pool: &PgPool) -> (Router, RecordingHarness, String) {
     let (state, harness) = recording_state(pool).await;
     let router = api::app(state);
-    let id = broadcast(&router, "streamer").await;
+    let id = broadcast(pool, &router, "streamer").await;
     (router, harness, id)
 }
 
@@ -168,7 +171,7 @@ async fn the_background_storer_wakes_on_a_registered_segment(pool: PgPool) {
     let (state, harness) = recording_state(&pool).await;
     let wake = std::sync::Arc::clone(&state.recordings.stored_wake);
     let router = api::app(state);
-    let id = broadcast(&router, "streamer").await;
+    let id = broadcast(&pool, &router, "streamer").await;
     let stream = format!("live/{id}");
     let segment = harness.spool_segment(&stream, SEGMENT_NAME, b"x");
     let storer = api::recording_store::spawn(harness.storer, wake);
@@ -210,7 +213,7 @@ async fn fetch(router: &Router, request: Request<Body>) -> (StatusCode, HeaderMa
 async fn ready_recording(pool: &PgPool, bytes: &[u8]) -> (Router, String, String, String) {
     let (state, harness) = recording_state(pool).await;
     let router = api::app(state);
-    let (broadcast, token) = owned_broadcast(&router, "streamer").await;
+    let (broadcast, token) = owned_broadcast(pool, &router, "streamer").await;
     let stream = format!("live/{broadcast}");
     let segment = harness.spool_segment(&stream, SEGMENT_NAME, bytes);
     segment_complete(&router, &stream, &segment, "12.5").await;

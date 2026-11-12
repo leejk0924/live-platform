@@ -678,12 +678,19 @@ export interface components {
              */
             url: string;
         };
+        /**
+         * @description Only streamers can create broadcasts; the client uses this to hide the
+         *     entry point, the server enforces it.
+         * @enum {string}
+         */
+        Role: "streamer" | "viewer";
         User: {
             /**
              * @description Snowflake id as a decimal string.
              * @example 112007302751453184
              */
             id: string;
+            role: components["schemas"]["Role"];
             username: string;
         };
     };

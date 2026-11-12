@@ -53,6 +53,10 @@ async fn signup_signs_in_with_a_hardened_session_cookie(pool: PgPool) {
     let id = signed_up.body["id"].as_str().expect("id is a string");
     assert!(id.parse::<i64>().unwrap() > 0);
     assert_eq!(signed_up.body["username"], "alice");
+    assert_eq!(
+        signed_up.body["role"], "viewer",
+        "signup never grants streamer"
+    );
 
     let token = signed_up.token();
     assert_eq!(token.len(), 43, "256 bits in unpadded base64url");
@@ -63,7 +67,10 @@ async fn signup_signs_in_with_a_hardened_session_cookie(pool: PgPool) {
 
     let current = me(&router, &token).await;
     assert_eq!(current.status, StatusCode::OK);
-    assert_eq!(current.body, json!({"id": id, "username": "alice"}));
+    assert_eq!(
+        current.body,
+        json!({"id": id, "username": "alice", "role": "viewer"})
+    );
 }
 
 #[sqlx::test(migrations = "../infrastructure/migrations")]
@@ -417,6 +424,10 @@ async fn demo_login_signs_into_seeded_accounts_that_have_no_password(pool: PgPoo
         .await;
         assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
         assert_eq!(reply.body["username"], format!("demo-{account}"));
+        assert_eq!(
+            reply.body["role"], account,
+            "demo accounts are seeded by name"
+        );
         assert_eq!(me(&router, &reply.token()).await.status, StatusCode::OK);
     }
 

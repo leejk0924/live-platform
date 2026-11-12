@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use support::{
     CountingTerminator, KICK_FAILURE, LogBuffer, PASSWORD, Reply, live_state_with, request, send,
-    sign_up,
+    sign_up, sign_up_streamer,
 };
 use tokio::task::JoinSet;
 
@@ -40,7 +40,9 @@ impl World {
     async fn with(pool: PgPool, terminator: CountingTerminator) -> Self {
         let kicks = Arc::new(terminator);
         let router = api::app(live_state_with(&pool, false, kicks.clone()).await);
-        let owner = sign_up(&router, "owner", PASSWORD).await.token();
+        let owner = sign_up_streamer(&pool, &router, "owner", PASSWORD)
+            .await
+            .token();
         let other = sign_up(&router, "other", PASSWORD).await.token();
         Self {
             pool,

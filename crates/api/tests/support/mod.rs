@@ -356,6 +356,23 @@ pub async fn sign_up(router: &Router, username: &str, password: &str) -> Reply {
     .await
 }
 
+/// Signs up and promotes the account to streamer, the way an operator would.
+/// Test only: no endpoint takes a role.
+pub async fn sign_up_streamer(
+    pool: &PgPool,
+    router: &Router,
+    username: &str,
+    password: &str,
+) -> Reply {
+    let reply = sign_up(router, username, password).await;
+    sqlx::query("UPDATE users SET role = 'streamer' WHERE username = $1")
+        .bind(username)
+        .execute(pool)
+        .await
+        .unwrap();
+    reply
+}
+
 /// One Server-Sent Event as a client parses it.
 #[derive(Debug)]
 pub struct SseEvent {

@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use support::{
     PASSWORD, Reply, SseReader, TOSS_CLIENT_KEY, donation_state, request, router, send, sign_up,
+    sign_up_streamer,
 };
 use tower::ServiceExt;
 
@@ -33,7 +34,9 @@ struct Shop {
 async fn shop(pool: &PgPool) -> Shop {
     let gateway = Arc::new(FakePaymentGateway::default());
     let router = app(donation_state(pool, gateway.clone()).await);
-    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let owner = sign_up_streamer(pool, &router, "owner", PASSWORD)
+        .await
+        .token();
     let viewer = sign_up(&router, "viewer", PASSWORD).await.token();
     let other = sign_up(&router, "other", PASSWORD).await.token();
     let created = send(

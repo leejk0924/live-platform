@@ -22,7 +22,7 @@ use axum::{
     routing::{get, post},
 };
 use domain::{
-    auth::{AuthError, DemoAccount, SessionToken, User, UserId, Username},
+    auth::{AuthError, DemoAccount, Role, SessionToken, User, UserId, Username},
     error::DomainError,
     id::SnowflakeId,
     secret::Secret,
@@ -214,6 +214,26 @@ pub(crate) struct UserResponse {
     #[schema(value_type = String, example = "112007302751453184")]
     id: SnowflakeId,
     username: String,
+    role: RoleResponse,
+}
+
+/// Only streamers can create broadcasts; the client uses this to hide the
+/// entry point, the server enforces it.
+#[derive(Serialize, ToSchema, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+#[schema(as = Role)]
+pub(crate) enum RoleResponse {
+    Streamer,
+    Viewer,
+}
+
+impl From<Role> for RoleResponse {
+    fn from(role: Role) -> Self {
+        match role {
+            Role::Streamer => Self::Streamer,
+            Role::Viewer => Self::Viewer,
+        }
+    }
 }
 
 impl From<&User> for UserResponse {
@@ -221,6 +241,7 @@ impl From<&User> for UserResponse {
         Self {
             id: user.id,
             username: user.username.as_str().to_owned(),
+            role: user.role.into(),
         }
     }
 }
