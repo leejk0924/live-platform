@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, NavLink, Outlet } from 'react-router'
 import { errorMessage } from './api/client.ts'
 import { useAuth } from './auth/context.ts'
+import { canCreateBroadcast } from './auth/role.ts'
 
 export default function Layout() {
   return (
@@ -64,9 +65,11 @@ function AccountMenu() {
 
   return (
     <nav className="account">
-      <Link to="/broadcasts/new" className="button button-primary">
-        방송하기
-      </Link>
+      {canCreateBroadcast(auth) && (
+        <Link to="/broadcasts/new" className="button button-primary">
+          방송하기
+        </Link>
+      )}
       <span className="username">{auth.user.username}</span>
       <button type="button" className="button-quiet" onClick={onLogout} disabled={pending}>
         로그아웃

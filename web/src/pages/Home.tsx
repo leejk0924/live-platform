@@ -4,6 +4,7 @@ import { broadcastApi } from '../api/broadcasts.ts'
 import { errorMessage } from '../api/client.ts'
 import type { Broadcast } from '../api/types.ts'
 import { useAuth } from '../auth/context.ts'
+import { canCreateBroadcast } from '../auth/role.ts'
 import StatusBadge from '../broadcasts/StatusBadge.tsx'
 import { EmptyState, FeedSkeleton } from '../ui/Feed.tsx'
 
@@ -21,7 +22,7 @@ export default function Home() {
     <>
       <div className="page-title">
         <h1>방송</h1>
-        {auth.status === 'signedIn' && (
+        {canCreateBroadcast(auth) && (
           <Link to="/broadcasts/new" className="button">
             방송 만들기
           </Link>
