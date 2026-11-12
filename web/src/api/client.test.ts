@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { ApiError, unwrap } from './client.ts'
+import { ApiError, errorMessage, unwrap } from './client.ts'
 import { eventsUrl } from './comments.ts'
 
 const envelope = { code: 'RATE_LIMITED', message: 'slow down', traceId: 't1' }
@@ -38,4 +38,9 @@ test('an answer without the error envelope is an unexpected response', async () 
 test('the event stream resumes after the given revision', () => {
   assert.equal(eventsUrl('12', '0'), '/api/broadcasts/12/events?after=0')
   assert.equal(eventsUrl('12', '345'), '/api/broadcasts/12/events?after=345')
+})
+
+test('a NOT_STREAMER error is shown in Korean', () => {
+  const error = new ApiError(403, 'NOT_STREAMER', 'only a streamer can create a broadcast')
+  assert.equal(errorMessage(error), '방송인 계정만 방송을 만들 수 있습니다.')
 })
