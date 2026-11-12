@@ -356,7 +356,7 @@ pub(crate) async fn get_one(
             )),
         (status = 400, body = ErrorBody, description = "`INVALID_TITLE`, `INVALID_DESCRIPTION` or `INVALID_REQUEST`"),
         (status = 401, body = ErrorBody, description = "`UNAUTHENTICATED`"),
-        (status = 403, body = ErrorBody, description = "`CSRF_REJECTED`"),
+        (status = 403, body = ErrorBody, description = "`NOT_STREAMER` or `CSRF_REJECTED`"),
     ),
 )]
 pub(crate) async fn create(

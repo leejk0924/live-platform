@@ -10,7 +10,7 @@ use axum::{
 };
 use serde_json::{Value, json};
 use sqlx::{PgPool, postgres::PgPoolOptions};
-use support::{PASSWORD, Reply, request, router, send, sign_up, state};
+use support::{PASSWORD, Reply, request, router, send, sign_up, sign_up_streamer, state};
 
 struct Actors {
     owner: String,
@@ -18,9 +18,9 @@ struct Actors {
     other: String,
 }
 
-async fn actors(router: &Router) -> Actors {
-    let owner = sign_up(router, "owner", PASSWORD).await;
-    let other = sign_up(router, "other", PASSWORD).await;
+async fn actors(pool: &PgPool, router: &Router) -> Actors {
+    let owner = sign_up_streamer(pool, router, "owner", PASSWORD).await;
+    let other = sign_up_streamer(pool, router, "other", PASSWORD).await;
     Actors {
         owner: owner.token(),
         owner_id: owner.body["id"].as_str().unwrap().to_owned(),
@@ -213,7 +213,7 @@ const MATRIX: [(Op, Actor, StatusCode, Option<&str>); 15] = [
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn authorization_matrix(pool: PgPool) {
     let router = router(&pool, false).await;
-    let actors = actors(&router).await;
+    let actors = actors(&pool, &router).await;
 
     for (op, actor, expected, code) in MATRIX {
         let row = format!("{op:?} as {actor:?}");
@@ -275,7 +275,7 @@ async fn authorization_matrix(pool: PgPool) {
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn create_binds_owner_status_and_version_from_the_server_only(pool: PgPool) {
     let router = router(&pool, false).await;
-    let actors = actors(&router).await;
+    let actors = actors(&pool, &router).await;
     let forged = json!({
         "title": "  첫 방송  ",
         "description": "",
@@ -323,7 +323,7 @@ async fn create_binds_owner_status_and_version_from_the_server_only(pool: PgPool
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn invalid_input_is_rejected_before_anything_is_written(pool: PgPool) {
     let router = router(&pool, false).await;
-    let actors = actors(&router).await;
+    let actors = actors(&pool, &router).await;
     let cases = [
         (json!({"title": "  ", "description": ""}), "INVALID_TITLE"),
         (
@@ -363,7 +363,7 @@ async fn invalid_input_is_rejected_before_anything_is_written(pool: PgPool) {
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn a_stale_if_match_is_a_version_conflict(pool: PgPool) {
     let router = router(&pool, false).await;
-    let actors = actors(&router).await;
+    let actors = actors(&pool, &router).await;
     let id = created_id(&router, &actors.owner, "v1").await;
 
     let first = update(&router, Some(&actors.owner), &id, Some("\"1\""), "first").await;
@@ -397,7 +397,7 @@ async fn a_stale_if_match_is_a_version_conflict(pool: PgPool) {
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn only_ready_and_ended_broadcasts_can_be_deleted(pool: PgPool) {
     let router = router(&pool, false).await;
-    let actors = actors(&router).await;
+    let actors = actors(&pool, &router).await;
 
     for (status, expected) in [
         ("READY", StatusCode::NO_CONTENT),
@@ -451,7 +451,7 @@ async fn only_ready_and_ended_broadcasts_can_be_deleted(pool: PgPool) {
 async fn broadcasts_survive_a_restart(pool: PgPool) {
     let id = {
         let router = router(&pool, false).await;
-        let actors = actors(&router).await;
+        let actors = actors(&pool, &router).await;
         created_id(&router, &actors.owner, "재시작 전").await
     };
     let options = pool.connect_options();
@@ -472,7 +472,7 @@ async fn broadcasts_survive_a_restart(pool: PgPool) {
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn the_list_is_public_cacheable_and_paged_newest_first(pool: PgPool) {
     let router = router(&pool, false).await;
-    let actors = actors(&router).await;
+    let actors = actors(&pool, &router).await;
     let mut ids = Vec::new();
     for title in ["one", "two", "three"] {
         ids.push(created_id(&router, &actors.owner, title).await);
@@ -514,7 +514,7 @@ async fn the_list_is_public_cacheable_and_paged_newest_first(pool: PgPool) {
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn a_signed_in_list_is_the_same_cacheable_response(pool: PgPool) {
     let router = router(&pool, false).await;
-    let actors = actors(&router).await;
+    let actors = actors(&pool, &router).await;
     created_id(&router, &actors.owner, "공개 목록").await;
 
     let anonymous = list(&router, "").await;
@@ -536,7 +536,7 @@ async fn a_signed_in_list_is_the_same_cacheable_response(pool: PgPool) {
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn concurrent_updates_with_one_version_let_exactly_one_through(pool: PgPool) {
     let router = router(&pool, false).await;
-    let actors = actors(&router).await;
+    let actors = actors(&pool, &router).await;
 
     for round in 0..20 {
         let id = created_id(&router, &actors.owner, "원래 제목").await;
@@ -564,7 +564,7 @@ async fn concurrent_updates_with_one_version_let_exactly_one_through(pool: PgPoo
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn a_concurrent_update_and_delete_leave_a_deleted_row(pool: PgPool) {
     let router = router(&pool, false).await;
-    let actors = actors(&router).await;
+    let actors = actors(&pool, &router).await;
 
     for round in 0..20 {
         let id = created_id(&router, &actors.owner, "원래 제목").await;
@@ -602,7 +602,7 @@ async fn a_concurrent_update_and_delete_leave_a_deleted_row(pool: PgPool) {
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn the_live_filter_splits_on_air_broadcasts_from_the_rest(pool: PgPool) {
     let router = router(&pool, false).await;
-    let actors = actors(&router).await;
+    let actors = actors(&pool, &router).await;
     // An owner may have only one active broadcast, so the two on air belong
     // to different owners.
     for (token, status) in [
@@ -653,4 +653,41 @@ async fn the_live_filter_splits_on_air_broadcasts_from_the_rest(pool: PgPool) {
         assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{bad}");
         assert_eq!(reply.code(), "INVALID_QUERY", "{bad}");
     }
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_viewer_cannot_create_a_broadcast_and_nothing_is_stored(pool: PgPool) {
+    let router = router(&pool, false).await;
+    let viewer = sign_up(&router, "viewer", PASSWORD).await.token();
+
+    let reply = create(&router, &viewer, "몰래 만든 방송").await;
+
+    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
+    assert_eq!(reply.code(), "NOT_STREAMER");
+    let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM broadcasts")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 0);
+}
+
+#[sqlx::test(migrations = "../infrastructure/migrations")]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn a_forged_role_in_the_create_body_does_not_make_a_viewer_a_streamer(pool: PgPool) {
+    let router = router(&pool, false).await;
+    let viewer = sign_up(&router, "viewer", PASSWORD).await.token();
+
+    let reply = send(
+        &router,
+        request(
+            Method::POST,
+            "/api/broadcasts",
+            Some(json!({"title": "t", "description": "", "role": "streamer"})),
+            Some(&viewer),
+        ),
+    )
+    .await;
+
+    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
 }

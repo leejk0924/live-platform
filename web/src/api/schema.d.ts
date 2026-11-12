@@ -1079,7 +1079,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
-            /** @description `CSRF_REJECTED` */
+            /** @description `NOT_STREAMER` or `CSRF_REJECTED` */
             403: {
                 headers: {
                     [name: string]: unknown;

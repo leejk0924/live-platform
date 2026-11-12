@@ -520,7 +520,7 @@
             }
           },
           "403": {
-            "description": "`CSRF_REJECTED`",
+            "description": "`NOT_STREAMER` or `CSRF_REJECTED`",
             "content": {
               "application/json": {
                 "schema": {

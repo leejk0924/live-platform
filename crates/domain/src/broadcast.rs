@@ -207,6 +207,8 @@ pub enum BroadcastError {
     NotFound,
     #[error("only the owner can change this broadcast")]
     NotOwner,
+    #[error("only a streamer can create a broadcast")]
+    NotStreamer,
     #[error("broadcast was changed by another request; reload and try again")]
     VersionConflict,
     #[error("a broadcast that is live or interrupted cannot be deleted")]
@@ -226,7 +228,7 @@ impl DomainError for BroadcastError {
                 ErrorKind::InvalidInput
             }
             Self::NotFound => ErrorKind::NotFound,
-            Self::NotOwner => ErrorKind::Forbidden,
+            Self::NotOwner | Self::NotStreamer => ErrorKind::Forbidden,
             Self::VersionConflict
             | Self::NotDeletable
             | Self::NotStartable
@@ -242,6 +244,7 @@ impl DomainError for BroadcastError {
             Self::InvalidPageSize => "INVALID_PAGE_SIZE",
             Self::NotFound => "BROADCAST_NOT_FOUND",
             Self::NotOwner => "NOT_BROADCAST_OWNER",
+            Self::NotStreamer => "NOT_STREAMER",
             Self::VersionConflict => "VERSION_CONFLICT",
             Self::NotDeletable => "BROADCAST_NOT_DELETABLE",
             Self::NotStartable => "BROADCAST_NOT_STARTABLE",
