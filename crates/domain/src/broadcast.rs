@@ -400,5 +400,7 @@ mod tests {
             "BROADCAST_NOT_DELETABLE"
         );
         assert_eq!(BroadcastError::NotFound.kind(), ErrorKind::NotFound);
+        assert_eq!(BroadcastError::NotStreamer.kind(), ErrorKind::Forbidden);
+        assert_eq!(BroadcastError::NotStreamer.code(), "NOT_STREAMER");
     }
 }
