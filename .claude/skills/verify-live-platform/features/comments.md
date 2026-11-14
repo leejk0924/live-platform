@@ -19,7 +19,7 @@ Signed-in users comment on a broadcast page. Everyone on the page sees new, edit
 
 ## Driving it with Playwright
 `bash scripts/run.sh comments` ([journeys/comments.mjs](../scripts/journeys/comments.mjs)):
-1. The author (role `author`) creates a READY broadcast. A second signed-in user (role `reader`) opens the same page.
+1. The author (journey account `author`, promoted to streamer because only a streamer can create broadcasts) creates a READY broadcast. A second signed-in user (role `reader`) opens the same page.
 2. The author posts `<script>alert(1)</script> <run id>` with `등록`.
    - The reader shows it within 3 s with no reload.
    - Neither page gains a `<script>` element.

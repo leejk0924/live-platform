@@ -75,3 +75,55 @@ async fn existing_rows_are_brought_into_the_one_active_per_owner_shape(pool: PgP
     .unwrap();
     assert!(index.is_some());
 }
+
+/// Migration 0010: accounts that existed before roles could create
+/// broadcasts, so they become streamers; the demo viewer and every account
+/// created afterwards are viewers.
+#[sqlx::test(migrations = false)]
+#[ignore = "requires DATABASE_URL (Postgres)"]
+async fn existing_accounts_become_streamers_except_the_demo_viewer(pool: PgPool) {
+    let migrator = sqlx::migrate!("./migrations");
+    migrator.run_to(9, &pool).await.unwrap();
+    for (id, name, demo) in [
+        (1, "alice", false),
+        (2, "demo-streamer", true),
+        (3, "demo-viewer", true),
+    ] {
+        let sql = if demo {
+            "INSERT INTO users (id, username, is_demo) VALUES ($1, $2, true)"
+        } else {
+            "INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'hash')"
+        };
+        sqlx::query(sql)
+            .bind(id)
+            .bind(name)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    migrator.run(&pool).await.unwrap();
+    sqlx::query("INSERT INTO users (id, username, password_hash) VALUES (4, 'new', 'hash')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let roles: Vec<(String, String)> =
+        sqlx::query_as("SELECT username, role FROM users ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let roles: Vec<(&str, &str)> = roles
+        .iter()
+        .map(|(name, role)| (name.as_str(), role.as_str()))
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            ("alice", "streamer"),
+            ("demo-streamer", "streamer"),
+            ("demo-viewer", "viewer"),
+            ("new", "viewer"),
+        ]
+    );
+}

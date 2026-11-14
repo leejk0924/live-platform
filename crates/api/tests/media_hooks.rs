@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use std::sync::atomic::Ordering;
 
-use support::{MEDIA_SECRET, PASSWORD, Reply, live_state, request, send, sign_up, state};
+use support::{MEDIA_SECRET, PASSWORD, Reply, live_state, request, send, sign_up_streamer, state};
 
 async fn hook_with(router: &Router, secret: Option<&str>, body: Value) -> Reply {
     let mut builder = Request::builder()
@@ -84,7 +84,9 @@ async fn broadcast_in(router: &Router, pool: &PgPool, owner: &str, status: &str)
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn a_publisher_leaving_interrupts_and_coming_back_resumes(pool: PgPool) {
     let router = api::app(state(&pool, false).await);
-    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let owner = sign_up_streamer(&pool, &router, "owner", PASSWORD)
+        .await
+        .token();
     let id = broadcast_in(&router, &pool, &owner, "LIVE").await;
 
     assert_eq!(
@@ -119,7 +121,9 @@ async fn a_publisher_leaving_interrupts_and_coming_back_resumes(pool: PgPool) {
 async fn reports_never_move_a_ready_or_ended_broadcast_and_its_stream_is_kicked(pool: PgPool) {
     let (state, kicks) = live_state(&pool, false).await;
     let router = api::app(state);
-    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let owner = sign_up_streamer(&pool, &router, "owner", PASSWORD)
+        .await
+        .token();
     for status in ["READY", "ENDED"] {
         let id = broadcast_in(&router, &pool, &owner, status).await;
         let before = stored(&pool, &id).await;
@@ -144,7 +148,9 @@ async fn reports_never_move_a_ready_or_ended_broadcast_and_its_stream_is_kicked(
 #[ignore = "requires DATABASE_URL (Postgres)"]
 async fn hooks_need_the_secret_and_a_known_shape(pool: PgPool) {
     let router = api::app(state(&pool, false).await);
-    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let owner = sign_up_streamer(&pool, &router, "owner", PASSWORD)
+        .await
+        .token();
     let id = broadcast_in(&router, &pool, &owner, "LIVE").await;
     let body = json!({"event": "unavailable", "path": format!("live/{id}")});
 

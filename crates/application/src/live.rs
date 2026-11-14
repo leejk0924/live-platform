@@ -122,7 +122,7 @@ mod tests {
 
     use async_trait::async_trait;
     use domain::{
-        auth::{Credential, User, Username},
+        auth::{Credential, Role, User, Username},
         broadcast::{Broadcast, BroadcastDescription, BroadcastStatus, BroadcastTitle, Version},
         id::SnowflakeId,
         secret::Secret,
@@ -215,6 +215,7 @@ mod tests {
                 id: user,
                 username: Username::parse("owner").unwrap(),
                 credential: Credential::DemoOnly,
+                role: Role::Streamer,
             }))
         }
     }

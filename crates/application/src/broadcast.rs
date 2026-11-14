@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use domain::{
-    auth::UserId,
+    auth::{Role, UserId},
     broadcast::{
         Broadcast, BroadcastDescription, BroadcastError, BroadcastId, BroadcastTitle,
         PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, Version,
@@ -77,6 +77,16 @@ impl CreateBroadcast {
         title: &str,
         description: &str,
     ) -> Result<BroadcastView, Error> {
+        // Only streamers create broadcasts. Later writes are guarded by the
+        // owner check, and only a streamer can own a broadcast.
+        let actor_account = self
+            .users
+            .find_by_id(actor)
+            .await?
+            .ok_or_else(|| PortError(format!("actor {actor} not found")))?;
+        if actor_account.role != Role::Streamer {
+            return Err(BroadcastError::NotStreamer.into());
+        }
         let new = NewBroadcast {
             title: BroadcastTitle::parse(title)?,
             description: BroadcastDescription::parse(description)?,
@@ -84,7 +94,10 @@ impl CreateBroadcast {
             owner_id: actor,
         };
         let broadcast = self.broadcasts.insert(&new).await?;
-        view_of(self.users.as_ref(), broadcast).await
+        Ok(BroadcastView {
+            broadcast,
+            owner_name: actor_account.username,
+        })
     }
 }
 

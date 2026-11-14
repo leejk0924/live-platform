@@ -89,11 +89,20 @@ pub enum Credential {
     DemoOnly,
 }
 
+/// What an account may do. Only a streamer can create broadcasts; both roles
+/// can watch, comment and donate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Streamer,
+    Viewer,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct User {
     pub id: UserId,
     pub username: Username,
     pub credential: Credential,
+    pub role: Role,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +120,14 @@ impl DemoAccount {
             Self::Viewer => "demo-viewer",
         };
         Username(name.to_owned())
+    }
+
+    /// The role the demo account is seeded with.
+    pub fn role(self) -> Role {
+        match self {
+            Self::Streamer => Role::Streamer,
+            Self::Viewer => Role::Viewer,
+        }
     }
 }
 

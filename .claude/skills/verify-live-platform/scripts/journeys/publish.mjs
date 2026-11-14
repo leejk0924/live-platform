@@ -24,7 +24,7 @@ async function viewerAdvances(page, label) {
 try {
   const phone = await phoneContext(browser, 'phone', 'Pixel 7')
   phonePage = await phone.newPage()
-  const o = await account(phonePage, 'phone')
+  const o = await account(phonePage, 'phone', { streamer: true })
   id = await createBroadcast(phonePage, `verify publish ${RUN_ID}`)
   log('owner', o.username, 'broadcast', id)
 
@@ -102,7 +102,7 @@ try {
   // A desktop publisher does not pause when its tab is hidden.
   const desktop = await newContext(browser, 'desktop')
   desktopPage = await desktop.newPage()
-  await account(desktopPage, 'phone')
+  await account(desktopPage, 'phone', { streamer: true })
   desktopId = await createBroadcast(desktopPage, `verify publish desktop ${RUN_ID}`)
   must(await startPublishing(desktopPage, desktopId), 'desktop publishes the screen and turns LIVE')
   await setHidden(desktopPage, true)

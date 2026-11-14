@@ -11,7 +11,7 @@ use axum::{
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
-use support::{PASSWORD, Reply, SseReader, request, router, send, sign_up};
+use support::{PASSWORD, Reply, SseReader, request, router, send, sign_up, sign_up_streamer};
 use tower::ServiceExt;
 
 struct Chat {
@@ -24,7 +24,9 @@ struct Chat {
 
 async fn chat(pool: &PgPool) -> Chat {
     let router = router(pool, false).await;
-    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let owner = sign_up_streamer(pool, &router, "owner", PASSWORD)
+        .await
+        .token();
     let viewer = sign_up(&router, "viewer", PASSWORD).await.token();
     let other = sign_up(&router, "other", PASSWORD).await.token();
     let created = send(

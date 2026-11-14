@@ -64,7 +64,7 @@ async function payInTossWindow(page) {
 try {
   const owner = await newContext(browser, 'owner')
   ownerPage = await owner.newPage()
-  const o = await account(ownerPage, 'streamer')
+  const o = await account(ownerPage, 'streamer', { streamer: true })
   id = await createBroadcast(ownerPage, `verify donation ${RUN_ID}`)
   log('owner', o.username, 'broadcast', id)
   must(await startPublishing(ownerPage, id), 'owner publishes and the broadcast turns LIVE')

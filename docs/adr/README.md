@@ -48,6 +48,7 @@ related: [10]                          # 관련 이슈 번호
 | data | [4-snowflake-worker-lease](data/4-snowflake-worker-lease.md) | Snowflake 상태 머신·PG worker lease·에러 응답 봉투 |
 | auth | [1-hybrid-session-jwt](auth/1-hybrid-session-jwt.md) | 웹은 DB 세션 쿠키, 송출은 1회용 단기 JWT |
 | auth | [5-session-auth-structure](auth/5-session-auth-structure.md) | Credential enum, adapter 안 토큰 해시, CSRF 미들웨어, 인스턴스별 속도 제한 |
+| auth | [58-user-roles](auth/58-user-roles.md) | users.role(streamer/viewer), 방송 생성만 유스케이스에서 streamer로 제한, 나머지 쓰기는 소유권 검사에 맡김, 기존 계정은 streamer로 마이그레이션 |
 | broadcast | [6-broadcast-crud-authz](broadcast/6-broadcast-crud-authz.md) | 쓰기·읽기 port 분리, 조건부 UPDATE 한 문장 인가, If-Match 낙관적 락, OpenAPI 스냅샷 |
 | media | [1-mediamtx-whip-llhls](media/1-mediamtx-whip-llhls.md) | MediaMTX에 미디어 중계, WHIP 송출, LL-HLS·WHEP 시청 |
 | media | [7-whip-publish-jwt](media/7-whip-publish-jwt.md) | 시작·종료 조건부 전이, MediaMTX JWT 송출 인증, 12시간 토큰과 재송출 공백 |

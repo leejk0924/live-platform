@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use support::{
     LogBuffer, MEDIA_SECRET, PASSWORD, Reply, donation_state, live_state, request, router, send,
-    sign_up,
+    sign_up, sign_up_streamer,
 };
 
 const WRONG_PASSWORD: &str = "not the password 7f3a";
@@ -100,7 +100,9 @@ async fn refused_logins_are_audited_without_the_password(pool: PgPool) {
 async fn a_forbidden_answer_is_audited_with_the_signed_in_user(pool: PgPool) {
     let (logs, _guard) = LogBuffer::capture();
     let router = router(&pool, false).await;
-    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let owner = sign_up_streamer(&pool, &router, "owner", PASSWORD)
+        .await
+        .token();
     let other = sign_up(&router, "other", PASSWORD).await;
     let other_id = other.body["id"].as_str().unwrap().to_owned();
     let created = send(
@@ -145,7 +147,7 @@ async fn a_forbidden_answer_is_audited_with_the_signed_in_user(pool: PgPool) {
 async fn an_owner_ending_a_broadcast_audits_the_kick(pool: PgPool) {
     let (logs, _guard) = LogBuffer::capture();
     let router = api::app(live_state(&pool, false).await.0);
-    let owner = sign_up(&router, "owner", PASSWORD).await;
+    let owner = sign_up_streamer(&pool, &router, "owner", PASSWORD).await;
     let owner_id = owner.body["id"].as_str().unwrap().to_owned();
     let created = send(
         &router,
@@ -217,7 +219,9 @@ async fn a_username_that_cannot_be_one_stays_out_of_the_audit(pool: PgPool) {
 async fn a_stream_of_an_ended_broadcast_audits_the_hook_kick(pool: PgPool) {
     let (logs, _guard) = LogBuffer::capture();
     let router = api::app(live_state(&pool, false).await.0);
-    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let owner = sign_up_streamer(&pool, &router, "owner", PASSWORD)
+        .await
+        .token();
     let id = create_broadcast(&router, &owner).await;
     sqlx::query("UPDATE broadcasts SET status = 'ENDED' WHERE id = $1")
         .bind(id.parse::<i64>().unwrap())
@@ -247,7 +251,9 @@ async fn a_stream_of_an_ended_broadcast_audits_the_hook_kick(pool: PgPool) {
 async fn a_refused_publish_token_is_audited_without_the_token(pool: PgPool) {
     let (logs, _guard) = LogBuffer::capture();
     let router = router(&pool, false).await;
-    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let owner = sign_up_streamer(&pool, &router, "owner", PASSWORD)
+        .await
+        .token();
     let id = create_broadcast(&router, &owner).await;
     let other = create_broadcast(&router, &owner).await;
     let started = send(
@@ -294,7 +300,9 @@ async fn payments_are_audited_without_the_payment_key(pool: PgPool) {
     let (logs, _guard) = LogBuffer::capture();
     let gateway = Arc::new(FakePaymentGateway::default());
     let router = app(donation_state(&pool, gateway.clone()).await);
-    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let owner = sign_up_streamer(&pool, &router, "owner", PASSWORD)
+        .await
+        .token();
     let viewer = sign_up(&router, "viewer", PASSWORD).await.token();
     let other = sign_up(&router, "other", PASSWORD).await.token();
     let id = create_broadcast(&router, &owner).await;
@@ -379,7 +387,9 @@ async fn payments_are_audited_without_the_payment_key(pool: PgPool) {
 /// `gateway`.
 async fn donation_shop(pool: &PgPool, gateway: Arc<FakePaymentGateway>) -> (Router, String) {
     let router = app(donation_state(pool, gateway).await);
-    let owner = sign_up(&router, "owner", PASSWORD).await.token();
+    let owner = sign_up_streamer(pool, &router, "owner", PASSWORD)
+        .await
+        .token();
     let id = create_broadcast(&router, &owner).await;
     let started = send(
         &router,

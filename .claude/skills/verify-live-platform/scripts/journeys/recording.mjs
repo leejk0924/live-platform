@@ -25,7 +25,7 @@ function findFiles(dir, name) {
 try {
   const owner = await newContext(browser, 'owner')
   ownerPage = await owner.newPage()
-  const o = await account(ownerPage, 'recorder')
+  const o = await account(ownerPage, 'recorder', { streamer: true })
   const title = `verify recording ${RUN_ID}`
   id = await createBroadcast(ownerPage, title)
   log('owner', o.username, 'broadcast', id)

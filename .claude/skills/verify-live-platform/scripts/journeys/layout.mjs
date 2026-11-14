@@ -166,7 +166,7 @@ let castPage, liveId, phonePage, phoneId
 try {
   const castContext = await newContext(browser, 'caster')
   castPage = await castContext.newPage()
-  const caster = await account(castPage, 'lcaster')
+  const caster = await account(castPage, 'lcaster', { streamer: true })
   const viewerContext = await newContext(browser, 'viewer')
   const viewerPage = await viewerContext.newPage()
   await account(viewerPage, 'lviewer')
@@ -205,7 +205,7 @@ try {
   // The owner already has a LIVE broadcast, so a second account publishes from a phone and goes INTERRUPTED in the
   // background for each interrupted screen, then comes back within the 30 s grace.
   phonePage = await (await phoneContext(browser, 'phone-publisher')).newPage()
-  await account(phonePage, 'lphone')
+  await account(phonePage, 'lphone', { streamer: true })
   phoneId = await createBroadcast(phonePage, `verify layout interrupted ${RUN_ID}`)
   must(await startPublishing(phonePage, phoneId), 'a phone publisher goes LIVE to be interrupted')
   const interrupt = async () => {

@@ -520,7 +520,7 @@
             }
           },
           "403": {
-            "description": "`CSRF_REJECTED`",
+            "description": "`NOT_STREAMER` or `CSRF_REJECTED`",
             "content": {
               "application/json": {
                 "schema": {
@@ -2779,17 +2779,29 @@
           }
         }
       },
+      "Role": {
+        "type": "string",
+        "description": "Only streamers can create broadcasts; the client uses this to hide the\nentry point, the server enforces it.",
+        "enum": [
+          "streamer",
+          "viewer"
+        ]
+      },
       "User": {
         "type": "object",
         "required": [
           "id",
-          "username"
+          "username",
+          "role"
         ],
         "properties": {
           "id": {
             "type": "string",
             "description": "Snowflake id as a decimal string.",
             "example": "112007302751453184"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
           },
           "username": {
             "type": "string"

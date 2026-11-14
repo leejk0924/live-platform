@@ -1,5 +1,6 @@
 // Shared harness for verify-live-platform journeys: Playwright (playwright-core) driving the system Chrome
 // against the local compose stack at https://localhost. Journeys import this file; run them through run.sh.
+import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { randomBytes } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -108,19 +109,33 @@ export function api(page, method, url, body, headers = {}) {
 // so running every journey back to back with fresh accounts hits 429. A role whose login fails (the database was
 // reset) signs up again. Any broadcast the account left LIVE or INTERRUPTED is stopped first.
 const ACCOUNTS = path.join(home, 'accounts.json')
-export async function account(page, role) {
+// Sign-up always makes a viewer, and only a streamer can create broadcasts (403 NOT_STREAMER otherwise). No endpoint
+// grants the role, so a role that broadcasts passes { streamer: true } and is promoted in the stack's own database.
+// The demo-streamer account is not used: it is a single account and a journey may need two LIVE owners at once.
+// A saved account that signed up before migration 0010 was raised to streamer by it, so a reused account of a viewer
+// role is set back to viewer. A fresh sign-up is left alone, which keeps the check below on the sign-up default.
+function setRole(username, userRole) {
+  const sql = `UPDATE users SET role = '${userRole}' WHERE username = '${username}'`
+  execFileSync('docker', ['compose', 'exec', '-T', 'postgres', 'sh', '-c', `psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "${sql}"`], { cwd: REPO, stdio: 'pipe' })
+}
+
+export async function account(page, role, { streamer = false } = {}) {
   const saved = existsSync(ACCOUNTS) ? JSON.parse(readFileSync(ACCOUNTS, 'utf8')) : {}
   await page.goto(BASE)
   let creds = saved[role]
   if (creds && (await api(page, 'POST', '/api/auth/login', creds)).status !== 200) creds = undefined
+  const reused = Boolean(creds)
   if (!creds) {
     creds = { username: `v${role.replace(/[^a-z0-9]/g, '').slice(0, 6)}${randomBytes(4).toString('hex')}`, password: randomBytes(12).toString('base64url') }
     const r = await api(page, 'POST', '/api/auth/signup', creds)
     must(r.status < 300, `sign up ${creds.username} (${r.status}${r.status === 429 ? ': sign-up limit, wait 2 minutes' : ''})`)
     writeFileSync(ACCOUNTS, JSON.stringify({ ...saved, [role]: creds }, null, 2))
   }
+  if (streamer) setRole(creds.username, 'streamer')
+  else if (reused) setRole(creds.username, 'viewer')
   const me = (await api(page, 'GET', '/api/auth/me')).json
   must(me?.id, `${role} signed in as ${creds.username}`)
+  must(me.role === (streamer ? 'streamer' : 'viewer'), `${role} has role ${me.role}`)
   const live = (await api(page, 'GET', '/api/broadcasts?live=true')).json?.items ?? []
   for (const b of live.filter((b) => b.ownerId === me.id)) {
     log(`stopping ${b.id}, left ${b.status} by an earlier run`)

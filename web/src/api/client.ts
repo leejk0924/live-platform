@@ -70,6 +70,7 @@ const MESSAGES: Record<string, string> = {
   NOT_FOUND: '요청한 대상을 찾을 수 없습니다.',
   INVALID_REQUEST: '요청 형식이 올바르지 않습니다.',
   BROADCAST_NOT_FOUND: '방송을 찾을 수 없습니다.',
+  NOT_STREAMER: '방송인 계정만 방송을 만들 수 있습니다.',
   NOT_BROADCAST_OWNER: '방송을 만든 사람만 바꿀 수 있습니다.',
   VERSION_CONFLICT: '다른 곳에서 방송이 수정되었습니다. 새로고침한 뒤 다시 시도하세요.',
   BROADCAST_NOT_DELETABLE: '방송 중이거나 중단된 방송은 삭제할 수 없습니다.',
