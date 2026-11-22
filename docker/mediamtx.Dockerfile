@@ -5,7 +5,7 @@ FROM busybox:1.38.0-musl@sha256:80e38f9a1b39188b8bdb28879178edb322a4402b081a9aed
 # directory, owner included, so the non-root user can write to it.
 RUN mkdir /recordings
 
-FROM bluenviron/mediamtx:1.21.3@sha256:59e43552f3be43695b70c19424dc2a42fcec18075f88d91561a24ac5d70a586c
+FROM bluenviron/mediamtx:1.21.4@sha256:c730bccdbc8739f8f0c13cefe9bea8b61926f599b88fa4d0d229baa91846c7bc
 COPY --from=busybox /bin/busybox /bin/wget
 COPY --from=busybox --chown=65532:65532 /recordings /recordings
 COPY deploy/mediamtx/mediamtx.yml /mediamtx.yml
